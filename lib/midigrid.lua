@@ -19,6 +19,8 @@ function MidiGrid:new (o)
   o.toggled = {{},{},{},{},{},{},{},{},{}}
   o.down = {{},{},{},{},{},{},{},{},{}}
   
+  o.state = {{},{},{},{},{},{},{},{},{}} -- KILL THIS ONE
+  
   o.midi = midi.connect(o.channel)
   o.midi:send({240,0,32,41,2,13,0,127,247})  -- Set to Programmer Mode
   
@@ -81,7 +83,7 @@ function MidiGrid.set_led(x,y,z)
             message = table.concat(message,{3,target})
             message = table.concat(message,z)    
        
-        elseif #z == 2 and z[2] == true then
+        elseif z[2] == true and #z == 2  then
             -- length of 2, second value is true
             message = table.concat(message,{2,target})
             message = table.concat(message,z)
@@ -125,29 +127,63 @@ function MidiGrid:redraw()
     end
     
     message = table.concat(message,{247})
-     self.midi:send(message)
+    self.midi:send(message)
 end
 
 --
 
-function MidiGrid.grid_to_index(pos,grid_start,grid_end)
-  grid_start = grid_start or {x=1,y=1}
-  grid_end = grid_end or {x=9,y=9}
-   
-  local width = math.abs(grid_end.x - grid_start.x) + 1
-  local max_x = math.max(grid_start.x,grid_end.x)
-  local max_y = math.max(grid_start.y,grid_end.y)
-  local min_x = math.min(grid_start.x,grid_end.x)
-  local min_y = math.min(grid_start.y,grid_end.y)
+function MidiGrid.get_bounds(grid_start,grid_end)
   
-  if pos.x <= max_x and pos.x >= min_x and pos.y <= max_y and pos.y >- min_y then
-    return math.abs(pos.y - grid_start.y) * width + math.abs(pos.x - grid_start.x) + 1
+  return {
+      width = math.abs(grid_end.x - grid_start.x) + 1,
+      height = math.abs(grid_end.y - grid_start.y) + 1,
+      max_x = math.max(grid_start.x,grid_end.x),
+      max_y = math.max(grid_start.y,grid_end.y),
+      min_x = math.min(grid_start.x,grid_end.x),
+      min_y = math.min(grid_start.y,grid_end.y),
+  }
+end
+
+function MidiGrid.in_bounds(pos,bounds)
+  return ( pos.x >= bounds.min_x and pos.x <= bounds.max_x and pos.y >= bounds.min_y and pos.y <= bounds.max_y )
+end
+
+function MidiGrid.grid_to_index(pos,grid_start,grid_end)
+
+  local b = MidiGrid.get_bounds(grid_start,grid_end)
+
+  if MidiGrid.in_bounds(pos,b) then
+    return math.abs(pos.y - grid_start.y) * b.width + math.abs(pos.x - grid_start.x) + 1
   else
     
     -- out of bounds
     return false
   end
 end
+
+
+function MidiGrid.index_to_grid(index,grid_start,grid_end)
+  local b = MidiGrid.get_bounds(grid_start, grid_end)
+  local x,y
+
+  if grid_start.x > grid_end.x then
+    x = b.width - math.fmod(index - 1,b.width) + b.min_x - 1
+  else
+    x = math.fmod(index - 1,b.width) + b.min_x
+  end
+
+  if grid_start.y > grid_end.y then
+    y = b.height - math.floor((index - 1)/b.width) + b.min_y - 1
+  else
+    y = math.floor((index - 1)/b.width) + b.min_y
+  end
+  if(y > b.max_y) then 
+    return false
+  else
+    return {x=x,y=y}
+  end
+end
+
 
 --
 
