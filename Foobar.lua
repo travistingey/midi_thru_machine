@@ -15,7 +15,23 @@ util = require('util')
 
 
 function init()
-	crow.input[2].mode("scale",{0})
+	include(path_name .. 'inc/settings')
+	Input = {{},{}}
+	
+	scale_select = 1
+	scale_name = musicutil.SCALES[scale_select]
+	scale = musicutil.generate_scale(0,scale_name,1)
+	
+	crow.input[1].mode('scale',scale)
+	crow.input[1].scale = function(s)
+		Input[1] = s
+	end
+
+	crow.input[2].mode('scale',scale)
+	crow.input[2].scale = function(s)
+		Input[2] = s
+	end
+
 	rainbow_off = {7,11,15,23,39,47,51,55}
   	rainbow_on = {5,9,13,21,37,45,49,53}
 	
@@ -33,8 +49,8 @@ function init()
 	input_one = 1
 	
 	drum_map = {}
-	drum_map[36] = {x = 1, y = 1, index = 1}
-	drum_map[37] = {x = 2, y = 1, index = 2}
+	drum_map[36] = {x = 1, y = 1, index = 1, output = {{type='crow_voct', input = 1, out = 1},{type='crow_gate', input = 0, out = 2}}}
+	drum_map[37] = {x = 2, y = 1, index = 2, output = {{type='crow_voct', input = 2, out = 3},{type='crow_gate', input = 0, out = 4}} }
 	drum_map[38] = {x = 3, y = 1, index = 3}
 	drum_map[39] = {x = 4, y = 1, index = 4}
 	drum_map[40] = {x = 1, y = 2, index = 5}
@@ -126,18 +142,38 @@ function init()
 	-- Transport Event Handler for incoming midi notes from the Beatstep Pro.
 	transport.event = function(msg)
 		local data = midi.to_msg(msg)
-
+		if(data.type ~= 'clock') then tab.print(data) end
+		
 		if (data.type == 'clock' or data.type == 'start' or data.type == 'stop' or
 			data.type == 'continue') then midi_out:send(data) end
 
-		if(data.type == 'note_on' and data.note == 36) then
-			crow.output[1].volts = input_one * 1/12
-		end
+		-- clock events
 		Seq.transport(data)
-		Mute.transport(data)
 
-		if (data.ch == 10 and data.type == 'note_on' and
-			drum_map[data.note].state) then midi_out:send(data)
+		-- note on/off events
+		Mute.transport(data)
+		
+		-- Process Outputs
+		if (data.ch == 10) then
+			if drum_map[data.note].output then
+				for i=1, #drum_map[data.note].output do
+					local output = drum_map[data.note].output[i]
+					if output.type == 'crow_voct' and data.type == 'note_on' then
+						crow.output[output.out].volts = Input[output.input].volts
+					elseif output.type == 'crow_gate' then
+						if (data.type == 'note_on') then
+							crow.output[output.out].volts = 5
+						elseif(data.type == 'note_off') then
+							crow.output[output.out].volts = 0
+						end
+					end
+				end
+			else
+				if(drum_map[data.note].state) then
+					midi_out:send(data)
+				elseif(drum_map[data.note].state == false) then
+				end
+			end
 		end
 
 		g:redraw()
@@ -217,6 +253,7 @@ function handle_seq_transport(data)
 		Seq.step = 1
 	end
 
+	
 end
 
 function handle_seq_grid(s, data)
@@ -271,7 +308,6 @@ function handle_seq_grid(s, data)
 			Seq.select_step = index
 			g:redraw()
 		else
-			print('off')
 			-- Turn off
 			Seq.value[index] = 0
 			Seq.select_step = index
@@ -304,23 +340,21 @@ function handle_mute_transport(data)
 		local target = drum_map[data.note]
 
 		if (not Mute.state[data.note]) then
+			drum_map[data.note].state = true
 			-- Mute is off
 			if data.type == 'note_on' then
 				g.led[target.x][target.y] = 3 -- note_on unmuted.
-				drum_map[data.note].state = true
-				drum_map[data.note].tick = Seq.tick
 			elseif data.type == 'note_off' then
 				g.led[target.x][target.y] = 0 -- note_on unmuted.
-				drum_map[data.note].state = false
-				drum_map[data.note].tick = Seq.tick
 			end
 		else
 			-- Mute is on
+			drum_map[data.note].state = false
+
 			midi_out:note_off(data.note, 64, 10)
 			if data.type == 'note_on' then
-				drum_map[data.note].state = false
-				drum_map[data.note].tick = Seq.tick
 				g.led[target.x][target.y] = 5 -- note_On muted.
+				data.type = 'note_off'
 			elseif data.type == 'note_off' then
 				g.led[target.x][target.y] = 7 -- note_off muted.
 			end

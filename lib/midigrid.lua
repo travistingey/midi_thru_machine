@@ -45,8 +45,6 @@ function MidiGrid:new (o)
       data.x = x
       data.y = y
       
-      if (not y) then tab.print(msg) end
-      
       if(x == 9) then data.type = 'row'
         elseif (x == 1 and y == 9) then data.type = 'up'
         elseif (x == 2 and y == 9) then data.type = 'down'
@@ -80,29 +78,29 @@ function MidiGrid.set_led(x,y,z)
     if(type(z) == 'table')then
         if #z == 3 then
             -- length of 3, RGB
-            message = table.concat(message,{3,target})
-            message = table.concat(message,z)    
+            message = concat_table(message,{3,target})
+            message = concat_table(message,z)    
        
         elseif z[2] == true and #z == 2  then
             -- length of 2, second value is true
-            message = table.concat(message,{2,target})
-            message = table.concat(message,z)
+            message = concat_table(message,{2,target})
+            message = concat_table(message,z)
         
         elseif #z == 2 then
             -- length of 2
-            message = table.concat(message,{1,target})
-            message = table.concat(message,z)
+            message = concat_table(message,{1,target})
+            message = concat_table(message,z)
             
         else
             -- length of 1 
-            message = table.concat(message,{0,target})
-            message = table.concat(message,z)
+            message = concat_table(message,{0,target})
+            message = concat_table(message,z)
             
         end
       else
         -- send single value to led
-        message = table.concat(message,{0,target})
-        message = table.concat(message,{z})
+        message = concat_table(message,{0,target})
+        message = concat_table(message,{z})
         
     end
 
@@ -118,15 +116,15 @@ function MidiGrid:redraw()
         
           if (self.led[x][y] == nil) then
             local m = self.set_led(x,y,0)
-            message = table.concat(message,m)
+            message = concat_table(message,m)
           else
               local m = self.set_led(x,y,self.led[x][y])
-              message = table.concat(message, m )
+              message = concat_table(message, m )
           end
       end
     end
     
-    message = table.concat(message,{247})
+    message = concat_table(message,{247})
     self.midi:send(message)
 end
 
@@ -187,7 +185,7 @@ end
 
 --
 
-function table.concat(t1,t2)
+function concat_table(t1,t2)
    for i=1,#t2 do
       t1[#t1+1] = t2[i]
    end
