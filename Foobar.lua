@@ -1,90 +1,142 @@
--- HTTPS://NOR.THE-RN.INFO
--- NORNSILERPLATE
--- >> k1: exit
--- >> k2:
--- >> k3:
--- >> e1:
--- >> e2:
--- >> e3:
+-- TO DOs:
+-- Turn Seq into a Class
+-- Implement Program Change
+-- Make multimode sequencer
+-- Add scale root note select
+-- Manage global variables
+-- Turn Mutes, Presets and Seq into proper objects and remove from init
+
 local path_name = 'Foobar/lib/'
 MidiGrid = require(path_name .. 'midigrid')
 musicutil = require('musicutil')
 util = require('util')
 
-------------------------------------------------------------------------------------------------------------------------------
+Input = {{},{}}
+Output= {{},{},{},{}}
 
+rainbow_off = {7,11,15,23,39,47,51,55}
+rainbow_on = {5,9,13,21,37,45,49,53}
+
+drum_map = {}
+drum_map[36] = {x = 1, y = 1, index = 1, output = {{type='crow_voct', input = 1, out = 1},{type='crow_gate', input = 0, out = 2}}}
+drum_map[37] = {x = 2, y = 1, index = 2, output = {{type='crow_voct', input = 2, out = 3},{type='crow_gate', input = 0, out = 4}} }
+drum_map[38] = {x = 3, y = 1, index = 3}
+drum_map[39] = {x = 4, y = 1, index = 4}
+drum_map[40] = {x = 1, y = 2, index = 5}
+drum_map[41] = {x = 2, y = 2, index = 6}
+drum_map[42] = {x = 3, y = 2, index = 7}
+drum_map[43] = {x = 4, y = 2, index = 8}
+drum_map[44] = {x = 1, y = 3, index = 9}
+drum_map[45] = {x = 2, y = 3, index = 10}
+drum_map[46] = {x = 3, y = 3, index = 11}
+drum_map[47] = {x = 4, y = 3, index = 12}
+drum_map[48] = {x = 1, y = 4, index = 13}
+drum_map[49] = {x = 2, y = 4, index = 14}
+drum_map[50] = {x = 3, y = 4, index = 15}
+drum_map[51] = {x = 4, y = 4, index = 16}
+
+grid_map = {}
+for i = 1, 16 do grid_map[i] = {} end
+
+grid_map[1][1] = {note = 36, index = 1}
+grid_map[2][1] = {note = 37, index = 2}
+grid_map[3][1] = {note = 38, index = 3}
+grid_map[4][1] = {note = 39, index = 4}
+grid_map[1][2] = {note = 40, index = 5}
+grid_map[2][2] = {note = 41, index = 6}
+grid_map[3][2] = {note = 42, index = 7}
+grid_map[4][2] = {note = 43, index = 8}
+grid_map[1][3] = {note = 44, index = 9}
+grid_map[2][3] = {note = 45, index = 10}
+grid_map[3][3] = {note = 46, index = 11}
+grid_map[4][3] = {note = 47, index = 12}
+grid_map[1][4] = {note = 48, index = 13}
+grid_map[2][4] = {note = 49, index = 14}
+grid_map[3][4] = {note = 50, index = 15}
+grid_map[4][4] = {note = 51, index = 16}
+	
+---------------------------------------
+---------------------------------------------------------------------------------------
+function set_scale(i,d)
+	o = o or 0
+	scale_name = musicutil.SCALES[i].name
+	scale = musicutil.generate_scale(0,scale_name,5)
+	print('Set Scale ' .. d .. ' to ' .. scale_name)
+	crow.input[d].mode('scale',scale)
+end
+
+function load_bank(i)
+	local bank = 'bank_' .. i .. '_'
+   
+    local pattern = params:get( bank .. 'drum_pattern')
+    local scale_one = params:get( bank .. 'scale_one')
+    local scale_two = params:get(bank .. 'scale_two')
+
+	transport:program_change(pattern - 1,10)
+	set_scale(scale_one,1)
+	set_scale(scale_two,2)
+	
+end
+
+function save_bank(i)
+	local current_bank = 'bank_' .. Preset.select .. '_'
+    local bank = 'bank_' .. i .. '_'
+    local pattern = params:get( current_bank .. 'drum_pattern')
+    
+    scale_root = params:get( current_bank .. 'scale_root')
+    scale_one = params:get( current_bank .. 'scale_one')
+    scale_two = params:get( current_bank .. 'scale_two')
+    
+    params:set( bank .. 'drum_pattern', pattern )
+    params:set( bank .. 'scale_root', scale_root )
+    params:set( bank .. 'scale_one', scale_one )
+    params:set( bank .. 'scale_two', scale_two )
+
+end
+
+-------------------
 
 function init()
+
 	include(path_name .. 'inc/settings')
-	Input = {{},{}}
 	
-	scale_select = 1
-	scale_name = musicutil.SCALES[scale_select]
-	scale = musicutil.generate_scale(0,scale_name,1)
+	Input[1] = {note = 0, octave = 0, volts = 0, index = 1}
+	Input[2] = {note = 0, octave = 0, volts = 0, index = 1}
 	
-	crow.input[1].mode('scale',scale)
-	crow.input[1].scale = function(s)
+	Output[1] = {}
+	Output[2] = {}
+	Output[3] = {}
+	Output[4] = {}
+	
+    crow.input[1].scale = function(s)
 		Input[1] = s
 	end
-
-	crow.input[2].mode('scale',scale)
+	
 	crow.input[2].scale = function(s)
 		Input[2] = s
 	end
 
-	rainbow_off = {7,11,15,23,39,47,51,55}
-  	rainbow_on = {5,9,13,21,37,45,49,53}
-	
+    -- Variables
+	set_scale(1,1)
+	set_scale(1,2)
+	scale_one = 1
+	scale_two = 1
+    scale_root = 0
+	current_bank = 1
+	current_preset = 1
+	current_mode = 1
+
+
 	message = "Foobar"
 	screen_dirty = true
 	redraw_clock_id = clock.run(redraw_clock)
+	
 
+	-- Devices
 	transport = midi.connect(1)
-	
-	
-	g = MidiGrid:new({event = grid_event})
+	g = MidiGrid:new({event = grid_event, channel = 3})
+	midi_out = midi.connect(2)
 
-	midi_out = midi.connect(3)
-	
-	input_one = 1
-	
-	drum_map = {}
-	drum_map[36] = {x = 1, y = 1, index = 1, output = {{type='crow_voct', input = 1, out = 1},{type='crow_gate', input = 0, out = 2}}}
-	drum_map[37] = {x = 2, y = 1, index = 2, output = {{type='crow_voct', input = 2, out = 3},{type='crow_gate', input = 0, out = 4}} }
-	drum_map[38] = {x = 3, y = 1, index = 3}
-	drum_map[39] = {x = 4, y = 1, index = 4}
-	drum_map[40] = {x = 1, y = 2, index = 5}
-	drum_map[41] = {x = 2, y = 2, index = 6}
-	drum_map[42] = {x = 3, y = 2, index = 7}
-	drum_map[43] = {x = 4, y = 2, index = 8}
-	drum_map[44] = {x = 1, y = 3, index = 9}
-	drum_map[45] = {x = 2, y = 3, index = 10}
-	drum_map[46] = {x = 3, y = 3, index = 11}
-	drum_map[47] = {x = 4, y = 3, index = 12}
-	drum_map[48] = {x = 1, y = 4, index = 13}
-	drum_map[49] = {x = 2, y = 4, index = 14}
-	drum_map[50] = {x = 3, y = 4, index = 15}
-	drum_map[51] = {x = 4, y = 4, index = 16}
-
-	grid_map = {}
-	for i = 1, 16 do grid_map[i] = {} end
-
-	grid_map[1][1] = {note = 36, index = 1}
-	grid_map[2][1] = {note = 37, index = 2}
-	grid_map[3][1] = {note = 38, index = 3}
-	grid_map[4][1] = {note = 39, index = 4}
-	grid_map[1][2] = {note = 40, index = 5}
-	grid_map[2][2] = {note = 41, index = 6}
-	grid_map[3][2] = {note = 42, index = 7}
-	grid_map[4][2] = {note = 43, index = 8}
-	grid_map[1][3] = {note = 44, index = 9}
-	grid_map[2][3] = {note = 45, index = 10}
-	grid_map[3][3] = {note = 46, index = 11}
-	grid_map[4][3] = {note = 47, index = 12}
-	grid_map[1][4] = {note = 48, index = 13}
-	grid_map[2][4] = {note = 49, index = 14}
-	grid_map[3][4] = {note = 50, index = 15}
-	grid_map[4][4] = {note = 51, index = 16}
 
 	---- DATA STRUCTURE ------------------------------
 	-- I'll keep shimming stuff into these tables until it makes sense
@@ -123,7 +175,7 @@ function init()
 		step = 1,
 		actions = {
 			[0] = function() end,
-			[1] = seq_action,
+			[1] = function() end,
 			[2] = function() end,
 			[3] = function() end,
 			[4] = function() end,
@@ -139,10 +191,9 @@ function init()
 		Seq.map[i] = MidiGrid.index_to_grid(i, Seq.grid_start, Seq.grid_end)
 	end
 
-	-- Transport Event Handler for incoming midi notes from the Beatstep Pro.
+	-- Transport Event Handler for incoming MIDI notes from the Beatstep Pro.
 	transport.event = function(msg)
 		local data = midi.to_msg(msg)
-		if(data.type ~= 'clock') then tab.print(data) end
 		
 		if (data.type == 'clock' or data.type == 'start' or data.type == 'stop' or
 			data.type == 'continue') then midi_out:send(data) end
@@ -155,11 +206,21 @@ function init()
 		
 		-- Process Outputs
 		if (data.ch == 10) then
+		    
+		    for i = 1,4 do
+		        if Output[i].trigger == data.note then
+		            print('output trigger, line 206')
+		        end
+		    end
+		    
 			if drum_map[data.note].output then
 				for i=1, #drum_map[data.note].output do
+				    
 					local output = drum_map[data.note].output[i]
+					
 					if output.type == 'crow_voct' and data.type == 'note_on' then
-						crow.output[output.out].volts = Input[output.input].volts
+						local root = params:get('bank_' .. Preset.select ..'_scale_root' ) * 1/12
+						crow.output[output.out].volts = Input[output.input].volts + root
 					elseif output.type == 'crow_gate' then
 						if (data.type == 'note_on') then
 							crow.output[output.out].volts = 5
@@ -167,6 +228,7 @@ function init()
 							crow.output[output.out].volts = 0
 						end
 					end
+					
 				end
 			else
 				if(drum_map[data.note].state) then
@@ -190,27 +252,6 @@ function play_note(note, vel, ch, duration)
 	end)
 end
 
-seq_action = function()
-	clock.run(function()
-
-		local count = 0
-		local delta = 20
-		local length = math.random(4)
-		local b = math.random(4)
-		local probability = 0
-
-		if (math.random() > probability) then
-			while count < length do
-				if (not (drum_map[41].state) and not (Mute.state[41])) then
-					play_note(41, (100 - delta * count), 10, 0.1)
-				end
-				count = count + 1
-				clock.sleep(300)
-
-			end
-		end
-	end)
-end
 
 function handle_seq_transport(data)
 	-- Tick based sequencer running on 16th notes at 24 PPQN
@@ -237,11 +278,13 @@ function handle_seq_transport(data)
 			if value == 0 then
 				g.led[c.x][c.y] = 1
 			else
+			    -- DO Stuff 
+			    print('line 281 was here for sequencer actions.')
+			    
+			    Seq.action(value)
+			    
 				g.led[c.x][c.y] = rainbow_on[value]
 			end
-
-			
-
 		end
 
 		Seq.step = next_step
@@ -255,18 +298,23 @@ function handle_seq_transport(data)
 
 	
 end
-
+-- TO DELETE:
 function handle_seq_grid(s, data)
 	local x = data.x
 	local y = data.y
 
 	local index = MidiGrid.grid_to_index({x = x, y = y}, Seq.grid_start, Seq.grid_end)
+	
 	if(x == 1 and y == 9 and data.state) then
 		-- up
 		Seq.select_action = util.wrap(Seq.select_action + 1, 1, #Seq.actions)
+		
 		local current = MidiGrid.index_to_grid(Seq.select_step, Seq.grid_start, Seq.grid_end)
-		g.led[1][9] = rainbow_off[Seq.select_action]
-		g.led[2][9] = rainbow_off[Seq.select_action]
+		
+		g.led[1][9] = rainbow_off[util.wrap(Seq.select_action + 1, 1, #Seq.actions)]
+		g.led[2][9] = rainbow_off[util.wrap(Seq.select_action - 1, 1, #Seq.actions)]
+		g.led[9][9] = rainbow_off[Seq.select_action]
+		
 
 		if Seq.value[Seq.select_step] and Seq.value[Seq.select_step] > 0 then
 			Seq.value[Seq.select_step] = Seq.select_action
@@ -275,12 +323,16 @@ function handle_seq_grid(s, data)
 
 		g:redraw()
 	end
+	
 	if(x == 2 and y == 9 and data.state) then
 		-- down
 		Seq.select_action = util.wrap(Seq.select_action - 1, 1, #Seq.actions)
+		
 		local current = MidiGrid.index_to_grid(Seq.select_step, Seq.grid_start, Seq.grid_end)
-		g.led[1][9] = rainbow_off[Seq.select_action]
-		g.led[2][9] = rainbow_off[Seq.select_action]
+		
+		g.led[1][9] = rainbow_off[util.wrap(Seq.select_action + 1, 1, #Seq.actions)]
+		g.led[2][9] = rainbow_off[util.wrap(Seq.select_action - 1, 1, #Seq.actions)]
+		g.led[9][9] = rainbow_off[Seq.select_action]
 		
 		if Seq.value[Seq.select_step] and Seq.value[Seq.select_step] > 0 then
 			Seq.value[Seq.select_step] = Seq.select_action
@@ -290,16 +342,18 @@ function handle_seq_grid(s, data)
 		g:redraw()
 	end
 	
+	-- TODO: Pagination
 	if(x == 3 and y == 9 and data.state) then
 		-- left
 	end
+	
 	if(x == 4 and y == 9 and data.state) then
 		-- right
 	end
 
 	if (index ~= false and data.state) then
 		local value = Seq.value[index] or 0
-
+		print('seq' .. index)
 		if value == 0 then
 			-- Turn on
 			Seq.note_select = index
@@ -367,29 +421,67 @@ end
 -- param s = self, MidiGrid instance
 -- param data = { x = 1-9, y = 1-9, state = boolean }
 function grid_event(s, data)
-	handle_alt_grid(s, data) -- Toggles alt button state
+	handle_function_grid(s, data) -- Toggles alt button state
 	Seq.grid(s, data) -- Toggles Seq actions
 	Mute.grid(s, data) -- Sets display of mute buttons
 	Preset.grid(s, data) -- Manages loading and saving of mute states
-
 	g:redraw()
-
 end
 
 -- The Alt button is the grid pad used to access secondary functions. 
 -- Based on the toggle state, tapping Alt will toggle on or off
 -- Methods using Alt check if the toggle state is true and should reset toggle state to false after event completes
-function handle_alt_grid(s, data)
+function handle_function_grid(s, data)
 	local x = data.x
 	local y = data.y
+	local alt = s.toggled[9][1]
 
 	-- Alt button
-	if x == 9 and y == 1 and s.toggled[x][y] then
-		s.led[9][1] = {3, true}
-	else
-		s.led[9][1] = 0
+	if x == 9 and y == 1 then
+		if(s.toggled[x][y])then
+			s.led[9][1] = {3, true}
+		else
+			s.led[9][1] = 0
+		end
+	end
+
+	--Bank Select
+	if x == 9 and y > 1 and data.state then
+
+		local bank_select = 9 - y
+		
+		if(alt) then
+			if bank_select == current_bank then
+				print('we gonna save this PSET')
+			else
+				print('we gonna load this PSET')
+			end
+		elseif bank_select ~= current_bank then
+			current_bank = bank_select
+
+			for i = 2, 8 do			
+				s.led[9][i] = 0
+			end
+
+			s.led[9][y] = rainbow_on[y - 1]
+			params:set('drum_bank', current_bank)
+		end
+	end
+
+	-- Mode Select
+	if x > 4 and y == 9 and data.state then
+		current_mode = x - 4
+		print(current_mode)
+		for i = 5, 8 do 
+			if i == x then
+				s.led[i][9] = 3
+			else
+				s.led[i][9] = 0
+			end
+		end
 	end
 end
+
 
 -- Mute are used to prevent incoming MIDI notes from passing through.
 -- Based on toggle state
@@ -399,7 +491,7 @@ function handle_mute_grid(s, data)
 	local alt = g.toggled[9][1]
 
 	if data.state and MidiGrid.in_bounds(data, Mute.bounds) then
-		
+		print('in bounds')
 		if alt then 
 			Seq.current = grid_map[x][y].note
 			print(Seq.current)
@@ -427,8 +519,7 @@ function handle_preset_grid(s, data)
 	local alt = s.toggled[9][1]
 
 	if (index ~= false and data.state) then
-
-		Preset.select = MidiGrid.grid_to_index({x = x, y = y},Preset.grid_start, Preset.grid_end)
+		print('preset_grid ' .. index)
 		for px = 5, 8 do
 			for py = 1, 4 do
 				if px == x and py == y then
@@ -441,17 +532,24 @@ function handle_preset_grid(s, data)
 
 		if alt then
 			-- Save Preset
+			print('Saved Preset ' .. Preset.select .. ' ' .. x .. ',' .. y)
+            save_bank( index )
+            
+            Preset.select = index
 			Preset.bank[Preset.select] = {}
+			
 			for k, v in pairs(drum_map) do
 				Preset[Preset.select][k] = (Mute.state[k] == true)
 			end
-
-			print('Saved Preset ' .. Preset.select .. ' ' .. x .. ',' .. y)
-
+			
 			s.toggled[9][1] = false
 		else
-			print('Load Preset ' .. Preset.select .. ' ' .. x .. ',' .. y)
 			-- Load Preset
+			print('Load Preset ' .. Preset.select .. ' ' .. x .. ',' .. y)
+			Preset.select = index
+			
+			load_bank( Preset.select )
+	
 			local pset = Preset[Preset.select]
 
 			if (pset) then
@@ -468,28 +566,29 @@ function handle_preset_grid(s, data)
 				end
 			else
 				print('no preset')
-				local foo = {}
+				local mutes = {}
 				for k, v in pairs(drum_map) do
-					foo[k] = false
+					mutes[k] = false
 					s.toggled[v.x][v.y] = false
 					s.led[v.x][v.y] = 0
 				end
-				Preset[Preset.select] = foo
+				Preset[Preset.select] = mutes
 			end
 
 		end
 
 	end
-
-	-- Preset Select
-	if data.state and MidiGrid.in_bounds(data, Preset.bounds) then
-		
-
-	end
 end
 
 function enc(e, d) --------------- enc() is automatically called by norns
-	if e == 1 then turn(e, d) end -- turn encoder 1
+	if e == 1 then
+	    local bank = 'bank_' .. Preset.select .. '_'
+	    local root = util.clamp(params:get(bank .. 'scale_root') + d,1,12)
+	    
+	    params:set(bank .. 'scale_root', root)
+	    message = root
+		screen_dirty = true
+	end -- turn encoder 1
 	if e == 2 then turn(e, d) end -- turn encoder 2
 	if e == 3 then turn(e, d) end -- turn encoder 3
 	screen_dirty = true ------------ something changed
@@ -497,6 +596,8 @@ end
 
 function turn(e, d) ----------------------------- an encoder has turned
 	message = "encoder " .. e .. ", delta " .. d -- build a message
+	
+	util.clamp()
 end
 
 function key(k, z) ------------------ key() is automatically called by norns

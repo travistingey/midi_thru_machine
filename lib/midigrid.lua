@@ -84,7 +84,7 @@ function MidiGrid.set_led(x,y,z)
         elseif z[2] == true and #z == 2  then
             -- length of 2, second value is true
             message = concat_table(message,{2,target})
-            message = concat_table(message,z)
+            message = concat_table(message,{z[1]})
         
         elseif #z == 2 then
             -- length of 2
@@ -99,6 +99,8 @@ function MidiGrid.set_led(x,y,z)
         end
       else
         -- send single value to led
+        tab.print(message)
+        
         message = concat_table(message,{0,target})
         message = concat_table(message,{z})
         
@@ -113,7 +115,6 @@ function MidiGrid:redraw()
     local message = {240,0,32,41,2,13,3}
     for x = 1, 9 do
       for y = 1, 9 do
-        
           if (self.led[x][y] == nil) then
             local m = self.set_led(x,y,0)
             message = concat_table(message,m)
