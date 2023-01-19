@@ -37,60 +37,56 @@ function Seq:set_map()
 		self.map[i] = self.grid.index_to_grid(i, self.grid_start, self.grid_end)
 	end
 end
+
 function Seq:set_grid()
-	if self.display then
-		local wrap = self.bounds.width * self.bounds.height
-		local page_count = math.ceil(self.length/wrap)
+	local wrap = self.bounds.width * self.bounds.height
+	local page_count = math.ceil(self.length/wrap)
 
-		for i = 1, #self.map do
-			
-			local page = math.ceil(i/wrap) -- does the current grid map appear on current page?
+	for i = 1, #self.map do
+		
+		local page = math.ceil(i/wrap) -- does the current grid map appear on current page?
 
-			if page == self.page then
-				local x = self.map[i].x
-				local y = self.map[i].y
+		if page == self.page then
+			local x = self.map[i].x
+			local y = self.map[i].y
 
-				if i > self.length then
-					self.grid.led[x][y] = 0 -- No steps / pattern is short	
+			if i > self.length then
+				self.grid.led[x][y] = 0 -- No steps / pattern is short	
+			else
+				local step = self.value[i]
+				
+				
+				if step and step > 0 then
+					self.grid.led[x][y] = rainbow_off[step]
 				else
-					local step = self.value[i]
-					
-					
-					if step and step > 0 then
-						self.grid.led[x][y] = rainbow_off[step]
-					else
-						self.grid.led[x][y] = {5,5,5} -- empty step
-					end 
-				end   
-			end
-			
+					self.grid.led[x][y] = {5,5,5} -- empty step
+				end 
+			end   
 		end
 		
-
-
-		self.grid.led[1][9] = {20,20,20}
-		self.grid.led[2][9] = {20,20,20}
-		if self.page > 1 then
-			self.grid.led[3][9] = {20,20,20}
-		else
-			self.grid.led[3][9] = 0
-		end
-
-		if self.page < page_count then
-			self.grid.led[4][9] = {20,20,20}
-		else
-			self.grid.led[4][9] = 0
-		end
-
-		self.grid.led[9][9] = rainbow_off[1]
-		
-		self.grid:redraw()
 	end
+
+	self.grid.led[1][9] = {20,20,20}
+	self.grid.led[2][9] = {20,20,20}
+	if self.page > 1 then
+		self.grid.led[3][9] = {20,20,20}
+	else
+		self.grid.led[3][9] = 0
+	end
+
+	if self.page < page_count then
+		self.grid.led[4][9] = {20,20,20}
+	else
+		self.grid.led[4][9] = 0
+	end
+
+	self.grid.led[9][9] = rainbow_off[1]
+	
+	self.grid:redraw()
 end
 
 
 function Seq:set_length(length)
-	print(length)
 	local wrap = self.bounds.height * self.bounds.width
 	for i = 1, length do
 		self.map[i] = self.grid.index_to_grid(util.wrap(i,1,wrap), self.grid_start, self.grid_end)

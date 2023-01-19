@@ -67,9 +67,9 @@ end
 
 function init()
 
-	include(path_name .. 'inc/settings')
-	include(path_name .. 'inc/strategies')
-	
+
+    -- Variables
+
 	Input[1] = {note = 0, octave = 0, volts = 0, index = 1}
 	Input[2] = {note = 0, octave = 0, volts = 0, index = 1}
 	
@@ -77,18 +77,10 @@ function init()
 	Output[2] = {}
 	Output[3] = {}
 	Output[4] = {}
-	
-    crow.input[1].scale = function(s)
-		Input[1] = s
-	end
-	
-	crow.input[2].scale = function(s)
-		Input[2] = s
-	end
 
-    -- Variables
 	set_scale(1,1)
 	set_scale(1,2)
+	
 	scale_one = 1
 	scale_two = 1
     scale_root = 0
@@ -99,10 +91,25 @@ function init()
 	screen_dirty = true
 	redraw_clock_id = clock.run(redraw_clock)
 	
+	include(path_name .. 'inc/settings')
+	include(path_name .. 'inc/strategies')
+	include(path_name .. 'inc/mute')
+	include(path_name .. 'inc/preset')
+
 	-- Devices
+    crow.input[1].scale = function(s)
+		Input[1] = s
+	end
 	
+	crow.input[2].scale = function(s)
+		Input[2] = s
+	end
+
 	g = MidiGrid:new({event = grid_event, channel = 3})
-	seq_1 = Seq:new({
+	
+	Mode = {}
+	Mode[1] = Seq:new({
+		display = true,
 	    grid = g,
 	    actions = 8,
 		div = 96,
@@ -112,7 +119,7 @@ function init()
 	        Preset.load(i)
 	    end
 	})
-	seq_2 = Seq:new({
+	Mode[2] = Seq:new({
 	    grid = g,
 	    actions = 8,
 		length = 1,
@@ -121,7 +128,7 @@ function init()
 	    end
 	})
 	
-	seq_3 = Seq:new({
+	Mode[3] = Seq:new({
 	    grid = g,
 	    actions = 8,
 		length = 5,
@@ -130,7 +137,7 @@ function init()
 	    end
 	})
 	
-	seq_4 = Seq:new({
+	Mode[4] = Seq:new({
 	    grid = g,
 	    actions = 8,
 	    action = function(i)
@@ -140,171 +147,12 @@ function init()
 	transport = midi.connect(1)
 	midi_out = midi.connect(2)
 
-
-	---- DATA STRUCTURE ------------------------------
-	-- I'll keep shimming stuff into these tables until it makes sense
-	Mute = {
-		grid_start = {x = 1, y = 1},
-		grid_end = {x = 4, y = 4},
-		state = {},
-		transport = handle_mute_transport,
-		grid = handle_mute_grid,
-		bounds = MidiGrid.get_bounds({x = 1, y = 1}, {x = 4, y = 4}),
-		set_grid = function ()
-            for i, state in pairs(Mute.state) do
-                local x = drum_map[i].x
-                local y = drum_map[i].y
-
-				if state then
-                    g.led[x][y] = rainbow_off[Preset.select]
-                else
-                    g.led[x][y] = 0
-                end
-            end
-        end
-	}
-
-	Preset = {
-		grid_start = {x = 5, y = 4},
-		grid_end = {x = 8, y = 1},
-		select = 1,
-		bank = {},
-		transport = handle_preset_transport,
-		grid = handle_preset_grid,
-		bounds = MidiGrid.get_bounds({x = 5, y = 4}, {x = 8, y = 1}),
-		set_grid = function()
-		    local current  = MidiGrid.index_to_grid(Preset.select,Preset.grid_start,Preset.grid_end)
-			for px = math.min(Preset.grid_start.x,Preset.grid_end.x), math.max(Preset.grid_start.x,Preset.grid_end.x) do
-				for py = math.min(Preset.grid_start.y,Preset.grid_end.y), math.max(Preset.grid_start.y,Preset.grid_end.y) do
-					if(current.x == px and current.y == py) then
-						g.led[px][py] = rainbow_off[Preset.select]
-					else
-						g.led[px][py] = {20,20,20}
-					end
-					
-				end 
-			end
-		end,
-		load = function (i)
-        	Preset.select = i
-			local bank = 'bank_' .. i .. '_'
-           
-            local pattern = params:get( bank .. 'drum_pattern')
-            local scale_one = params:get( bank .. 'scale_one')
-            local scale_two = params:get(bank .. 'scale_two')
-        
-        	transport:program_change(pattern - 1,10)
-        	set_scale(scale_one,1)
-        	set_scale(scale_two,2)
-        	
-			local pset = Preset.bank[Preset.select]
-			if (pset) then
-				for k, v in pairs(pset) do
-					local target = drum_map[k]
-					Mute.state[k] = pset[k]
-					g.toggled[target.x][target.y] = pset[k]
-
-					if pset[k] then
-						g.led[target.x][target.y] = rainbow_off[Preset.select]
-					else
-						g.led[target.x][target.y] = 0
-					end
-				end
-			else
-				print('No Preset Saved')
-				for k, v in pairs(drum_map) do
-					local target = v
-					Mute.state[k] = false
-					g.toggled[target.x][target.y] = false
-					g.led[target.x][target.y] = 0
-				end
-			end
-			
-			Preset:set_grid()
-		end,
-        save = function (i)
-        	local current_bank = 'bank_' .. Preset.select .. '_'
-            local bank = 'bank_' .. i .. '_'
-            local pattern = params:get( current_bank .. 'drum_pattern')
-            
-            scale_root = params:get( current_bank .. 'scale_root')
-            scale_one = params:get( current_bank .. 'scale_one')
-            scale_two = params:get( current_bank .. 'scale_two')
-            
-            params:set( bank .. 'drum_pattern', pattern )
-            params:set( bank .. 'scale_root', scale_root )
-            params:set( bank .. 'scale_one', scale_one )
-            params:set( bank .. 'scale_two', scale_two )
-			
-			Preset.bank[i] = {}
-			
-			for k, v in pairs(drum_map) do
-				Preset.bank[i][k] = (Mute.state[k] == true)
-			end
-			
-			g.toggled[9][1] = false
-			g.led[9][1] = 0
-        end
-	}
-    
-    Modes = {seq_1,seq_2,seq_3,seq_4}
-    Modes[1].display = true
-
     Mute.set_grid()
     Preset.load(1)
     
 	-- Transport Event Handler for incoming MIDI notes from the Beatstep Pro.
-	transport.event = function(msg)
-		local data = midi.to_msg(msg)
-		
-		if (data.type == 'clock' or data.type == 'start' or data.type == 'stop' or
-			data.type == 'continue') then midi_out:send(data) end
+	transport.event = transport_event
 
-		-- clock events
-			
-		    Modes[1]:transport_event(data)
-			Modes[2]:transport_event(data)
-			Modes[3]:transport_event(data)
-			Modes[4]:transport_event(data)
-    
-		-- note on/off events
-		Mute.transport(data)
-		
-		-- Process Outputs
-		if (data.ch == 10) then
-		    
-		    for i = 1,4 do
-		        if Output[i].trigger == data.note then
-		            print('output trigger, line 206')
-		        end
-		    end
-		    
-			if drum_map[data.note].output then
-				for i=1, #drum_map[data.note].output do
-				    
-					local output = drum_map[data.note].output[i]
-					
-					if output.type == 'crow_voct' and data.type == 'note_on' then
-						local root = scale_root * 1/12
-						crow.output[output.out].volts = Input[output.input].volts + root
-					elseif output.type == 'crow_gate' then
-						if (data.type == 'note_on') then
-							crow.output[output.out].volts = 5
-						elseif(data.type == 'note_off') then
-							crow.output[output.out].volts = 0
-						end
-					end
-				end
-			else
-				if(drum_map[data.note].state) then
-					midi_out:send(data)
-				elseif(drum_map[data.note].state == false) then
-				end
-			end
-		end
-
-		g:redraw()
-	end
 end -- end Init
 
 function play_note(note, vel, ch, duration)
@@ -334,33 +182,55 @@ end
 
 ]]
 
-function handle_mute_transport(data)
-	-- react only to drum pads
-	if data.ch == 10 and drum_map[data.note] then
-		local target = drum_map[data.note]
+function transport_event(msg)
+	local data = midi.to_msg(msg)
+	
+	if (data.type == 'clock' or data.type == 'start' or data.type == 'stop' or
+		data.type == 'continue') then midi_out:send(data) end
 
-		if (not Mute.state[data.note]) then
-			drum_map[data.note].state = true
-			
-			-- Mute is off
-			if data.type == 'note_on' then
-				g.led[target.x][target.y] = 3 -- note_on unmuted.
-			elseif data.type == 'note_off' then
-				g.led[target.x][target.y] = 0 -- note_on unmuted.
+	-- clock events
+	Mode[1]:transport_event(data)
+	Mode[2]:transport_event(data)
+	Mode[3]:transport_event(data)
+	Mode[4]:transport_event(data)
+
+	-- note on/off events
+	Mute.transport(data)
+	
+	-- Process Outputs
+	if (data.ch == 10) then
+		
+		for i = 1,4 do
+			if Output[i].trigger == data.note then
+				print('output trigger, line 206')
+			end
+		end
+		
+		if drum_map[data.note].output then
+			for i=1, #drum_map[data.note].output do
+				
+				local output = drum_map[data.note].output[i]
+				
+				if output.type == 'crow_voct' and data.type == 'note_on' then
+					local root = scale_root * 1/12
+					crow.output[output.out].volts = Input[output.input].volts + root
+				elseif output.type == 'crow_gate' then
+					if (data.type == 'note_on') then
+						crow.output[output.out].volts = 5
+					elseif(data.type == 'note_off') then
+						crow.output[output.out].volts = 0
+					end
+				end
 			end
 		else
-			-- Mute is on
-			drum_map[data.note].state = false
-
-			midi_out:note_off(data.note, 64, 10)
-			if data.type == 'note_on' then
-				g.led[target.x][target.y] = rainbow_on[Preset.select] -- note_on muted.
-				data.type = 'note_off'
-			elseif data.type == 'note_off' then
-				g.led[target.x][target.y] = rainbow_off[Preset.select] -- note_off muted.
+			if(drum_map[data.note].state) then
+				midi_out:send(data)
+			elseif(drum_map[data.note].state == false) then
 			end
 		end
 	end
+
+	g:redraw()
 end
 
 
@@ -369,9 +239,9 @@ end
 -- param s = self, MidiGrid instance
 -- param data = { x = 1-9, y = 1-9, state = boolean }
 function grid_event(s, data)
-	handle_function_grid(s, data) -- Toggles alt button state
+	handle_function_grid(s, data)
 	
-	seq_1:grid_event(data)
+	Mode[current_mode]:grid_event(data)
 	
 	Mute.grid(s, data) -- Sets display of mute buttons
 	Preset.grid(s, data) -- Manages loading and saving of mute states
@@ -441,55 +311,9 @@ function handle_function_grid(s, data)
 end
 
 
--- Mute are used to prevent incoming MIDI notes from passing through.
--- Based on toggle state
-function handle_mute_grid(s, data)
-	local x = data.x
-	local y = data.y
-	local alt = g.toggled[9][1]
 
-	if data.state and MidiGrid.in_bounds(data, Mute.bounds) then
 
-		if alt then 
-			g.toggled[9][1] = false
-			print('alt' .. g.toggled[9][1])
-		else
-			local index = grid_map[x][y].note
-			Mute.state[index] = s.toggled[x][y]
 
-			if Mute.state[index] then 
-				g.led[x][y] = rainbow_off[Preset.select]
-			else
-				g.led[x][y] = 0
-			end
-		end
-	end
-end
-
--- Preset are used to store different combination of mute settings, stored as a 2D table
--- Ony one preset in a bank is active at a time.
--- Pressing pad will load preset. Pressing alt + pad will save current mutes as a preset
-function handle_preset_grid(s, data)
-	local x = data.x
-	local y = data.y
-	local index = MidiGrid.grid_to_index({x = x, y = y}, Preset.grid_start, Preset.grid_end)
-	local alt = s.toggled[9][1]
-
-	if (index ~= false and data.state) then
-
-		if alt then
-			-- Save Preset
-			print('Saved Preset ' .. Preset.select .. ' ' .. x .. ',' .. y)
-            Preset.save( index )
-		else
-			-- Load Preset
-			print('Load Preset ' .. Preset.select .. ' ' .. x .. ',' .. y)
-			Preset.select = index
-			Preset.load( Preset.select )
-		end
-
-	end
-end
 
 function enc(e, d) --------------- enc() is automatically called by norns
     local bank = 'bank_' .. Preset.select .. '_'
