@@ -46,8 +46,9 @@ Preset = {
         local bank = 'bank_' .. i .. '_'
        
         local pattern = params:get( bank .. 'drum_pattern')
-        local scale_one = params:get( bank .. 'scale_one')
-        local scale_two = params:get(bank .. 'scale_two')
+        scale_root = params:get(bank .. 'scale_root')
+        scale_one = params:get( bank .. 'scale_one')
+        scale_two = params:get(bank .. 'scale_two')
     
         transport:program_change(pattern - 1,10)
         set_scale(scale_one,1)
@@ -82,11 +83,7 @@ Preset = {
         local current_bank = 'bank_' .. Preset.select .. '_'
         local bank = 'bank_' .. i .. '_'
         local pattern = params:get( current_bank .. 'drum_pattern')
-        
-        scale_root = params:get( current_bank .. 'scale_root')
-        scale_one = params:get( current_bank .. 'scale_one')
-        scale_two = params:get( current_bank .. 'scale_two')
-        
+        print(scale_one .. '  and ' .. scale_two)
         params:set( bank .. 'drum_pattern', pattern )
         params:set( bank .. 'scale_root', scale_root )
         params:set( bank .. 'scale_one', scale_one )
@@ -100,5 +97,6 @@ Preset = {
         
         g.toggled[9][1] = false
         g.led[9][1] = 0
+        screen_dirty = true
     end
 }

@@ -61,6 +61,7 @@ function set_scale(i,d)
 	scale_name = musicutil.SCALES[i].name
 	scale = musicutil.generate_scale(0,scale_name,5)
 	crow.input[d].mode('scale',scale)
+	screen_dirty = true
 end
 
 -------------------
@@ -112,7 +113,7 @@ function init()
 		display = true,
 	    grid = g,
 	    actions = 8,
-		div = 96,
+		div = 6,
 		length = 4,
 	    action = function(i)
 			print('load preset ' .. i)
@@ -122,7 +123,7 @@ function init()
 	Mode[2] = Seq:new({
 	    grid = g,
 	    actions = 8,
-		length = 1,
+		length = 16,
 	    action = function(i)
 
 	    end
@@ -131,7 +132,7 @@ function init()
 	Mode[3] = Seq:new({
 	    grid = g,
 	    actions = 8,
-		length = 5,
+		length = 32,
 	    action = function(i)
 
 	    end
@@ -140,13 +141,14 @@ function init()
 	Mode[4] = Seq:new({
 	    grid = g,
 	    actions = 8,
+		length = 16,
 	    action = function(i)
 	    end
 	})
 
 	transport = midi.connect(1)
 	midi_out = midi.connect(2)
-
+	Mode[1]:set_grid()
     Mute.set_grid()
     Preset.load(1)
     
@@ -195,7 +197,7 @@ function transport_event(msg)
 	Mode[4]:transport_event(data)
 
 	-- note on/off events
-	Mute.transport(data)
+	Mute.transport_event(data)
 	
 	-- Process Outputs
 	if (data.ch == 10) then
@@ -243,8 +245,8 @@ function grid_event(s, data)
 	
 	Mode[current_mode]:grid_event(data)
 	
-	Mute.grid(s, data) -- Sets display of mute buttons
-	Preset.grid(s, data) -- Manages loading and saving of mute states
+	Mute.grid_event(s, data) -- Sets display of mute buttons
+	Preset.grid_event(s, data) -- Manages loading and saving of mute states
 	g:redraw()
 end
 
@@ -296,17 +298,24 @@ function handle_function_grid(s, data)
 	if x > 4 and y == 9 and data.state then
 		current_mode = x - 4
 		print('Current Mode ' .. current_mode)
-		Modes[current_mode].display = true
-		Modes[current_mode]:set_grid()
+		
+		for i = 1, 4 do
+			if i == current_mode then
+				Mode[i].display = true
+			else
+				Mode[i].display = false
+			end
+		end
 		
 		for i = 5, 8 do 
 			if i == x then
 				s.led[i][9] = 3
 			else
-			    Modes[current_mode].display = false
 				s.led[i][9] = 0
 			end
 		end
+
+		Mode[current_mode]:set_grid()
 	end
 end
 
