@@ -10,12 +10,6 @@ Seq = require(path_name .. 'seq')
 musicutil = require('musicutil')
 util = require('util')
 
-Input = {{},{}}
-Output= {{},{},{},{}}
-
-rainbow_off = {5,60,9,61,13,17,21,25,33,41,45,49,52,54,57,59}
-rainbow_on = {7,62,11,63,15,19,23,27,35,43,47,51,54,56,59,61}
-
 drum_map = {}
 drum_map[36] = {x = 1, y = 1, index = 1, output = {{type='crow_voct', input = 1, out = 1},{type='crow_gate', input = 0, out = 2}}}
 drum_map[37] = {x = 2, y = 1, index = 2, output = {{type='crow_voct', input = 2, out = 3},{type='crow_gate', input = 0, out = 4}} }
@@ -64,12 +58,21 @@ function set_scale(i,d)
 	screen_dirty = true
 end
 
+
 -------------------
 
 function init()
-
-
+    
     -- Variables
+    
+    rainbow_on = {{127,0,0},{127,15,0},{127,45,0},{127,100,0},{75,127,0},{40,127,0},{0,127,0},{0,127,27},{0,127,127},{0,45,127},{0,0,127},{10,0,127},{27,0,127},{55,0,127},{127,0,75},{127,0,15}}
+	rainbow_off = {}
+
+	for i=1, 16 do
+		rainbow_off[i] = {math.floor(rainbow_on[i][1]/4),math.floor(rainbow_on[i][2]/4),math.floor(rainbow_on[i][3]/4)}
+	end
+    Input = {{},{}}
+    Output = {{},{},{},{}}
 
 	Input[1] = {note = 0, octave = 0, volts = 0, index = 1}
 	Input[2] = {note = 0, octave = 0, volts = 0, index = 1}
@@ -85,8 +88,8 @@ function init()
 	scale_one = 1
 	scale_two = 1
     scale_root = 0
+    
 	current_bank = 1
-	current_mode = 1
 
 	message = ''
 	screen_dirty = true
@@ -96,6 +99,7 @@ function init()
 	include(path_name .. 'inc/strategies')
 	include(path_name .. 'inc/mute')
 	include(path_name .. 'inc/preset')
+	include(path_name .. 'inc/mode')
 
 	-- Devices
     crow.input[1].scale = function(s)
@@ -108,47 +112,17 @@ function init()
 
 	g = MidiGrid:new({event = grid_event, channel = 3})
 	
-	Mode = {}
-	Mode[1] = Seq:new({
-		display = true,
-	    grid = g,
-	    actions = 8,
-		div = 6,
-		length = 4,
-	    action = function(i)
-			print('load preset ' .. i)
-	        Preset.load(i)
-	    end
-	})
-	Mode[2] = Seq:new({
-	    grid = g,
-	    actions = 8,
-		length = 16,
-	    action = function(i)
 
-	    end
-	})
 	
-	Mode[3] = Seq:new({
-	    grid = g,
-	    actions = 8,
-		length = 32,
-	    action = function(i)
-
-	    end
-	})
 	
-	Mode[4] = Seq:new({
-	    grid = g,
-	    actions = 8,
-		length = 16,
-	    action = function(i)
-	    end
-	})
 
 	transport = midi.connect(1)
 	midi_out = midi.connect(2)
-	Mode[1]:set_grid()
+	
+	Mode:load()
+	g.led[5][9] = 3
+	g.led[9][8] = 3
+	
     Mute.set_grid()
     Preset.load(1)
     
@@ -157,32 +131,7 @@ function init()
 
 end -- end Init
 
-function play_note(note, vel, ch, duration)
-	clock.run(function()
-		midi_out:note_on(note, vel, ch)
-		drum_map[note].state = true
-		clock.sleep(duration)
-		midi_out:note_off(note, 0, ch)
-		drum_map[note].state = false
-	end)
-end
 
---[[ SAVE THIS STRUCTURE FOR A LATER REFACTOR -----------
-
-function handle_grid(s, data)
-	local x = data.x
-	local y = data.y
-	
-	local index = MidiGrid.grid_to_index({x=x,y=y},Seq.grid_start,Seq.grid_end)
-	
-	if (index ~= false and data.state) then
-	
-		--> Valid pad is pressed 
-	
-	end
-end
-
-]]
 
 function transport_event(msg)
 	local data = midi.to_msg(msg)
@@ -235,7 +184,6 @@ function transport_event(msg)
 	g:redraw()
 end
 
-
 -- MidiGrid Event Handler
 -- Event triggered for every pad up and down event — TRUE state is a pad up event, FALSE state is a pad up event.
 -- param s = self, MidiGrid instance
@@ -243,7 +191,7 @@ end
 function grid_event(s, data)
 	handle_function_grid(s, data)
 	
-	Mode[current_mode]:grid_event(data)
+	Mode[Mode.select]:grid_event(data)
 	
 	Mute.grid_event(s, data) -- Sets display of mute buttons
 	Preset.grid_event(s, data) -- Manages loading and saving of mute states
@@ -278,8 +226,10 @@ function handle_function_grid(s, data)
 			else
 				print('we gonna load this PSET')
 			end
+			
 			g.toggled[9][1] = false
 			g.led[9][1] = 0
+			
 		elseif bank_select ~= current_bank then
 			current_bank = bank_select
             Preset:set_grid()
@@ -296,17 +246,11 @@ function handle_function_grid(s, data)
 
 	-- Mode Select
 	if x > 4 and y == 9 and data.state then
-		current_mode = x - 4
-		print('Current Mode ' .. current_mode)
+		Mode.select = x - 4
+		print('Current Mode ' .. Mode.select)
+		Mode:set_mode(x - 4)
 		
-		for i = 1, 4 do
-			if i == current_mode then
-				Mode[i].display = true
-			else
-				Mode[i].display = false
-			end
-		end
-		
+			
 		for i = 5, 8 do 
 			if i == x then
 				s.led[i][9] = 3
@@ -314,14 +258,8 @@ function handle_function_grid(s, data)
 				s.led[i][9] = 0
 			end
 		end
-
-		Mode[current_mode]:set_grid()
 	end
 end
-
-
-
-
 
 
 function enc(e, d) --------------- enc() is automatically called by norns
@@ -366,6 +304,7 @@ function redraw_clock() ----- a clock that draws space
 		end
 	end
 end
+
 
 function redraw() -------------- redraw() is automatically called by norns
 	screen.clear() --------------- clear space

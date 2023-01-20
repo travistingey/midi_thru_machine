@@ -68,7 +68,6 @@ Preset = {
                 end
             end
         else
-            print('No Preset Saved')
             for k, v in pairs(drum_map) do
                 local target = v
                 Mute.state[k] = false

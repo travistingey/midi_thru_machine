@@ -58,7 +58,7 @@ function Seq:set_grid()
 					
 					if step_value and step_value > 0 then
 						if i == self.step then
-							self.grid.led[x][y] = 1
+							self.grid.led[x][y] = rainbow_on[step_value]
 						else
 							self.grid.led[x][y] = rainbow_off[step_value]
 						end
@@ -136,24 +136,6 @@ function Seq:transport_event(data)
 			
 			if self.display then
 				self:set_grid()
-        		--[[if step_page == l.page then
-					
-        			if  last_value == 0 then
-						self.grid.led[l.x][l.y] = {5,5,5}
-					else
-						self.grid.led[l.x][l.y] = rainbow_off[last_value]
-					end
-				else
-					
-					self.grid.led[l.x][l.y] = 100
-					
-        		end
-        
-        		if value == 0 and step_page == self.page then
-        			self.grid.led[c.x][c.y] = 1
-        		elseif step_page == self.page then
-        			self.grid.led[c.x][c.y] = rainbow_on[value]
-        		end]]
 			end
 		end
 	end
@@ -236,14 +218,13 @@ function Seq:grid_event(data)
     			self.grid.led[9][1] = 0
     		elseif  index <= self.length then
     		
-            	if value == 0 then
+            	if self.value[index] ~= self.select_action then
             		-- Turn on
             		self.note_select = index
             		self.value[index] = self.select_action
             		self.grid.led[x][y] = rainbow_off[self.select_action]
             		self.select_step = index
-            		self.grid:redraw()
-            	else
+				else
             		-- Turn off
             		self.value[index] = 0
             		self.select_step = index
