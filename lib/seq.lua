@@ -9,30 +9,40 @@ function Seq:new (o)
     
     setmetatable(o, self)
     self.__index = self
-
-    o.grid = o.grid
+	
+	o.id = o.id or 1
+    o.grid = g
     o.grid_start = o.grid_start or {x = 1, y = 8}
     o.grid_end = o.grid_end or {x = 8, y = 5}
-	o.bounds = o.grid.get_bounds(o.grid_start,o.grid_end)
+	o.bounds = o.bounds or o.grid.get_bounds(o.grid_start,o.grid_end)
     o.div = o.div or 12
     o.select_step = 1
     o.select_action = 1
-    o.map = {}
+    o.map = o.map or {}
+    o.bank = o.bank or 1
     o.value = o.value or {}
     o.length = o.length or 32
-    o.tick = 1
-    o.step = 1
-	o.page = 1
+    o.tick = o.tick or 1
+    o.step = o.step or 1
+	o.page = o.page or 1
     o.actions = o.actions or 16
-    o.action = o.action or function(value) print('Step ' .. o.step .. ' : Action ' .. value) end
+    o.action = o.action or function(value)  end
     o.display = o.display or false
+	o.on_grid = o.on_grid
+	o.on_transport = o.on_transport
 	
+	if(o.enabled == nil) then
+		o.enabled = true
+	end
+	
+	for i = 1, 16 do
+	    o.value[i] = {}
+	end
+		
     o:set_length(o.length)
     
 	return o
 end
-
-
 
 function Seq:set_grid()
 	if self.display then
@@ -54,7 +64,7 @@ function Seq:set_grid()
 				if i > self.length then
 					self.grid.led[x][y] = 0 -- No steps / pattern is short	
 				else
-					local step_value = self.value[i]
+					local step_value = self.value[self.bank][i]
 					
 					if step_value and step_value > 0 then
 						if i == self.step then
@@ -74,22 +84,24 @@ function Seq:set_grid()
 			end
 		end
 
-		self.grid.led[1][9] = {20,20,20}
-		self.grid.led[2][9] = {20,20,20}
-		
-		if self.page > 1 then
-			self.grid.led[3][9] = {20,20,20}
-		else
-			self.grid.led[3][9] = 0
+		if( not self.grid.toggled[9][1]) then
+			self.grid.led[1][9] = {20,20,20}
+			self.grid.led[2][9] = {20,20,20}
+			
+			if self.page > 1 then
+				self.grid.led[3][9] = {20,20,20}
+			else
+				self.grid.led[3][9] = 0
+			end
+
+			if self.page < page_count then
+				self.grid.led[4][9] = {20,20,20}
+			else
+				self.grid.led[4][9] = 0
+			end
 		end
 
-		if self.page < page_count then
-			self.grid.led[4][9] = {20,20,20}
-		else
-			self.grid.led[4][9] = 0
-		end
-
-		self.grid.led[9][9] = rainbow_off[self.select_action]
+		self.grid.led[9][9] = rainbow_on[self.select_action]
 		
 		self.grid:redraw()
 	end
@@ -102,6 +114,7 @@ function Seq:set_length(length)
 		self.map[i] = self.grid.index_to_grid(util.wrap(i,1,wrap), self.grid_start, self.grid_end)
 		self.map[i].page = math.ceil(i/wrap)
 	end
+	params:set('mode_' .. self.id .. '_length',length)
 	self.length = length
 end
 
@@ -127,11 +140,17 @@ function Seq:transport_event(data)
 			local l = self.map[last_step]
 			local c = self.map[next_step]
 
-			local last_value = self.value[last_step] or 0
-			local value = self.value[next_step] or 0
+			local last_value = self.value[self.bank][last_step] or 0
+			local value = self.value[self.bank][next_step] or 0
 			
-			if value > 0 then 
+			if self.enabled then 
+			    
 			    self.action(value)
+			    
+		    	if self.on_transport ~= nil then
+                    self:on_transport(data)
+		    	end
+            
 			end
 			
 			if self.display then
@@ -146,6 +165,7 @@ function Seq:transport_event(data)
 		self.step = self.length
 	end
 	
+
 end
 
 
@@ -159,16 +179,74 @@ function Seq:grid_event(data)
     	
     	if(x == 1 and y == 9 and data.state) then
     		-- up
-    		self.select_action = util.wrap(self.select_action + 1, 1, self.actions)
-    		self.grid.led[9][9] = rainbow_off[self.select_action]
-    		self.grid:redraw()
+			if alt then
+				local div = params:get('mode_' .. self.id .. '_div',div) - 1
+				if div < 1 then 
+					return false
+				end
+				print('Increased resolution of Mode ' .. self.id)
+				params:set('mode_' .. self.id .. '_div',div)
+
+				local length = self.length * 2
+				local old_value = self.value[self.bank]
+				local new_value = {}
+				
+				for i=1, length do
+					if math.fmod(i,2) == 1 then
+					new_value[#new_value + 1] = old_value[math.ceil(i/2)]
+					else
+					new_value[#new_value + 1] = 0
+					end
+				end
+				
+				self.value[self.bank] = new_value
+				self:set_length(length)
+
+				set_alt(false)
+				
+				self:set_grid()			  
+			else
+				self.select_action = util.wrap(self.select_action + 1, 1, self.actions)
+				self.grid.led[9][9] = rainbow_off[self.select_action]
+				self.grid:redraw()
+			end
     	end
     	
     	if(x == 2 and y == 9 and data.state) then
     		-- down
-    		self.select_action = util.wrap(self.select_action - 1, 1, self.actions)
-    		self.grid.led[9][9] = rainbow_off[self.select_action]
-    		self.grid:redraw()
+
+			if alt then
+				local div =  params:get('mode_' .. self.id .. '_div',div) + 1
+
+				if div > 10 then 
+					return false
+				end
+				print('Decreased resolution of Mode ' .. self.id)
+				params:set('mode_' .. self.id .. '_div',div)
+
+				self.div = 3 * 2^(div)
+				local length = math.ceil(self.length / 2)
+				
+				local old_value = self.value[self.bank]
+				local new_value = {}
+				
+				for i=1, length do
+					local index = 2 * i - 1
+					new_value[i] = old_value[index]
+				
+				end
+				
+				self.value[self.bank] = new_value
+				self:set_length(length)
+
+				set_alt(false)
+				
+				self:set_grid()	
+			else
+				self.select_action = util.wrap(self.select_action - 1, 1, self.actions)
+				self.grid.led[9][9] = rainbow_off[self.select_action]
+				self.grid:redraw()
+			end
     	end
     	
     	if(x == 3 and y == 9 and data.state) then
@@ -177,8 +255,7 @@ function Seq:grid_event(data)
     		if alt and self.length > 32 then
     			print('Remove Page')
     		    self:set_length (self.length - 32)
-    			self.grid.toggled[9][1] = false
-    			self.grid.led[9][1] = 0
+    			set_alt(false)
     		else
     		    local wrap = self.bounds.height * self.bounds.width 
     		    self.page = util.clamp(self.page - 1, 1, math.ceil(self.length/wrap) )
@@ -194,11 +271,10 @@ function Seq:grid_event(data)
     				local previous_length = self.length
     				self:set_length(math.ceil(self.length/32) * 32 + 32)
     				for i = 1, 32 do
-    					self.value[previous_length + i] = self.value[i]
+    					self.value[self.bank][previous_length + i] = self.value[self.bank][i]
     				end
     			end
-    			self.grid.toggled[9][1] = false
-    			self.grid.led[9][1] = 0
+    			set_alt(false)
     		else
     			local wrap = self.bounds.height * self.bounds.width 
     			self.page = util.clamp(self.page + 1, 1, math.ceil(self.length/wrap) )
@@ -208,37 +284,74 @@ function Seq:grid_event(data)
     
     	if(index ~= false and data.state) then
     		index = index + (self.page - 1) * (self.bounds.height * self.bounds.width)
-    		local value = self.value[index] or 0
+    		local value = self.value[self.bank][index] or 0
     		
     		if (alt) then
-    		    print('length increased')
     		    self:set_length(index)
                 self:set_grid()
-    			self.grid.toggled[9][1] = false
-    			self.grid.led[9][1] = 0
+    			set_alt(false)
     		elseif  index <= self.length then
     		
-            	if self.value[index] ~= self.select_action then
+            	if self.value[self.bank][index] ~= self.select_action then
             		-- Turn on
             		self.note_select = index
-            		self.value[index] = self.select_action
+            		self.value[self.bank][index] = self.select_action
             		self.grid.led[x][y] = rainbow_off[self.select_action]
             		self.select_step = index
 				else
             		-- Turn off
-            		self.value[index] = 0
+            		self.value[self.bank][index] = 0
             		self.select_step = index
             		self.grid.led[x][y] = {5,5,5}
             	end
-            	
-            	if alt then
-            	    
-            	end
+
             end
     	end
     	
     	self.grid:redraw()
     end
+end
+
+function Seq:alt_event(alt)
+	local div = params:get('mode_' .. self.id .. '_div', div)
+	local page_count = math.ceil(self.length / 32)
+	if alt then
+		if div == 1 then
+			self.grid.led[1][9] = 0
+			self.grid.led[2][9] = {3,true}
+		elseif div == 10 then
+			self.grid.led[2][9] = 0
+			self.grid.led[1][9] = {3,true}
+		else
+			self.grid.led[1][9] = {3,true}
+			self.grid.led[2][9] = {3,true}
+		end
+
+		if page_count == 4 then
+			self.grid.led[4][9] = 0
+			self.grid.led[3][9] = {3,true}
+		elseif page_count == 1 then
+			self.grid.led[3][9] = 0
+			self.grid.led[4][9] = {3,true}
+		else
+			self.grid.led[3][9] = {3,true}
+			self.grid.led[4][9] = {3,true}
+		end
+
+		if self.on_alt ~= nil then
+			self:on_alt(alt)
+		end
+
+		self.grid:redraw()
+	else
+
+		if self.on_alt ~= nil then
+			self:on_alt(alt)
+		end
+		
+		self:set_grid()
+		self.grid:redraw()
+	end
 end
 
 return Seq

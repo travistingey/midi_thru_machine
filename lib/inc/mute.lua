@@ -3,8 +3,9 @@ Mute = {
     grid_end = {x = 4, y = 4},
     state = {},
     transport_event = function(data)
+        local alt = get_alt()
         -- react only to drum pads
-        if data.ch == 10 and drum_map[data.note] then
+        if data.ch == 10 and drum_map[data.note] and not alt then
             local target = drum_map[data.note]
     
             if (not Mute.state[data.note]) then
@@ -36,13 +37,12 @@ Mute = {
 
         local x = data.x
         local y = data.y
-        local alt = g.toggled[9][1]
+        local alt = get_alt()
     
         if data.state and MidiGrid.in_bounds(data, Mute.bounds) then
     
             if alt then 
-                g.toggled[9][1] = false
-                print('alt' .. g.toggled[9][1])
+                set_alt(false)
             else
                 local index = grid_map[x][y].note
                 Mute.state[index] = s.toggled[x][y]

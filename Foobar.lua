@@ -3,8 +3,9 @@
 -- Manage global variables
 -- Turn Mutes, Presets and OG_Seq into proper objects and remove from init
 -- CLEANUP: Utility functions of MidiGrid like get_bounds should reference self rather than inputs.
+script_name = 'Foobar'
+path_name = script_name .. '/lib/'
 
-local path_name = 'Foobar/lib/'
 MidiGrid = require(path_name .. 'midigrid')
 Seq = require(path_name .. 'seq')
 musicutil = require('musicutil')
@@ -48,7 +49,7 @@ grid_map[2][4] = {note = 49, index = 14}
 grid_map[3][4] = {note = 50, index = 15}
 grid_map[4][4] = {note = 51, index = 16}
 	
----------------------------------------
+------------------------------------------------------------------------------
 
 function set_scale(i,d)
 	o = o or 0
@@ -58,8 +59,21 @@ function set_scale(i,d)
 	screen_dirty = true
 end
 
+------------------------------------------------------------------------------
 
--------------------
+function set_alt(state)
+	if(state) then
+		g.led[9][1] = {3,true}
+		g.toggled[9][1] = true
+		Mode[Mode.select]:alt_event(true)
+	else
+		g.led[9][1] = 0
+		g.toggled[9][1] = false
+		Mode[Mode.select]:alt_event(false)
+	end
+end
+
+function get_alt() return g.toggled[9][1] end
 
 function init()
     
@@ -77,10 +91,7 @@ function init()
 	Input[1] = {note = 0, octave = 0, volts = 0, index = 1}
 	Input[2] = {note = 0, octave = 0, volts = 0, index = 1}
 	
-	Output[1] = {}
-	Output[2] = {}
-	Output[3] = {}
-	Output[4] = {}
+	
 
 	set_scale(1,1)
 	set_scale(1,2)
@@ -101,6 +112,16 @@ function init()
 	include(path_name .. 'inc/preset')
 	include(path_name .. 'inc/mode')
 
+
+	for i=1,4 do
+		local out = 'crow_out_' .. i .. '_'
+		Output[i] = {
+			type = params:get(out .. 'type'),
+			source = params:get(out .. 'source'),
+			trigger = params:get(out .. 'trigger')
+		}
+	end
+
 	-- Devices
     crow.input[1].scale = function(s)
 		Input[1] = s
@@ -112,23 +133,20 @@ function init()
 
 	g = MidiGrid:new({event = grid_event, channel = 3})
 	
-
-	
-	
-
 	transport = midi.connect(1)
 	midi_out = midi.connect(2)
+		
+    Mute:set_grid()
 	
-	Mode:load()
-	g.led[5][9] = 3
-	g.led[9][8] = 3
-	
-    Mute.set_grid()
-    Preset.load(1)
     
+	
 	-- Transport Event Handler for incoming MIDI notes from the Beatstep Pro.
 	transport.event = transport_event
-
+	params:default()
+	Mode:load()
+	g.led[9][9 - params:get('drum_bank')] = 3 -- Set Drum Bank
+	Preset.load(1)
+	g:redraw()
 end -- end Init
 
 
@@ -147,38 +165,31 @@ function transport_event(msg)
 
 	-- note on/off events
 	Mute.transport_event(data)
-	
+
 	-- Process Outputs
 	if (data.ch == 10) then
 		
 		for i = 1,4 do
 			if Output[i].trigger == data.note then
-				print('output trigger, line 206')
-			end
-		end
-		
-		if drum_map[data.note].output then
-			for i=1, #drum_map[data.note].output do
-				
-				local output = drum_map[data.note].output[i]
-				
-				if output.type == 'crow_voct' and data.type == 'note_on' then
+				if(Output[i].type == 'v/oct') and data.type == 'note_on' then
 					local root = scale_root * 1/12
-					crow.output[output.out].volts = Input[output.input].volts + root
-				elseif output.type == 'crow_gate' then
-					if (data.type == 'note_on') then
-						crow.output[output.out].volts = 5
-					elseif(data.type == 'note_off') then
-						crow.output[output.out].volts = 0
+					local volts = Input[Output[i].source].volts + root
+					crow.output[i].volts = volts
+				elseif(Output[i].type == 'gate')then
+					if data.type == 'note_on' then
+						crow.output[i].volts = 5
+					elseif data.type == 'note_off' then
+						crow.output[i].volts = 0
 					end
 				end
 			end
-		else
-			if(drum_map[data.note].state) then
-				midi_out:send(data)
-			elseif(drum_map[data.note].state == false) then
-			end
 		end
+		
+		if(drum_map[data.note].state) then
+			midi_out:send(data)
+		elseif(drum_map[data.note].state == false) then
+		end
+		
 	end
 
 	g:redraw()
@@ -189,6 +200,7 @@ end
 -- param s = self, MidiGrid instance
 -- param data = { x = 1-9, y = 1-9, state = boolean }
 function grid_event(s, data)
+	screen:ping()
 	handle_function_grid(s, data)
 	
 	Mode[Mode.select]:grid_event(data)
@@ -204,14 +216,14 @@ end
 function handle_function_grid(s, data)
 	local x = data.x
 	local y = data.y
-	local alt = s.toggled[9][1]
+	local alt = get_alt()
 
 	-- Alt button
 	if x == 9 and y == 1 then
-		if(s.toggled[x][y])then
-			s.led[9][1] = {3, true}
+		if(alt)then
+			set_alt(true)
 		else
-			s.led[9][1] = 0
+			set_alt(false)
 		end
 	end
 
@@ -219,7 +231,7 @@ function handle_function_grid(s, data)
 	if x == 9 and y > 1 and data.state then
 
 		local bank_select = 9 - y
-		
+
 		if(alt) then
 			if bank_select == current_bank then
 				print('we gonna save this PSET')
@@ -227,8 +239,7 @@ function handle_function_grid(s, data)
 				print('we gonna load this PSET')
 			end
 			
-			g.toggled[9][1] = false
-			g.led[9][1] = 0
+			set_alt(false)
 			
 		elseif bank_select ~= current_bank then
 			current_bank = bank_select
@@ -239,26 +250,12 @@ function handle_function_grid(s, data)
 				s.led[9][i] = 0
 			end
 
-			s.led[9][y] = 1
+			s.led[9][y] = 3
 			params:set('drum_bank', current_bank)
 		end
 	end
 
-	-- Mode Select
-	if x > 4 and y == 9 and data.state then
-		Mode.select = x - 4
-		print('Current Mode ' .. Mode.select)
-		Mode:set_mode(x - 4)
-		
-			
-		for i = 5, 8 do 
-			if i == x then
-				s.led[i][9] = 3
-			else
-				s.led[i][9] = 0
-			end
-		end
-	end
+	Mode:grid_event(data)
 end
 
 
@@ -266,7 +263,7 @@ function enc(e, d) --------------- enc() is automatically called by norns
     local bank = 'bank_' .. Preset.select .. '_'
    
 	if e == 1 then
-	    scale_root = util.clamp(scale_root + d,-11,11)
+	    scale_root = util.clamp(scale_root + d,-24,24)
 	end -- turn encoder 1
 	
 	if e == 2 then
@@ -305,17 +302,68 @@ function redraw_clock() ----- a clock that draws space
 	end
 end
 
-
+fonts = {
+	{name = '04B_03', face = 1, size = 8},
+	{name = 'ALEPH', face = 2, size = 8},
+	{name = 'tom-thumb', face = 25, size = 6},
+	{name = 'creep', face = 26, size = 16},
+	{name = 'ctrld', face = 27, size = 10},
+	{name = 'ctrld', face = 28, size = 10},
+	{name = 'ctrld', face = 29, size = 13},
+	{name = 'ctrld', face = 30, size = 13},
+	{name = 'ctrld', face = 31, size = 13},
+	{name = 'ctrld', face = 32, size = 13},
+	{name = 'ctrld', face = 33, size = 16},
+	{name = 'ctrld', face = 34, size = 16},
+	{name = 'ctrld', face = 35, size = 16},
+	{name = 'ctrld', face = 36, size = 16},
+	{name = 'scientifica', face = 37, size = 11},
+	{name = 'scientifica', face = 38, size = 11},
+	{name = 'scientifica', face = 39, size = 11},
+	{name = 'ter', face = 40, size = 12},
+	{name = 'ter', face = 41, size = 12},
+	{name = 'ter', face = 42, size = 14},
+	{name = 'ter', face = 43, size = 14},
+	{name = 'ter', face = 44, size = 14},
+	{name = 'ter', face = 45, size = 16},
+	{name = 'ter', face = 46, size = 16},
+	{name = 'ter', face = 47, size = 16},
+	{name = 'ter', face = 48, size = 18},
+	{name = 'ter', face = 49, size = 18},
+	{name = 'ter', face = 50, size = 20},
+	{name = 'ter', face = 51, size = 20},
+	{name = 'ter', face = 52, size = 22},
+	{name = 'ter', face = 53, size = 22},
+	{name = 'ter', face = 54, size = 24},
+	{name = 'ter', face = 55, size = 24},
+	{name = 'ter', face = 56, size = 28},
+	{name = 'ter', face = 57, size = 28},
+	{name = 'ter', face = 58, size = 32},
+	{name = 'ter', face = 59, size = 32},
+	{name = 'unscii', face = 60, size = 16},
+	{name = 'unscii', face = 61, size = 16},
+	{name = 'unscii', face = 62, size = 8},
+	{name = 'unscii', face = 63, size = 8},
+	{name = 'unscii', face = 64, size = 8},
+	{name = 'unscii', face = 65, size = 8},
+	{name = 'unscii', face = 66, size = 16},
+	{name = 'unscii', face = 67, size = 8}
+}
+font_select = 1
 function redraw() -------------- redraw() is automatically called by norns
+	local font = fonts[font_select]
 	screen.clear() --------------- clear space
 	screen.aa(1) ----------------- enable anti-aliasing
-	screen.font_face(1) ---------- set the font face to "04B_03"
-	screen.font_size(8) ---------- set the size to 8
+	screen.font_face(font.face)
+	screen.font_size(font.size)
 	screen.level(15) ------------- max
 	screen.move(2,10)
 	screen.text(musicutil.note_num_to_name(scale_root, false) .. ' ' .. musicutil.SCALES[scale_one].name )
 	screen.move(2,20)
 	screen.text(musicutil.note_num_to_name(scale_root, false) .. ' ' .. musicutil.SCALES[scale_two].name )
+
+	screen.move(127,10)
+	screen.text_right(scale_root)
 
 	local display = message
 	local y = 40
@@ -370,6 +418,13 @@ function unrequire(name)
 	_G[name] = nil
 end
 
+function concat_table(t1,t2)
+	for i=1,#t2 do
+	   t1[#t1+1] = t2[i]
+	end
+	return t1
+ end
+ 
 function r() ----------------------------- execute r() in the repl to quickly rerun this script
 	unrequire(path_name .. 'midigrid')
 	unrequire(path_name .. 'seq')
