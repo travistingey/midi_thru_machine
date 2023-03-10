@@ -1,14 +1,14 @@
 Mode = {}
-
-function Mode:save()
-    tab.save(Mode, '')
-end
-
 Mode.types = {{
 	name = 'Song Mode',
+	type = 1,
 	class = Seq,
 	actions = 16,
-	action = function(d) if(d > 0) then Preset.load(d) end end,
+	action = function(s,d)
+		if(d > 0) then
+			Preset.load(d)
+		end
+	end,
 	on_grid = function(s,data)
 	    
 	    local x = data.x
@@ -17,8 +17,8 @@ Mode.types = {{
         
         if (index ~= false and data.state) then
             
-    	    s.select_action = Preset.select
-            g.led[9][9] = rainbow_on[Preset.select]
+    	    s.select_action = index
+            g.led[9][9] = rainbow_on[index]
             
             g:redraw()
         end
@@ -26,9 +26,10 @@ Mode.types = {{
     end
 },{
 	name = 'Drum Effects',
+	type = 2,
 	class = Seq,
 	actions = 4,
-	action = function(d)
+	action = function(s,d)
        if(d == 1) then
             transport:cc(9,26,16)
        elseif(d == 2) then
@@ -67,20 +68,27 @@ Mode.types = {{
 		end
 	end
          
+},{
+	name = 'Key Mode',
+	type = 3,
+	class = Keys
+
 }}
 
+
+
 function Mode:load(data)
-	if data then
+	
 		for i = 1, 4 do
 			local t = params:get('mode_' .. i .. '_type')
-			self[i] = self.types[t].class:new(data[i])
-		end
-	else
-		print('Mode Init')
-		for i = 1, 4 do
-			local t = params:get('mode_' .. i .. '_type')
-			
-			self[i] = self.types[t].class:new()
+
+			if data and data[i] then
+				self[i] = self.types[t].class:new(data[i])
+			else
+				self[i] = self.types[t].class:new()
+			end
+
+
 			self[i].on_grid = self.types[t].on_grid
 			self[i].on_alt = self.types[t].on_alt
 			self[i].on_transport = self.types[t].on_transport
@@ -88,11 +96,15 @@ function Mode:load(data)
 			self[i].actions = self.types[t].actions
 			self[i].id = i
 			
-			if(self.types[t].actions) then
+			if( self.types[t].actions ) then
 				self[i].actions = self.types[t].actions
 			end
+			
+			if( self.types[t].on_init ~= nil ) then
+			    self.types[t].on_init(self[i])
+			end
+			
 		end
-	end
 	
 	self[1].display = true
 	g.led[5][9] = 3

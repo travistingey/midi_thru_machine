@@ -5,7 +5,7 @@ Mute = {
     transport_event = function(data)
         local alt = get_alt()
         -- react only to drum pads
-        if data.ch == 10 and drum_map[data.note] and not alt then
+        if data.ch == 10 and drum_map[data.note] then
             local target = drum_map[data.note]
     
             if (not Mute.state[data.note]) then

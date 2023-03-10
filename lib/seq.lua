@@ -18,11 +18,12 @@ function Seq:new (o)
     o.div = o.div or 12
     o.select_step = 1
     o.select_action = 1
+	o.type = o.type or 1
     o.map = o.map or {}
     o.bank = o.bank or 1
     o.value = o.value or {}
     o.length = o.length or 32
-    o.tick = o.tick or 1
+    o.tick = o.tick or 0
     o.step = o.step or 1
 	o.page = o.page or 1
     o.actions = o.actions or 16
@@ -30,15 +31,18 @@ function Seq:new (o)
     o.display = o.display or false
 	o.on_grid = o.on_grid
 	o.on_transport = o.on_transport
+	o.data = o.data or {}
+	
 	
 	if(o.enabled == nil) then
 		o.enabled = true
 	end
 	
-	for i = 1, 16 do
-	    o.value[i] = {}
+	if(#o.value == 0) then 
+		for i = 1, 16 do
+			o.value[i] = {}
+		end
 	end
-		
     o:set_length(o.length)
     
 	return o
@@ -101,7 +105,7 @@ function Seq:set_grid()
 			end
 		end
 
-		self.grid.led[9][9] = rainbow_on[self.select_action]
+		self.grid.led[9][9] = rainbow_on[util.wrap(self.select_action,1,#rainbow_on)]
 		
 		self.grid:redraw()
 	end
@@ -123,7 +127,7 @@ function Seq:transport_event(data)
 	-- Tick based sequencer running on 16th notes at 24 PPQN
 	if data.type == 'clock' then
 		
-		self.tick = util.wrap(self.tick + 1, 1, self.div * self.length)
+		self.tick = util.wrap(self.tick + 1, 0, self.div * self.length - 1)
 
 		local next_step = util.wrap(math.floor(self.tick / self.div) + 1, 1, self.length)
 		local last_step = self.step
@@ -145,11 +149,9 @@ function Seq:transport_event(data)
 			
 			if self.enabled then 
 			    
-			    self.action(value)
+			    self:action(value)
 			    
-		    	if self.on_transport ~= nil then
-                    self:on_transport(data)
-		    	end
+		    	
             
 			end
 			
@@ -159,9 +161,13 @@ function Seq:transport_event(data)
 		end
 	end
 
+	if self.on_transport ~= nil and self.enabled then
+		self:on_transport(data)
+	end
+
 	-- Note: 'Start' is called at the beginning of the sequence
 	if data.type == 'start' then
-		self.tick = 0
+		self.tick = self.div * self.length - 1
 		self.step = self.length
 	end
 	
@@ -207,7 +213,7 @@ function Seq:grid_event(data)
 				self:set_grid()			  
 			else
 				self.select_action = util.wrap(self.select_action + 1, 1, self.actions)
-				self.grid.led[9][9] = rainbow_off[self.select_action]
+				self.grid.led[9][9] = rainbow_on[self.select_action]
 				self.grid:redraw()
 			end
     	end
@@ -244,7 +250,7 @@ function Seq:grid_event(data)
 				self:set_grid()	
 			else
 				self.select_action = util.wrap(self.select_action - 1, 1, self.actions)
-				self.grid.led[9][9] = rainbow_off[self.select_action]
+				self.grid.led[9][9] = rainbow_on[self.select_action]
 				self.grid:redraw()
 			end
     	end

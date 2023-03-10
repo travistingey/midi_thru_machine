@@ -7,6 +7,10 @@ Preset = {
         set_mute = (params:get('preset_set_mute') > 0),
         set_scales = (params:get('preset_set_scales') > 0),
         set_pattern = (params:get('preset_set_pattern') > 0),
+        set_seq1 = (params:get('preset_set_seq1') > 0),
+        set_seq2 = (params:get('preset_set_seq2') > 0),
+        save_seq1 = (params:get('preset_save_seq1') > 0),
+        save_seq2 = (params:get('preset_save_seq2') > 0),
         save_mute = (params:get('preset_save_mute') > 0),
         save_scales = (params:get('preset_save_scales') > 0),
         save_pattern = (params:get('preset_save_pattern') > 0)
@@ -60,16 +64,34 @@ Preset = {
 
         if Preset.options['set_pattern'] then
             local pattern = params:get( bank .. 'drum_pattern')
-            transport:program_change(pattern - 1,10)
+            local channel = params:get('bsp_drum_channel')
+            transport:program_change(pattern - 1, channel)
+        end
+
+        if Preset.options['set_seq1'] then
+            local pattern = params:get( bank .. 'seq1_pattern')
+            local channel = params:get( 'bsp_seq1_channel')
+            transport:program_change(pattern - 1, channel)
+        end
+
+        if Preset.options['set_seq2'] then
+            local pattern = params:get( bank .. 'seq2_pattern')
+            local channel = params:get( 'bsp_seq2_channel')
+            transport:program_change(pattern - 1, channel)
         end
 
         if Preset.options['set_scales'] then
-            scale_root = params:get(bank .. 'scale_root')
-            scale_one = params:get( bank .. 'scale_one')
-            scale_two = params:get(bank .. 'scale_two')
-
-            set_scale(scale_one,1)
-            set_scale(scale_two,2)
+            
+            Scale[1].bits = params:get(bank .. 'scale_1')
+            Scale[2].bits = params:get(bank .. 'scale_2')
+            Scale[1].root = params:get(bank .. 'scale_1_root')
+            Scale[2].root = params:get(bank .. 'scale_2_root')
+            
+            set_scale(Scale[1].bits,1)
+            set_scale(Scale[2].bits,2)
+            
+            
+            
         end
                
         if Preset.options['set_mute'] then
@@ -106,11 +128,22 @@ Preset = {
             local pattern = params:get( current_bank .. 'drum_pattern')
             params:set( bank .. 'drum_pattern', pattern )
         end
+
+        if(Preset.options['save_seq1']) then
+            local pattern = params:get( current_bank .. 'seq1_pattern')
+            params:set( bank .. 'seq1_pattern', pattern )
+        end
+
+        if(Preset.options['save_seq2']) then
+            local pattern = params:get( current_bank .. 'seq2_pattern')
+            params:set( bank .. 'seq2_pattern', pattern )
+        end
         
         if(Preset.options['save_scales']) then
-            params:set( bank .. 'scale_root', scale_root )
-            params:set( bank .. 'scale_one', scale_one )
-            params:set( bank .. 'scale_two', scale_two )
+            params:set( bank .. 'scale_1_root', Scale[1].root )
+            params:set( bank .. 'scale_1', Scale[1].bits )
+            params:set( bank .. 'scale_2_root', Scale[2].root )
+            params:set( bank .. 'scale_2', Scale[2].bits )
         end
 
         Preset.bank[i] = {}

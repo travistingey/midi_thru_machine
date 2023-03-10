@@ -1,13 +1,13 @@
 -- TO DOs:
--- Make multimode sequencer
--- Manage global variables
--- Turn Mutes, Presets and OG_Seq into proper objects and remove from init
+-- Sequencers not saving patterns and loading time divisions
 -- CLEANUP: Utility functions of MidiGrid like get_bounds should reference self rather than inputs.
+-- Re-architect use of MidiGrid to allow for sub-grids. functions like get bounds, index of etc can reference themselves
 script_name = 'Foobar'
 path_name = script_name .. '/lib/'
 
 MidiGrid = require(path_name .. 'midigrid')
 Seq = require(path_name .. 'seq')
+Keys = require(path_name .. 'keys')
 musicutil = require('musicutil')
 util = require('util')
 
@@ -50,26 +50,114 @@ grid_map[3][4] = {note = 50, index = 15}
 grid_map[4][4] = {note = 51, index = 16}
 	
 ------------------------------------------------------------------------------
+function intervals_to_bits(t,d)
+	t = t or musicutil.SCALES[1].intervals
 
-function set_scale(i,d)
-	o = o or 0
-	scale_name = musicutil.SCALES[i].name
-	scale = musicutil.generate_scale(0,scale_name,5)
-	crow.input[d].mode('scale',scale)
-	screen_dirty = true
+	local bits = 0
+
+	for i=1, #t do
+		if t[i] == 12 then
+			bits = bits | 1
+		else
+			bits = bits | (1 << math.fmod(t[i],12) )
+		end
+	end
+
+	return bits
 end
 
+function bits_to_intervals(b,d)
+	local intervals = {}
+	for i=1, 12 do
+		if (b & (1 << i - 1) > 0) then
+			intervals[#intervals + 1] = i - 1
+		end
+	end
+
+	return intervals
+end
+
+
+function set_scale(i,d)
+	Scale[d].bits = i
+	Scale[d].intervals = bits_to_intervals(i)
+	
+	-- crow.input[d].mode('scale',scale)
+	screen_dirty = true
+
+
+	-- Update leds for Keys mode
+	if Mode and Mode.select == 3 then
+		Mode[3]:set_grid()
+	end
+end
+
+interval_lookup = {}
+
+for i=1, #musicutil.SCALES do
+	local bits = intervals_to_bits(musicutil.SCALES[i].intervals)
+	interval_lookup[bits] = musicutil.SCALES[i]
+end
+
+for i=1, #musicutil.CHORDS do
+	local chord = musicutil.CHORDS[i].intervals
+
+	for i=1, #chord do
+		chord[i] = math.fmod(chord[i],12)
+	end
+	local bits = intervals_to_bits(chord)
+
+	if(interval_lookup[bits] == nil )then
+		interval_lookup[bits] = musicutil.CHORDS[i]
+	end
+
+	
+end
+
+function select_interval(index)
+	local i = 1
+	for key,value in pairs(interval_lookup) do
+		if(i == index) then
+			return value
+		else
+			i = i + 1
+		end
+	end
+	return {}
+end
+
+
 ------------------------------------------------------------------------------
+
+function shift_scale(s,degree)
+	degree = math.fmod(degree,12) or 0
+	local scale = s
+
+	if degree > 0 then
+		scale = ((s >> degree) | (s << 12 - degree) ) & 4095
+	else
+		scale = ((s << math.abs(degree)) | (s >> 12 - math.abs(degree)) ) & 4095
+	end
+	
+	local name = interval_lookup[scale]
+
+	return scale
+end
+
 
 function set_alt(state)
 	if(state) then
 		g.led[9][1] = {3,true}
 		g.toggled[9][1] = true
-		Mode[Mode.select]:alt_event(true)
+		if(Mode[Mode.select].alt_event ~= nil) then
+			Mode[Mode.select]:alt_event(true)
+		end
 	else
 		g.led[9][1] = 0
 		g.toggled[9][1] = false
-		Mode[Mode.select]:alt_event(false)
+		if(Mode[Mode.select].alt_event ~= nil) then
+			Mode[Mode.select]:alt_event(false)
+		end
 	end
 end
 
@@ -85,23 +173,33 @@ function init()
 	for i=1, 16 do
 		rainbow_off[i] = {math.floor(rainbow_on[i][1]/4),math.floor(rainbow_on[i][2]/4),math.floor(rainbow_on[i][3]/4)}
 	end
+	
     Input = {{},{}}
     Output = {{},{},{},{}}
 
+	Scale = {{
+		bits = 1,
+		root = 0
+	},{
+		bits = 1,
+		root = 0
+	}}  
+	
 	Input[1] = {note = 0, octave = 0, volts = 0, index = 1}
 	Input[2] = {note = 0, octave = 0, volts = 0, index = 1}
-	
-	
 
 	set_scale(1,1)
 	set_scale(1,2)
 	
-	scale_one = 1
-	scale_two = 1
-    scale_root = 0
+	crow.input[1].stream = function (d) Input[1].volts = d end
+	crow.input[2].stream = function (d) Input[2].volts = d end
     
 	current_bank = 1
-
+    
+    
+    last_tick = 0
+    tick_time = 0
+	
 	message = ''
 	screen_dirty = true
 	redraw_clock_id = clock.run(redraw_clock)
@@ -123,13 +221,16 @@ function init()
 	end
 
 	-- Devices
-    crow.input[1].scale = function(s)
-		Input[1] = s
-	end
+    -- crow.input[1].scale = function(s)
+	-- 	Input[1] = s
+	-- end
 	
-	crow.input[2].scale = function(s)
-		Input[2] = s
-	end
+	-- crow.input[2].scale = function(s)
+	-- 	Input[2] = s
+	-- end
+
+
+
 
 	g = MidiGrid:new({event = grid_event, channel = 3})
 	
@@ -138,14 +239,14 @@ function init()
 		
     Mute:set_grid()
 	
-    
-	
 	-- Transport Event Handler for incoming MIDI notes from the Beatstep Pro.
 	transport.event = transport_event
+	
 	params:default()
-	Mode:load()
+	
 	g.led[9][9 - params:get('drum_bank')] = 3 -- Set Drum Bank
 	Preset.load(1)
+	Mode:load(Mode)
 	g:redraw()
 end -- end Init
 
@@ -153,9 +254,17 @@ end -- end Init
 
 function transport_event(msg)
 	local data = midi.to_msg(msg)
-	
-	if (data.type == 'clock' or data.type == 'start' or data.type == 'stop' or
-		data.type == 'continue') then midi_out:send(data) end
+
+    if(data.type == 'start' or data.type == 'continue') then
+        playing = true
+    end
+    
+    if(data.type == 'stop') then
+        playing = false
+    end
+
+	-- note on/off events
+	Mute.transport_event(data)
 
 	-- clock events
 	Mode[1]:transport_event(data)
@@ -163,17 +272,27 @@ function transport_event(msg)
 	Mode[3]:transport_event(data)
 	Mode[4]:transport_event(data)
 
-	-- note on/off events
-	Mute.transport_event(data)
-
 	-- Process Outputs
-	if (data.ch == 10) then
+	if (data.ch == params:get('bsp_drum_channel')) then
 		
 		for i = 1,4 do
 			if Output[i].trigger == data.note then
 				if(Output[i].type == 'v/oct') and data.type == 'note_on' then
-					local root = scale_root * 1/12
-					local volts = Input[Output[i].source].volts + root
+					local s = Output[i].source
+
+					crow.send('input[' .. s .. '].query()')
+					local note = math.floor(Input[s].volts * 12)
+					local octave = math.floor( note / 12 )
+					note =  note - octave * 12
+					
+					if(#Scale[s].intervals > 0) then
+						note = musicutil.snap_note_to_array(note,Scale[s].intervals)
+					else
+						note = Input[s].volts
+					end
+
+					local volts = (note + Scale[s].root + octave * 12) / 12
+	
 					crow.output[i].volts = volts
 				elseif(Output[i].type == 'gate')then
 					if data.type == 'note_on' then
@@ -189,11 +308,16 @@ function transport_event(msg)
 			midi_out:send(data)
 		elseif(drum_map[data.note].state == false) then
 		end
-		
+	else
+		midi_out:send(data)
 	end
 
 	g:redraw()
 end
+
+function Output(type,channel){
+
+}
 
 -- MidiGrid Event Handler
 -- Event triggered for every pad up and down event — TRUE state is a pad up event, FALSE state is a pad up event.
@@ -219,7 +343,7 @@ function handle_function_grid(s, data)
 	local alt = get_alt()
 
 	-- Alt button
-	if x == 9 and y == 1 then
+	if x == 9 and y == 1 and data.state then
 		if(alt)then
 			set_alt(true)
 		else
@@ -263,16 +387,20 @@ function enc(e, d) --------------- enc() is automatically called by norns
     local bank = 'bank_' .. Preset.select .. '_'
    
 	if e == 1 then
-	    scale_root = util.clamp(scale_root + d,-24,24)
+	    Scale[1].root = util.clamp(Scale[1].root + d,-24,24)
+		Scale[2].root = util.clamp(Scale[2].root + d,-24,24)
+		if Mode.select == 3 then
+			Mode[3]:set_grid()
+			g:redraw()
+		end
+
 	end -- turn encoder 1
 	
-	if e == 2 then
-	    scale_one = util.clamp(scale_one + d,1,41)
-	    set_scale(scale_one,1)
+	if e == 2 then 
+	    set_scale(util.clamp(Scale[1].bits + d,1,4095),1)
 	end -- turn encoder 2
 	if e == 3 then
-	    scale_two = util.clamp(scale_two + d,1,41)
-	    set_scale(scale_two,2)
+	    set_scale(util.clamp(Scale[2].bits + d,1,4095),2)
 	end -- turn encoder 3
 	
 	screen_dirty = true ------------ something changed
@@ -358,12 +486,26 @@ function redraw() -------------- redraw() is automatically called by norns
 	screen.font_size(font.size)
 	screen.level(15) ------------- max
 	screen.move(2,10)
-	screen.text(musicutil.note_num_to_name(scale_root, false) .. ' ' .. musicutil.SCALES[scale_one].name )
+
+	if(interval_lookup[Scale[1].bits] ~= nil)then
+		screen.text(musicutil.note_num_to_name(Scale[1].root, false) .. ' ' .. interval_lookup[Scale[1].bits].name )
+	else
+		screen.text(musicutil.note_num_to_name(Scale[1].root, false) .. ' ' .. Scale[1].bits )
+	end
+	
 	screen.move(2,20)
-	screen.text(musicutil.note_num_to_name(scale_root, false) .. ' ' .. musicutil.SCALES[scale_two].name )
+	
+	if(interval_lookup[Scale[2].bits] ~= nil)then
+		screen.text(musicutil.note_num_to_name(Scale[2].root, false) .. ' ' .. interval_lookup[Scale[2].bits].name )
+	else
+		screen.text(musicutil.note_num_to_name(Scale[2].root, false) .. ' ' .. Scale[2].bits )
+	end
+
 
 	screen.move(127,10)
-	screen.text_right(scale_root)
+	screen.text_right(Scale[1].root)
+	screen.move(127,20)
+	screen.text_right(Scale[2].root)
 
 	local display = message
 	local y = 40
@@ -428,6 +570,7 @@ function concat_table(t1,t2)
 function r() ----------------------------- execute r() in the repl to quickly rerun this script
 	unrequire(path_name .. 'midigrid')
 	unrequire(path_name .. 'seq')
+	unrequire(path_name .. 'keys')
 	norns.script.load(norns.state.script) -- https://github.com/monome/norns/blob/main/lua/core/state.lua
 end
 
