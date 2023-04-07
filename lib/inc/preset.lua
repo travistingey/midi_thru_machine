@@ -4,6 +4,7 @@ Preset = {
     select = 1,
     bank = {},
     options = {
+        auto_save = (params:get('preset_auto_save') > 0),
         set_mute = (params:get('preset_set_mute') > 0),
         set_scales = (params:get('preset_set_scales') > 0),
         set_pattern = (params:get('preset_set_pattern') > 0),
@@ -37,7 +38,10 @@ Preset = {
                 Preset.load( Preset.select )
 
             end
-    
+        elseif data.state and data.x ~= 9 and data.y ~= 9 then
+            if(Preset.options['auto_save']) then
+                Preset.save(Preset.select)
+            end
         end
     end,
     bounds = MidiGrid.get_bounds({x = 5, y = 4}, {x = 8, y = 1}),
@@ -98,7 +102,7 @@ Preset = {
             local pset = Preset.bank[Preset.select]
             if (pset) then
                 for k, v in pairs(pset) do
-                    local target = drum_map[k]
+                    local target = Mute.map[k]
                     Mute.state[k] = pset[k]
                     g.toggled[target.x][target.y] = pset[k]
 
@@ -109,7 +113,7 @@ Preset = {
                     end
                 end
             else
-                for k, v in pairs(drum_map) do
+                for k, v in pairs(Mute.map) do
                     local target = v
                     Mute.state[k] = false
                     g.toggled[target.x][target.y] = false
@@ -149,7 +153,7 @@ Preset = {
         Preset.bank[i] = {}
         
         if(Preset.options['save_mute']) then
-            for k, v in pairs(drum_map) do
+            for k, v in pairs(Mute.map) do
                 Preset.bank[i][k] = (Mute.state[k] == true)
             end
         end

@@ -93,50 +93,38 @@ function Keys:set_grid()
 			end
 		end
 
-		local s1 =  bits_to_intervals(Scale[1].bits)
-		local s2 =  bits_to_intervals(Scale[2].bits)
-		
-		for i, v in pairs(self.note_map) do
-			local one = v['scale_1']
-			local two = v['scale_2']
-			self.grid.led[one.x][one.y] = {5,5,5}
-			self.grid.led[two.x][two.y] = {5,5,5}
-		end
-		
-		for i, v in pairs(s1) do
-			
-			local n = math.fmod(24 + v + Scale[1].root,12)
-			local c = self.note_map[n]
-			if (n == math.fmod(Scale[1].root,12) ) then
-				self.grid.led[c['scale_1'].x][c['scale_1'].y] = rainbow_on[math.fmod(Preset.select,#rainbow_on + 1)]
-				if n == 0 then
-					self.grid.led[8][7] = rainbow_on[math.fmod(Preset.select,#rainbow_on + 1)]
-				end
-			else
-				self.grid.led[c['scale_1'].x][c['scale_1'].y] = rainbow_off[math.fmod(Preset.select,#rainbow_off + 1)]
-				if n == 0 then
-					self.grid.led[8][7] = rainbow_off[math.fmod(Preset.select,#rainbow_off + 1)]
-				end
+		for s = 1,2 do
+			local scale =  bits_to_intervals(Scale[s].bits)
+			for i, v in pairs(self.note_map) do
+				self.grid.led[ v['scale_' .. s].x ][ v['scale_' .. s] .y] = {5,5,5}
 			end
-		end
 
-		for i, v in pairs(s2) do
-			
-			local n = math.fmod(24 + v + Scale[2].root,12)
-			local c = self.note_map[n]
-			if (n == math.fmod(Scale[2].root,12) ) then
-				self.grid.led[c['scale_2'].x][c['scale_2'].y] = rainbow_on[math.fmod(Preset.select,#rainbow_on + 1)]
-				if n == 0 then
-					self.grid.led[8][5] = rainbow_on[math.fmod(Preset.select,#rainbow_on + 1)]
-				end
-			else
-				self.grid.led[c['scale_2'].x][c['scale_2'].y] = rainbow_off[math.fmod(Preset.select,#rainbow_off + 1)]
-				if n == 0 then
-					self.grid.led[8][5] = rainbow_off[math.fmod(Preset.select,#rainbow_off + 1)]
+			for i, v in pairs(scale) do
+				local n = (24 + v + Scale[s].root) % 12
+				local c = self.note_map[n]
+
+				if (n == math.fmod(Scale[s].root,12) ) then
+					self.grid.led[c['scale_'..s].x][c['scale_'..s].y] = rainbow_on[math.fmod(Preset.select,#rainbow_on + 1)]
+					
+					if n == 0 then
+						if s%2 == 1 then
+							self.grid.led[8][7] = rainbow_on[math.fmod(Preset.select,#rainbow_on + 1)]
+						else
+							self.grid.led[8][5] = rainbow_on[math.fmod(Preset.select,#rainbow_on + 1)]
+						end
+					end
+				else
+					self.grid.led[c['scale_'..s].x][c['scale_'..s].y] = rainbow_off[math.fmod(Preset.select,#rainbow_off + 1)]
+					if n == 0 then
+						if s%2 == 1 then
+							self.grid.led[8][7] = rainbow_on[math.fmod(Preset.select,#rainbow_off + 1)]
+						else
+							self.grid.led[8][5] = rainbow_on[math.fmod(Preset.select,#rainbow_off + 1)]
+						end
+					end
 				end
 			end
 		end
-		
 	end
 end
 
@@ -157,27 +145,10 @@ function Keys:grid_event(data)
     	local index = MidiGrid.grid_to_index({x = x, y = y}, self.grid_start, self.grid_end)
     	
 		if(index and data.state and self.index_map[index])then
-    		local note = self.index_map[index]
+    		local d = self.index_map[index]
 			
-			if(alt) then
-			    
-			if note.scale == 1 then
-				local scale = shift_scale(Scale[note.scale].bits, note.note - Scale[note.scale].root)
-				Scale[note.scale].root = note.note
-				set_scale(scale, note.scale)
-				else
-					Scale[2].root = note.note
-				end
-				screen_dirty = true
-			else
-				
-				if ( note.scale == 1 ) then
-					set_scale(Scale[1].bits ~ (1 << (math.fmod(24 + note.note - Scale[1].root,12))),1)
-				elseif(note.scale == 2) then
-					set_scale(Scale[2].bits ~ (1 << (math.fmod(24 + note.note - Scale[2].root,12))),2)
-				end
-				
-			end
+			set_scale(Scale[d.scale].bits ~ (1 << (math.fmod(24 + d.note - Scale[d.scale].root,12))),d.scale)
+			
 			self:set_grid()
     		self.grid:redraw()
 		end

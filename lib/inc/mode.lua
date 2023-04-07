@@ -75,36 +75,33 @@ Mode.types = {{
 
 }}
 
-
-
 function Mode:load(data)
 	
-		for i = 1, 4 do
-			local t = params:get('mode_' .. i .. '_type')
+	for i = 1, 4 do
+		local t = params:get('mode_' .. i .. '_type')
 
-			if data and data[i] then
-				self[i] = self.types[t].class:new(data[i])
-			else
-				self[i] = self.types[t].class:new()
-			end
-
-
-			self[i].on_grid = self.types[t].on_grid
-			self[i].on_alt = self.types[t].on_alt
-			self[i].on_transport = self.types[t].on_transport
-			self[i].action = self.types[t].action
-			self[i].actions = self.types[t].actions
-			self[i].id = i
-			
-			if( self.types[t].actions ) then
-				self[i].actions = self.types[t].actions
-			end
-			
-			if( self.types[t].on_init ~= nil ) then
-			    self.types[t].on_init(self[i])
-			end
-			
+		if data and data[i] then
+			self[i] = self.types[t].class:new(data[i])
+		else
+			self[i] = self.types[t].class:new()
 		end
+
+		self[i].on_grid = self.types[t].on_grid
+		self[i].on_alt = self.types[t].on_alt
+		self[i].on_transport = self.types[t].on_transport
+		self[i].action = self.types[t].action
+		self[i].actions = self.types[t].actions
+		self[i].id = i
+		
+		if( self.types[t].actions ) then
+			self[i].actions = self.types[t].actions
+		end
+		
+		if( self.types[t].on_init ~= nil ) then
+		    self.types[t].on_init(self[i])
+		end
+		
+	end
 	
 	self[1].display = true
 	g.led[5][9] = 3

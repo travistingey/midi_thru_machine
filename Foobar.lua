@@ -11,45 +11,10 @@ Keys = require(path_name .. 'keys')
 musicutil = require('musicutil')
 util = require('util')
 
-drum_map = {}
-drum_map[36] = {x = 1, y = 1, index = 1, output = {{type='crow_voct', input = 1, out = 1},{type='crow_gate', input = 0, out = 2}}}
-drum_map[37] = {x = 2, y = 1, index = 2, output = {{type='crow_voct', input = 2, out = 3},{type='crow_gate', input = 0, out = 4}} }
-drum_map[38] = {x = 3, y = 1, index = 3}
-drum_map[39] = {x = 4, y = 1, index = 4}
-drum_map[40] = {x = 1, y = 2, index = 5}
-drum_map[41] = {x = 2, y = 2, index = 6}
-drum_map[42] = {x = 3, y = 2, index = 7}
-drum_map[43] = {x = 4, y = 2, index = 8}
-drum_map[44] = {x = 1, y = 3, index = 9}
-drum_map[45] = {x = 2, y = 3, index = 10}
-drum_map[46] = {x = 3, y = 3, index = 11}
-drum_map[47] = {x = 4, y = 3, index = 12}
-drum_map[48] = {x = 1, y = 4, index = 13}
-drum_map[49] = {x = 2, y = 4, index = 14}
-drum_map[50] = {x = 3, y = 4, index = 15}
-drum_map[51] = {x = 4, y = 4, index = 16}
 
-grid_map = {}
-for i = 1, 16 do grid_map[i] = {} end
-
-grid_map[1][1] = {note = 36, index = 1}
-grid_map[2][1] = {note = 37, index = 2}
-grid_map[3][1] = {note = 38, index = 3}
-grid_map[4][1] = {note = 39, index = 4}
-grid_map[1][2] = {note = 40, index = 5}
-grid_map[2][2] = {note = 41, index = 6}
-grid_map[3][2] = {note = 42, index = 7}
-grid_map[4][2] = {note = 43, index = 8}
-grid_map[1][3] = {note = 44, index = 9}
-grid_map[2][3] = {note = 45, index = 10}
-grid_map[3][3] = {note = 46, index = 11}
-grid_map[4][3] = {note = 47, index = 12}
-grid_map[1][4] = {note = 48, index = 13}
-grid_map[2][4] = {note = 49, index = 14}
-grid_map[3][4] = {note = 50, index = 15}
-grid_map[4][4] = {note = 51, index = 16}
-	
 ------------------------------------------------------------------------------
+
+-- Returns bits from an array of intervals
 function intervals_to_bits(t,d)
 	t = t or musicutil.SCALES[1].intervals
 
@@ -66,6 +31,7 @@ function intervals_to_bits(t,d)
 	return bits
 end
 
+-- Returns an array of intervals from bits
 function bits_to_intervals(b,d)
 	local intervals = {}
 	for i=1, 12 do
@@ -77,7 +43,9 @@ function bits_to_intervals(b,d)
 	return intervals
 end
 
-
+-- Sets the current scale from bits
+-- i = bits
+-- d = scale selection
 function set_scale(i,d)
 	Scale[d].bits = i
 	Scale[d].intervals = bits_to_intervals(i)
@@ -92,6 +60,9 @@ function set_scale(i,d)
 	end
 end
 
+
+-- Lookup table that uses bits as keys
+-- returns matching musicutil SCALE or CHORD
 interval_lookup = {}
 
 for i=1, #musicutil.SCALES do
@@ -114,21 +85,8 @@ for i=1, #musicutil.CHORDS do
 	
 end
 
-function select_interval(index)
-	local i = 1
-	for key,value in pairs(interval_lookup) do
-		if(i == index) then
-			return value
-		else
-			i = i + 1
-		end
-	end
-	return {}
-end
-
-
-------------------------------------------------------------------------------
-
+-- Shifts bits to another scale degree
+-- Intervals remain the same, but the mode changes of the scale
 function shift_scale(s,degree)
 	degree = math.fmod(degree,12) or 0
 	local scale = s
@@ -138,13 +96,22 @@ function shift_scale(s,degree)
 	else
 		scale = ((s << math.abs(degree)) | (s >> 12 - math.abs(degree)) ) & 4095
 	end
-	
-	local name = interval_lookup[scale]
 
 	return scale
 end
 
+-- shifts a Scale to the target note degree
+function shift_scale_to_note(s, n)
+	local scale = shift_scale(Scale[s].bits, n - Scale[s].root)
+	-- local octave = math.floor(( 24 + Scale[s].root) / 12)
+	-- Scale[s].root = n % 12 + (octave - 2) * 12
+	Scale[s].root = n - 48
+	set_scale(scale, s)
+end
 
+
+
+-- toggle the alt button
 function set_alt(state)
 	if(state) then
 		g.led[9][1] = {3,true}
@@ -161,8 +128,10 @@ function set_alt(state)
 	end
 end
 
+-- get the alt button state
 function get_alt() return g.toggled[9][1] end
 
+------------------------------------------------------------------------------
 function init()
     
     -- Variables
@@ -177,6 +146,18 @@ function init()
     Input = {{},{}}
     Output = {{},{},{},{}}
 
+    Chord = {}
+    
+    CHORDS = {}
+    
+    for i=1, #musicutil.CHORDS do
+        CHORDS[i] = {}
+        CHORDS[i].name = musicutil.CHORDS[i].name
+        CHORDS[i].intervals = musicutil.CHORDS[i].intervals
+    end
+    
+    CHORDS[#CHORDS + 1] = { name = 'Fifth', intervals = {0,7} }
+    
 	Scale = {{
 		bits = 1,
 		root = 0
@@ -185,17 +166,20 @@ function init()
 		root = 0
 	}}  
 	
-	Input[1] = {note = 0, octave = 0, volts = 0, index = 1}
-	Input[2] = {note = 0, octave = 0, volts = 0, index = 1}
+	Input[1] = {note = 0, octave = 0, volts = 0, last_note = 0, last_interval = 0, last_octave = 0, last_volts = 0}
+	Input[2] = {note = 0, octave = 0, volts = 0, last_note = 0, last_interval = 0, last_octave = 0,  last_volts = 0}
 
 	set_scale(1,1)
 	set_scale(1,2)
 	
+	crow.send("input[1].query = function() stream_handler(1, input[1].volts) end")
+	crow.send("input[2].query = function() stream_handler(2, input[2].volts) end")
+	
 	crow.input[1].stream = function (d) Input[1].volts = d end
 	crow.input[2].stream = function (d) Input[2].volts = d end
-    
+	crow.input[1].mode('none')
+
 	current_bank = 1
-    
     
     last_tick = 0
     tick_time = 0
@@ -210,7 +194,6 @@ function init()
 	include(path_name .. 'inc/preset')
 	include(path_name .. 'inc/mode')
 
-
 	for i=1,4 do
 		local out = 'crow_out_' .. i .. '_'
 		Output[i] = {
@@ -220,18 +203,6 @@ function init()
 		}
 	end
 
-	-- Devices
-    -- crow.input[1].scale = function(s)
-	-- 	Input[1] = s
-	-- end
-	
-	-- crow.input[2].scale = function(s)
-	-- 	Input[2] = s
-	-- end
-
-
-
-
 	g = MidiGrid:new({event = grid_event, channel = 3})
 	
 	transport = midi.connect(1)
@@ -239,7 +210,7 @@ function init()
 		
     Mute:set_grid()
 	
-	-- Transport Event Handler for incoming MIDI notes from the Beatstep Pro.
+	-- Transport Event Handler for incoming MIDI from the Transport device.
 	transport.event = transport_event
 	
 	params:default()
@@ -250,7 +221,26 @@ function init()
 	g:redraw()
 end -- end Init
 
+-- Update the Input table
+function update_input(s)
+	Input[s].last_interval= Input[s].interval or 0
+	Input[s].last_note = Input[s].note or 0
+	Input[s].last_octave = Input[s].octave  or 0
+	Input[s].last_volts = Input[s].volts  or 0
+	
+	local note = math.floor(Input[s].volts * 12)
+	local octave = math.floor( note / 12 )
+	note =  note - octave * 12
 
+	Input[s].note = note
+	Input[s].interval = note - octave * 12
+	Input[s].octave = octave
+
+	crow.send('input[' .. s .. '].query()')
+
+end
+
+-- Transport Event occurs when a MIDI event is sent from the transport device
 
 function transport_event(msg)
 	local data = midi.to_msg(msg)
@@ -263,10 +253,7 @@ function transport_event(msg)
         playing = false
     end
 
-	-- note on/off events
 	Mute.transport_event(data)
-
-	-- clock events
 	Mode[1]:transport_event(data)
 	Mode[2]:transport_event(data)
 	Mode[3]:transport_event(data)
@@ -277,23 +264,75 @@ function transport_event(msg)
 		
 		for i = 1,4 do
 			if Output[i].trigger == data.note then
-				if(Output[i].type == 'v/oct') and data.type == 'note_on' then
+				
+				if(Output[i].type == 'v/oct'  or Output[i].type == 'chord') and data.type == 'note_on' then
 					local s = Output[i].source
-
-					crow.send('input[' .. s .. '].query()')
-					local note = math.floor(Input[s].volts * 12)
-					local octave = math.floor( note / 12 )
-					note =  note - octave * 12
+				    update_input(s)
+					
+					local volts = Input[s].volts
 					
 					if(#Scale[s].intervals > 0) then
-						note = musicutil.snap_note_to_array(note,Scale[s].intervals)
+						Input[s].interval = musicutil.snap_note_to_array(Input[s].interval,Scale[s].intervals)
+						Input[s].note = (Input[s].interval + Input[s].octave * 12 + Scale[s].root) 
+						volts = Input[s].note / 12
+					end
+					
+					crow_note_out(i,s,volts)
+					
+				elseif(Output[i].type == 'interval') and data.type == 'note_on' then
+					local s = Output[i].source
+				    update_input(s)
+				    
+					local next = Input[s].last_note
+					local score = math.fmod(Input[s].volts,1)
+					local octave = math.floor(Input[s].volts)
+					local ratio = 0.68
+
+					local direction = 1
+					local range = params:get('crow_out_' .. i .. '_range')
+					local ceil = Scale[s].root + 12 * range
+
+					if octave > Input[s].last_octave or Input[s].last_note < Scale[s].root then
+						direction = 2
+					elseif octave < Input[s].last_octave or Input[s].last_note > ceil  then
+						direction = 1
+					end
+					
+					if(Input[s].volts < 0.2)then
+						next = Scale[s].root					
+					elseif score < ratio then
+						if direction == 2 or direction == 0 and math.random() > 0.5 then
+							-- Step up
+							next = util.clamp(next + 1,Scale[s].root,ceil)
+							local count = 0
+							while(1 << math.fmod(next - Scale[s].root,12) & Scale[s].bits == 0 and Scale[s].bits > 0 and count < 12) do
+								next = util.clamp(next + 1,0,ceil)
+								print(next)
+								count = count + 1
+							end
+						else
+							-- Step down
+							next = util.clamp(next - 1,Scale[s].root,ceil)
+							local count = 0
+							while(1 << math.fmod(next - Scale[s].root,12) & Scale[s].bits == 0 and Scale[s].bits > 0 and count < 12) do
+								next = util.clamp(next - 1,0,ceil)
+								print(next)
+								count = count + 1
+							end
+						end
 					else
-						note = Input[s].volts
+						-- Skipwise Motion
+						local interval = Scale[s].intervals[math.random(1,#Scale[s].intervals)]
+						next = util.clamp(Input[s].last_octave * 12 + interval + Scale[s].root,0,ceil)
 					end
 
-					local volts = (note + Scale[s].root + octave * 12) / 12
-	
-					crow.output[i].volts = volts
+					Input[s].interval = math.fmod(next,12)
+					Input[s].note = next
+					Input[s].octave = math.floor(Input[s].note / 12)
+					
+					local volts = (Input[s].note + Scale[s].root) /12
+
+					crow_note_out(i,s,volts)
 				elseif(Output[i].type == 'gate')then
 					if data.type == 'note_on' then
 						crow.output[i].volts = 5
@@ -304,20 +343,92 @@ function transport_event(msg)
 			end
 		end
 		
-		if(drum_map[data.note].state) then
+		if(Mute.map[data.note].state) then
 			midi_out:send(data)
-		elseif(drum_map[data.note].state == false) then
 		end
+
+	elseif(data.ch == params:get('bsp_seq1_channel'))then
+		local current = Chord[data.note % 12 + 1]
+		
+		if EO_Learn then
+			midi_out:send(data)
+		elseif(data.type == 'note_on') then
+			for i = 1,4 do
+				if Output[i].type == 'chord' and data.type == 'note_on' then
+					-- Switch scales here 
+					
+					local source = Output[i].source
+					set_scale(intervals_to_bits(current.intervals),source)
+					Scale[source].root = current.note
+					
+					screen_dirty = true
+					
+					if Mode.select == 3 then
+						Mode[3]:set_grid()
+						g:redraw()
+					end
+				elseif(Output[i].type == 'v/oct' or Output[i].type == 'interval')then
+					local s = Output[i].source
+
+					if Scale[s].follow == 2 then
+						Scale[s].root = current.note
+						
+						screen_dirty = true
+					
+						if Mode.select == 3 then
+							Mode[3]:set_grid()
+							g:redraw()
+						end
+					elseif Scale[s].follow == 3 then
+						shift_scale_to_note(s,current.note + 48)
+
+						screen_dirty = true
+					
+						if Mode.select == 3 then
+							Mode[3]:set_grid()
+							g:redraw()
+						end
+					end
+				end
+			end
+
+			data.ch = 14
+			
+			local selection = util.clamp((current.slot - 1) * 14,0,127)
+			midi_out:cc(21,selection,14)
+			
+		elseif data.type == 'note_off' then
+			data.ch = 14
+		end
+		
+		if data.note ~= nil then
+			data.note = math.floor(data.note / 12) * 12 + current.note
+		end
+		
+		midi_out:send(data)
 	else
+		-- Pass through other channels
 		midi_out:send(data)
 	end
 
 	g:redraw()
 end
 
-function Output(type,channel){
 
-}
+
+function crow_note_out(index,input,volts)
+	crow.output[1].action = '{to(dyn{note = 0},dyn{slew = 0})}'
+	crow.output[index].dyn.note = volts
+					
+	if(Input[input].last_note > Input[input].note) then
+		crow.output[index].dyn.slew = params:get('crow_out_' .. index .. '_slew_down')
+	else
+		crow.output[index].dyn.slew = params:get('crow_out_' .. index .. '_slew_up')
+	end
+	
+	crow.send('output[' .. index .. ']()')
+	
+end
 
 -- MidiGrid Event Handler
 -- Event triggered for every pad up and down event — TRUE state is a pad up event, FALSE state is a pad up event.
@@ -387,13 +498,7 @@ function enc(e, d) --------------- enc() is automatically called by norns
     local bank = 'bank_' .. Preset.select .. '_'
    
 	if e == 1 then
-	    Scale[1].root = util.clamp(Scale[1].root + d,-24,24)
-		Scale[2].root = util.clamp(Scale[2].root + d,-24,24)
-		if Mode.select == 3 then
-			Mode[3]:set_grid()
-			g:redraw()
-		end
-
+	
 	end -- turn encoder 1
 	
 	if e == 2 then 
@@ -485,10 +590,12 @@ function redraw() -------------- redraw() is automatically called by norns
 	screen.font_face(font.face)
 	screen.font_size(font.size)
 	screen.level(15) ------------- max
+	
 	screen.move(2,10)
-
+	
 	if(interval_lookup[Scale[1].bits] ~= nil)then
 		screen.text(musicutil.note_num_to_name(Scale[1].root, false) .. ' ' .. interval_lookup[Scale[1].bits].name )
+		
 	else
 		screen.text(musicutil.note_num_to_name(Scale[1].root, false) .. ' ' .. Scale[1].bits )
 	end
@@ -577,3 +684,82 @@ end
 function cleanup() --------------- cleanup() is automatically called on script close
 	clock.cancel(redraw_clock_id) -- melt our clock vie the id we noted
 end
+
+--[[
+1. Major
+2. Major 6 x
+3. Major 7 x
+4. Major 69
+5. Major 9
+6. Major 11
+7. Major 13
+8. Dominant 7 x
+9. Ninth
+10. Eleventh
+11. Thirteenth
+12. Augmented
+13. Augmented 7 x
+14. Sus4 
+15. Seventh sus4 x
+16. Minor Major 7 x
+17. Minor
+18. Minor 6 x
+19. Minor 7 x
+20. Minor 69
+21. Minor 9
+22. Minor 11
+23. Minor 13
+24. Diminished
+25. Diminished 7 x
+26. Half Diminished 7 
+]]
+
+
+EO = {
+	slot = {0,2,3,8,13,15,16,18,19,25},
+	program = function(index)
+	    
+	    local step = 0 
+        local chord = musicutil.CHORDS[index]
+        local intervals = {}
+        
+        if index > 0 then
+            print(chord.name .. ' on scale ' .. index)
+            intervals = chord.intervals
+        else
+            print('No chord.')
+            return
+        end    
+        
+        if slot ~= nil then
+            midi_out:cc(21,util.clamp((slot - 1) * 14,0,127),14)
+        end
+        
+    	metro[1].event = function(c)
+    		step = step + c%2
+    
+    		if(step <= #intervals) then
+    			if(c%2 == 1)then
+    				midi_out:note_on(intervals[step] + 36,127,14)
+    			else
+    				midi_out:note_off(intervals[step] + 36,127,14)
+    			end
+    		else
+    			if(c%2 == 1)then
+    				midi_out:note_on(math.floor((intervals[#intervals]/12) + 1) * 12 + 36,127,14)
+    			else
+    				midi_out:note_off(math.floor((intervals[#intervals]/12) + 1) * 12 + 36,127,14)
+    				metro[1]:stop()
+    			end
+    		end
+    	end
+        
+    	metro[1].time = 0.02
+        metro[1]:start()
+	end,
+
+}
+
+
+    
+    

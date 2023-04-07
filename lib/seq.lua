@@ -148,11 +148,7 @@ function Seq:transport_event(data)
 			local value = self.value[self.bank][next_step] or 0
 			
 			if self.enabled then 
-			    
 			    self:action(value)
-			    
-		    	
-            
 			end
 			
 			if self.display then
@@ -160,7 +156,23 @@ function Seq:transport_event(data)
 			end
 		end
 	end
-
+	
+	----------------------------------
+	----------------------------------
+	----------------------------------
+	----------------------------------
+	----------------------------------
+	
+	if self.record == true then
+	
+	end
+    
+    ----------------------------------
+    ----------------------------------
+    ----------------------------------
+    ----------------------------------
+    ----------------------------------
+    
 	if self.on_transport ~= nil and self.enabled then
 		self:on_transport(data)
 	end

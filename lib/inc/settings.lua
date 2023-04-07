@@ -1,6 +1,74 @@
--- START PARAM MENU ------------------------------------------------------------------
+-- PROJECT ------------------------------------------------------------------
+params:add_separator('Project')
 
-params:add_separator('Beatstep Pro')
+params:add_number('project_bank', 'Project',1,16,1)
+params:set_action('project_bank', function(i)  transport:cc(0,i-1,16) end)
+
+params:add_number('drum_bank', 'Drum Bank',1,7,1)
+params:set_action('drum_bank', function(i)
+    midi_out:program_change(i-1,10)
+    for y=1,8 do
+        g.led[9][y] = 0
+    end    
+    g.led[9][9 - i] = 3 -- Set Drum Bank
+    current_bank = i
+	g:redraw()
+end)
+
+params:add_group('chord', 'Chords', 26)
+
+    params:add_option( 'scale_1_follow', 'Scale 1 Follow', {'No','Transpose','Degree'},1)
+    params:set_action( 'scale_1_follow', function(d)
+        Scale[1].follow = d    
+    end)
+
+    params:add_option( 'scale_2_follow', 'Scale 2 Follow', {'No','Transpose','Degree'},1)
+    params:set_action( 'scale_2_follow', function(d) Scale[2].follow = d end)
+
+    for i=1,12 do
+        params:add_number('chord_slot_' .. i, i .. ' Chord',1,10,1,
+        function(param)
+            local chord = params:get('eo_slot_' .. param:get())
+
+            return CHORDS[chord].name .. ' ('.. param:get() ..')'
+        end
+    )
+    params:set_action('chord_slot_' .. i,
+        function(d)
+            local selection = params:get('eo_slot_' .. d)
+            
+            if Chord[i] == nil then
+                Chord[i] = {}
+            end
+            
+            Chord[i].note = params:get('chord_note_' .. i) or i - 1
+            Chord[i].name = CHORDS[selection].name
+            Chord[i].intervals = CHORDS[selection].intervals
+            Chord[i].slot = d
+            Chord[i].index = selection
+          
+        end
+    )
+    
+    params:add_number('chord_note_' .. i, i .. ' Root',0,11,i-1,
+        function(param)
+            return musicutil.note_num_to_name(param:get())
+        end
+    )
+    
+    params:set_action('chord_note_' .. i,
+        function(d)
+            if Chord[i] ~= nil then
+                Chord[i].note = d
+            end
+        end
+    )
+end
+
+-- DEVICES ------------------------------------------------------------------
+
+params:add_separator('Devices')
+params:add_group('bsp', 'Beatstep Pro', 4)
 
 params:add_option("bsp_touchstrip_mode", "Touchstrip Mode", {'Looper','Roller'}, 1)
 params:set_action("bsp_touchstrip_mode",function(x)
@@ -27,57 +95,161 @@ params:set_action("bsp_drum_channel",function(x)
     transport:send({0xF0,0x00,0x20,0x6B,0x7F,0x42,0x02,0x00,0x41,0x45,x - 1,0xF7})   
 end)
 
-params:add_number('project_bank', 'Project',1,16,1)
-params:set_action('project_bank', function(i)  transport:cc(0,i-1,16) end)
 
-params:add_number('drum_bank', 'Drum Bank',1,7,1)
-params:set_action('drum_bank', function(i)
-    midi_out:program_change(i-1,10)
-    for y=1,8 do
-        g.led[9][y] = 0
-    end    
-    g.led[9][9 - i] = 3 -- Set Drum Bank
-    current_bank = i
-	g:redraw()
+-- Ensemble Oscillator -------------------------------------------------------------------------
+
+params:add_group('eo','Ensemble Oscillator',13)
+
+params:add_number('eo_program_select', 'Program', 1,10,1, function(param)
+    local slot = param:get()
+    local chord = params:get('eo_slot_' .. slot)
+
+    return CHORDS[ chord ].name .. ' (' .. slot .. ')'
+
 end)
+params:add_trigger('eo_program','Go')
+params:add_separator('')
 
+for i = 1, 10 do
+    params:add_number('eo_slot_' .. i, 'Scale ' .. i, 1,#CHORDS,1, function(param)
+       return CHORDS[param:get()].name
+    end)
+end
 
+EO_Learn = false
+
+params:set_action('eo_program', function(d)
+    local slot = params:get('eo_program_select')
+    local selection = params:get('eo_slot_' .. slot)
+    local step = 0 
+    local intervals = CHORDS[selection].intervals
+    
+    midi_out:cc(21,util.clamp((slot - 1) * 14,0,127),14)
+        
+    print('Programming ' .. CHORDS[selection].name .. ' on Scale ' .. slot)
+    metro[1].event = function(c)
+        EO_Learn = true
+        step = step + c%2
+        if(step <= #intervals) then
+            if(c%2 == 1)then
+                print(intervals[step])
+                midi_out:note_on(intervals[step] + 48,127,14)
+            else
+                midi_out:note_off(intervals[step] + 48,127,14)
+            end
+        else
+            if(c%2 == 1)then
+                print((math.floor(intervals[#intervals]/12) + 1) * 12)
+                midi_out:note_on((math.floor(intervals[#intervals]/12) + 1) * 12 + 48,127,14)
+            else
+                midi_out:note_off((math.floor(intervals[#intervals]/12) + 1) * 12 + 48,127,14)
+                print('done.')
+            end
+        end
+        
+        EO_Learn = false
+    end
+    
+    metro[1].time = 0.02
+    metro[1].count = #intervals * 2 + 2
+    metro[1]:start()
+
+    params:set('eo_program_select', util.wrap(slot + 1,1,10) )
+end)
 
 -- CROW -----------------------------------------------------------------------------
 
 params:add_separator('Crow')
 
-local crow_options = {'v/oct', 'gate'}
+local crow_options = {'v/oct', 'gate', 'interval','chord','arpeggio'}
+local destination_options = {'crow', 'midi'}
 params:add_number('crow_channel', 'Channel',1,16,10)
 
 for i = 1,4 do
     local out = 'crow_out_' .. i .. '_'
     
-    params:add_group(out, 'OUT ' .. i, 3)
+    params:add_group(out, 'OUT ' .. i, 7)
     if i == 1 then
         params:add_option(out .. 'type', 'Type', crow_options, 1)
+        params:add_option( out .. 'source', 'Source', {'IN 1','IN 2'},1)
     elseif i == 2 then
         params:add_option(out .. 'type', 'Type', crow_options, 2)
+        params:add_option( out .. 'source', 'Source', {'IN 1','IN 2'},1)
     elseif i == 3 then
         params:add_option(out .. 'type', 'Type', crow_options, 1)
+        params:add_option( out .. 'source', 'Source', {'IN 1','IN 2'},2)
     elseif i == 4 then
         params:add_option(out .. 'type', 'Type', crow_options, 2)
+        params:add_option( out .. 'source', 'Source', {'IN 1','IN 2'},2)
     end
+
     params:set_action(out .. 'type', function(d)
+        params:hide(out .. 'ratio')
+        params:hide(out .. 'range')
+        params:hide(out .. 'source')
+        params:hide(out .. 'slew_up')
+        params:hide(out .. 'slew_down')
+
         if d == 1 then
+            -- v/oct
             params:show(out .. 'source')
-            
-        else
-            params:hide(out .. 'source')
+            params:show(out .. 'slew_up')
+            params:show(out .. 'slew_down')
+            crow.output[i].action = "to(dyn{note=0},dyn{slew=0})"
+        elseif d == 3 then
+            -- intervals
+            params:show(out .. 'ratio')
+            params:show(out .. 'range')
+            params:show(out .. 'source')
+            params:show(out .. 'slew_up')
+            params:show(out .. 'slew_down')
+            crow.output[i].action = "to(dyn{note=0},dyn{slew=0})"
+        elseif d == 4 then
+            -- intervals
+            params:show(out .. 'source')
+            params:show(out .. 'slew_up')
+            params:show(out .. 'slew_down')
+            crow.output[i].action = "to(dyn{note=0},dyn{slew=0})"
         end
-        
+
         Output[i].type = crow_options[d]
         
         _menu.rebuild_params()
     end)
-    params:add_option( out .. 'source', 'Source', {'IN 1','IN 2'})
-    params:set_action( out .. 'source', function(d) Output[i].source = d end )
     
+    local ratio = controlspec.def{
+        min = 0.00, -- the minimum value
+        max = 1.0, -- the maximum value
+        warp = 'lin', -- a shaping option for the raw value
+        step = 0.01, -- output value quantization
+        default = 0.68, -- default value
+        units = '', -- displayed on PARAMS UI
+        quantum = 0.01, -- each delta will change raw value by this much
+        wrap = false -- wrap around on overflow (true) or clamp (false)
+    }
+    params:add_control(out .. 'ratio',"Step/Skip",ratio)
+    
+    local slew = controlspec.def{
+        min = 0.00, -- the minimum value
+        max = 30.0, -- the maximum value
+        warp = 'exp', -- a shaping option for the raw value
+        step = 0.01, -- output value quantization
+        default = 0.00, -- default value
+        units = 's', -- displayed on PARAMS UI
+        quantum = 0.0002, -- each delta will change raw value by this much
+        wrap = false -- wrap around on overflow (true) or clamp (false)
+    }
+    params:add_control(out .. 'slew_up',"Slew Up",slew)
+    params:set_action( out .. 'slew_up', function(d) Output[i].slew_up = d end )
+    params:add_control(out .. 'slew_down',"Slew Down",slew)
+    params:set_action( out .. 'slew_down', function(d) Output[i].slew_down = d end )
+    params:add_number(out .. 'range','Range',1,5,2)
+    params:set_action( out .. 'range', function(d) Output[i].range = d end )
+    
+    params:set_action( out .. 'source', function(d) Output[i].source = d end )
+
+
+
     if i == 1 then
         params:add_number( out .. 'trigger', 'Trigger',1,128,36)
     elseif i == 2 then
@@ -92,11 +264,9 @@ for i = 1,4 do
 
 end
 
-
-
 -- MODES ------------------------------------------------------------------------- 
 
-local mode_types = {'song', 'drum', 'break'}
+local mode_types = {'song', 'drum', 'keys',}
 function format_div(param)
     local index = param:get()
 
@@ -114,18 +284,28 @@ for i = 1, 4 do
     
     local mode = 'mode_' .. i .. '_'
     
+    -- Mode Presets
     if i == 1 then
+        params:add_option(mode .. 'type','Type', mode_types,1)
         params:add_number( mode .. 'div', 'Division', 1, 10, 7, format_div)
-    else
+    elseif i == 2 then
+        params:add_option(mode .. 'type','Type', mode_types,1)
         params:add_number( mode .. 'div', 'Division', 1, 10, 2, format_div)
+    elseif i == 3 then
+        params:add_option(mode .. 'type','Type', mode_types,3)
+        params:add_number( mode .. 'div', 'Division', 1, 10, 7, format_div)
+    elseif i == 4 then
+        -- recording grid
+        params:add_option(mode .. 'type','Type', mode_types,1)
+        params:add_number( mode .. 'div', 'Division', 1, 10, 7, format_div)
     end
-    
+ 
     params:set_action( mode .. 'div', function(d) if Mode and Mode[i] then Mode[i].div = 3 * 2^d end end)
     
     params:add_number( mode .. 'length', 'Length', 1, 128, 16 )
     params:set_action( mode .. 'length', function(d) if Mode and Mode[i] and Mode[i].type ~= 3 then Mode[i]:set_length( d ) end end)
 
-    params:add_option(mode .. 'type','Type', mode_types)
+    
     params:set_action( mode .. 'type', function(d) if Mode and Mode[i] then Mode[i].type = d end end)
     params:add_number(mode .. 'channel','Channel', 1,16,10)
 
@@ -134,8 +314,12 @@ end
 
 
 -- Presets -----------------------------------------------------------------------
+params:add_separator('Presets')
+params:add_group('preset_options','Options',11)
 
-params:add_separator('Preset')
+params:add_binary('preset_auto_save', 'Auto Save', 'toggle', 1)
+params:set_action('preset_auto_save', function(b) Preset.options['auto_save'] = (b > 0) end)
+
 params:add_binary('preset_set_mute', 'Set Mute', 'toggle', 1)
 params:set_action('preset_set_mute', function(b) Preset.options['set_mute'] = (b > 0) end)
 params:add_binary('preset_set_scales', 'Set Scales', 'toggle', 1)
@@ -204,23 +388,11 @@ for i = 1,16 do
         end    
     end)
     
-    -- params:add_number( bank .. 'scale_one', 'Scale One',1,41,1,
-    --     function(param)
-    --         local name = musicutil.SCALES[param:get()].name
-    
-    --         if name:len() > 18 then
-    --             return name:sub(1,15) .. '...'
-    --         else
-    --             return name
-    --         end
-    --     end
-    -- ) -- end scale one
 
-    params:add_number( bank .. 'scale_1', 'Scale One',1,4095,4095) -- end scale one
-
+    params:add_number( bank .. 'scale_1', 'Scale One',1,4095,1) -- end scale one
     params:set_action( bank .. 'scale_1', function(s) if (Preset.select and Preset.select == i) then set_scale(s,1) end end)
     
-    params:add_number( bank .. 'scale_2', 'Scale Two',1,4095,5289) -- end scale two
+    params:add_number( bank .. 'scale_2', 'Scale Two',1,4095,1) -- end scale two
     params:set_action(bank .. 'scale_2', function(s) if(Preset.select and Preset.select == i) then set_scale(s,2) end end)    
 end
 
@@ -244,3 +416,4 @@ end
 params.action_delete = function(filename,name,number)
     print("finished deleting '"..filename.."' as '"..name.."' and PSET number: "..number)
 end
+
