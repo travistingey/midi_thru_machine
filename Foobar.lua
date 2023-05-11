@@ -1,7 +1,9 @@
 -- TO DOs:
 -- Sequencers not saving patterns and loading time divisions
--- CLEANUP: Utility functions of MidiGrid like get_bounds should reference self rather than inputs.
+-- Utility functions of MidiGrid like get_bounds should reference self rather than inputs.
 -- Re-architect use of MidiGrid to allow for sub-grids. functions like get bounds, index of etc can reference themselves
+-- Chords are hard coded to run on Channel 14 with scale selection set to CC 21 in unipolar mode.
+
 script_name = 'Foobar'
 path_name = script_name .. '/lib/'
 
@@ -16,8 +18,6 @@ util = require('util')
 
 -- Returns bits from an array of intervals
 function intervals_to_bits(t,d)
-	t = t or musicutil.SCALES[1].intervals
-
 	local bits = 0
 
 	for i=1, #t do
@@ -49,6 +49,13 @@ end
 function set_scale(i,d)
 	Scale[d].bits = i
 	Scale[d].intervals = bits_to_intervals(i)
+	Scale[d].notes = {}
+
+	for i=1,5 do
+		for j=1,#Scale[d].intervals do
+			Scale[d].notes[(i - 1) * #Scale[d].intervals + j] = Scale[d].intervals[j] + (i-1) * 12
+		end
+	end
 	
 	-- crow.input[d].mode('scale',scale)
 	screen_dirty = true
@@ -223,6 +230,7 @@ end -- end Init
 
 -- Update the Input table
 function update_input(s)
+	
 	Input[s].last_interval= Input[s].interval or 0
 	Input[s].last_note = Input[s].note or 0
 	Input[s].last_octave = Input[s].octave  or 0
@@ -230,14 +238,13 @@ function update_input(s)
 	
 	local note = math.floor(Input[s].volts * 12)
 	local octave = math.floor( note / 12 )
-	note =  note - octave * 12
 
 	Input[s].note = note
 	Input[s].interval = note - octave * 12
 	Input[s].octave = octave
 
 	crow.send('input[' .. s .. '].query()')
-
+	
 end
 
 -- Transport Event occurs when a MIDI event is sent from the transport device
@@ -265,16 +272,18 @@ function transport_event(msg)
 		for i = 1,4 do
 			if Output[i].trigger == data.note then
 				
-				if(Output[i].type == 'v/oct'  or Output[i].type == 'chord') and data.type == 'note_on' then
+				if(Output[i].type == 'v/oct') and data.type == 'note_on' then
 					local s = Output[i].source
 				    update_input(s)
 					
 					local volts = Input[s].volts
 					
 					if(#Scale[s].intervals > 0) then
-						Input[s].interval = musicutil.snap_note_to_array(Input[s].interval,Scale[s].intervals)
-						Input[s].note = (Input[s].interval + Input[s].octave * 12 + Scale[s].root) 
-						volts = Input[s].note / 12
+						volts = ( musicutil.snap_note_to_array(Input[s].note, Scale[s].notes) + Scale[s].root )  / 12
+					end
+
+					if (params:get('scale_' .. s .. '_follow') > 1 ) then
+						volts = volts + (Chord.root/12)
 					end
 					
 					crow_note_out(i,s,volts)
@@ -307,7 +316,6 @@ function transport_event(msg)
 							local count = 0
 							while(1 << math.fmod(next - Scale[s].root,12) & Scale[s].bits == 0 and Scale[s].bits > 0 and count < 12) do
 								next = util.clamp(next + 1,0,ceil)
-								print(next)
 								count = count + 1
 							end
 						else
@@ -316,7 +324,6 @@ function transport_event(msg)
 							local count = 0
 							while(1 << math.fmod(next - Scale[s].root,12) & Scale[s].bits == 0 and Scale[s].bits > 0 and count < 12) do
 								next = util.clamp(next - 1,0,ceil)
-								print(next)
 								count = count + 1
 							end
 						end
@@ -326,11 +333,15 @@ function transport_event(msg)
 						next = util.clamp(Input[s].last_octave * 12 + interval + Scale[s].root,0,ceil)
 					end
 
-					Input[s].interval = math.fmod(next,12)
+					Input[s].interval = next % 12
 					Input[s].note = next
 					Input[s].octave = math.floor(Input[s].note / 12)
 					
 					local volts = (Input[s].note + Scale[s].root) /12
+					
+					if (params:get('scale_' .. s .. '_follow') > 1 ) then
+						volts = volts + (Chord.root/12)
+					end
 
 					crow_note_out(i,s,volts)
 				elseif(Output[i].type == 'gate')then
@@ -343,69 +354,79 @@ function transport_event(msg)
 			end
 		end
 		
-		if(Mute.map[data.note].state) then
+		if(not Mute.state[data.note]) then
 			midi_out:send(data)
 		end
 
 	elseif(data.ch == params:get('bsp_seq1_channel'))then
-		local current = Chord[data.note % 12 + 1]
-		
 		if EO_Learn then
 			midi_out:send(data)
 		elseif(data.type == 'note_on') then
-			for i = 1,4 do
-				if Output[i].type == 'chord' and data.type == 'note_on' then
-					-- Switch scales here 
-					
-					local source = Output[i].source
-					set_scale(intervals_to_bits(current.intervals),source)
-					Scale[source].root = current.note
-					
-					screen_dirty = true
-					
-					if Mode.select == 3 then
-						Mode[3]:set_grid()
-						g:redraw()
-					end
-				elseif(Output[i].type == 'v/oct' or Output[i].type == 'interval')then
-					local s = Output[i].source
+			
+			local current = Chord[data.note % 12 + 1]
+			for i = 1,2 do
 
-					if Scale[s].follow == 2 then
-						Scale[s].root = current.note
-						
-						screen_dirty = true
-					
-						if Mode.select == 3 then
-							Mode[3]:set_grid()
-							g:redraw()
-						end
-					elseif Scale[s].follow == 3 then
-						shift_scale_to_note(s,current.note + 48)
+				if Scale[i].follow == 2 then
+					-- Transpose
+					Scale[i].root = current.note
+				elseif Scale[i].follow == 3 then
+					-- Scale Degree
+					shift_scale_to_note(i,current.note + 48)
+				elseif Scale[i].follow == 4 then
+					-- Chord
+					set_scale(intervals_to_bits(current.intervals),i)
+					Scale[i].root = current.note
+				elseif Scale[i].follow == 5 then
+					-- Pentatonic
+					local chord = intervals_to_bits(current.intervals)
+					local major = intervals_to_bits({0,4})
+					local minor = intervals_to_bits({0,3})
 
-						screen_dirty = true
-					
-						if Mode.select == 3 then
-							Mode[3]:set_grid()
-							g:redraw()
-						end
+					if chord & major == major then
+						set_scale(661,i)
+						Scale[i].root = current.note
+					elseif chord & minor == minor then
+						set_scale(1193,i)
+						Scale[i].root = current.note
+					else
+						set_scale(1,i)
+						Scale[i].root = current.note
 					end
+				end
+				
+				screen_dirty = true
+					
+				if Mode.select == 3 then
+					Mode[3]:set_grid()
+					g:redraw()
 				end
 			end
 
-			data.ch = 14
+			
 			
 			local selection = util.clamp((current.slot - 1) * 14,0,127)
 			midi_out:cc(21,selection,14)
-			
-		elseif data.type == 'note_off' then
-			data.ch = 14
+
 		end
+		
+		data.ch = 14
 		
 		if data.note ~= nil then
-			data.note = math.floor(data.note / 12) * 12 + current.note
+			local current = Chord[data.note % 12 + 1]
+			data.note = math.floor(data.note / 12) * 12 + current.note + Chord.root
 		end
 		
-		midi_out:send(data)
+		if data.type == 'note_on' then
+		    midi_out:note_off(Chord.last_note,0,14)
+			Chord.last_note = data.note
+		end
+
+		local mute = params:get('chord_mute')
+
+		if not ( Mute.state[mute] and data.type == 'note_on' ) then
+			midi_out:send(data)
+		end
+		
 	else
 		-- Pass through other channels
 		midi_out:send(data)
@@ -442,6 +463,7 @@ function grid_event(s, data)
 	
 	Mute.grid_event(s, data) -- Sets display of mute buttons
 	Preset.grid_event(s, data) -- Manages loading and saving of mute states
+
 	g:redraw()
 end
 
@@ -498,7 +520,8 @@ function enc(e, d) --------------- enc() is automatically called by norns
     local bank = 'bank_' .. Preset.select .. '_'
    
 	if e == 1 then
-	
+		local root = params:get('chord_root')
+		params:set('chord_root',root + d)
 	end -- turn encoder 1
 	
 	if e == 2 then 
@@ -594,8 +617,11 @@ function redraw() -------------- redraw() is automatically called by norns
 	screen.move(2,10)
 	
 	if(interval_lookup[Scale[1].bits] ~= nil)then
-		screen.text(musicutil.note_num_to_name(Scale[1].root, false) .. ' ' .. interval_lookup[Scale[1].bits].name )
-		
+		if params:get('scale_1_follow') > 1 then
+			screen.text(musicutil.note_num_to_name(Scale[1].root + Chord.root, false) .. ' ' .. interval_lookup[Scale[1].bits].name )
+		else
+			screen.text(musicutil.note_num_to_name(Scale[1].root, false) .. ' ' .. interval_lookup[Scale[1].bits].name )
+		end
 	else
 		screen.text(musicutil.note_num_to_name(Scale[1].root, false) .. ' ' .. Scale[1].bits )
 	end
@@ -603,16 +629,19 @@ function redraw() -------------- redraw() is automatically called by norns
 	screen.move(2,20)
 	
 	if(interval_lookup[Scale[2].bits] ~= nil)then
-		screen.text(musicutil.note_num_to_name(Scale[2].root, false) .. ' ' .. interval_lookup[Scale[2].bits].name )
+		if params:get('scale_2_follow') > 1 then
+			screen.text(musicutil.note_num_to_name(Scale[2].root + Chord.root, false) .. ' ' .. interval_lookup[Scale[2].bits].name )
+		else
+			screen.text(musicutil.note_num_to_name(Scale[2].root, false) .. ' ' .. interval_lookup[Scale[2].bits].name )
+		end
 	else
 		screen.text(musicutil.note_num_to_name(Scale[2].root, false) .. ' ' .. Scale[2].bits )
 	end
 
 
 	screen.move(127,10)
-	screen.text_right(Scale[1].root)
-	screen.move(127,20)
-	screen.text_right(Scale[2].root)
+	screen.text_right(Chord.root)
+	
 
 	local display = message
 	local y = 40
@@ -684,82 +713,3 @@ end
 function cleanup() --------------- cleanup() is automatically called on script close
 	clock.cancel(redraw_clock_id) -- melt our clock vie the id we noted
 end
-
---[[
-1. Major
-2. Major 6 x
-3. Major 7 x
-4. Major 69
-5. Major 9
-6. Major 11
-7. Major 13
-8. Dominant 7 x
-9. Ninth
-10. Eleventh
-11. Thirteenth
-12. Augmented
-13. Augmented 7 x
-14. Sus4 
-15. Seventh sus4 x
-16. Minor Major 7 x
-17. Minor
-18. Minor 6 x
-19. Minor 7 x
-20. Minor 69
-21. Minor 9
-22. Minor 11
-23. Minor 13
-24. Diminished
-25. Diminished 7 x
-26. Half Diminished 7 
-]]
-
-
-EO = {
-	slot = {0,2,3,8,13,15,16,18,19,25},
-	program = function(index)
-	    
-	    local step = 0 
-        local chord = musicutil.CHORDS[index]
-        local intervals = {}
-        
-        if index > 0 then
-            print(chord.name .. ' on scale ' .. index)
-            intervals = chord.intervals
-        else
-            print('No chord.')
-            return
-        end    
-        
-        if slot ~= nil then
-            midi_out:cc(21,util.clamp((slot - 1) * 14,0,127),14)
-        end
-        
-    	metro[1].event = function(c)
-    		step = step + c%2
-    
-    		if(step <= #intervals) then
-    			if(c%2 == 1)then
-    				midi_out:note_on(intervals[step] + 36,127,14)
-    			else
-    				midi_out:note_off(intervals[step] + 36,127,14)
-    			end
-    		else
-    			if(c%2 == 1)then
-    				midi_out:note_on(math.floor((intervals[#intervals]/12) + 1) * 12 + 36,127,14)
-    			else
-    				midi_out:note_off(math.floor((intervals[#intervals]/12) + 1) * 12 + 36,127,14)
-    				metro[1]:stop()
-    			end
-    		end
-    	end
-        
-    	metro[1].time = 0.02
-        metro[1]:start()
-	end,
-
-}
-
-
-    
-    

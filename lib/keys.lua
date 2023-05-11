@@ -147,8 +147,12 @@ function Keys:grid_event(data)
 		if(index and data.state and self.index_map[index])then
     		local d = self.index_map[index]
 			
-			set_scale(Scale[d.scale].bits ~ (1 << (math.fmod(24 + d.note - Scale[d.scale].root,12))),d.scale)
-			
+			if alt then
+				Scale[d.scale].root = d.note
+			else
+				set_scale(Scale[d.scale].bits ~ (1 << (math.fmod(24 + d.note - Scale[d.scale].root,12))),d.scale)
+			end
+
 			self:set_grid()
     		self.grid:redraw()
 		end

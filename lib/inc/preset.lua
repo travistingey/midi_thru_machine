@@ -90,6 +90,9 @@ Preset = {
             Scale[2].bits = params:get(bank .. 'scale_2')
             Scale[1].root = params:get(bank .. 'scale_1_root')
             Scale[2].root = params:get(bank .. 'scale_2_root')
+            Scale[1].follow = params:get(bank .. 'scale_1_follow')
+            Scale[2].follow = params:get(bank .. 'scale_2_follow')
+            Chord.root = params:get(bank .. 'chord_root')
             
             set_scale(Scale[1].bits,1)
             set_scale(Scale[2].bits,2)
@@ -102,7 +105,7 @@ Preset = {
             local pset = Preset.bank[Preset.select]
             if (pset) then
                 for k, v in pairs(pset) do
-                    local target = Mute.map[k]
+                    local target = Mute.note_map[k]
                     Mute.state[k] = pset[k]
                     g.toggled[target.x][target.y] = pset[k]
 
@@ -113,7 +116,7 @@ Preset = {
                     end
                 end
             else
-                for k, v in pairs(Mute.map) do
+                for k, v in pairs(Mute.note_map) do
                     local target = v
                     Mute.state[k] = false
                     g.toggled[target.x][target.y] = false
@@ -148,12 +151,17 @@ Preset = {
             params:set( bank .. 'scale_1', Scale[1].bits )
             params:set( bank .. 'scale_2_root', Scale[2].root )
             params:set( bank .. 'scale_2', Scale[2].bits )
+            
+            params:set( bank .. 'scale_1_follow', Scale[1].follow )
+            params:set( bank .. 'scale_2_follow', Scale[2].follow )
+            params:set( bank .. 'chord_root', Chord.root )
+            
         end
 
         Preset.bank[i] = {}
         
         if(Preset.options['save_mute']) then
-            for k, v in pairs(Mute.map) do
+            for k, v in pairs(Mute.note_map) do
                 Preset.bank[i][k] = (Mute.state[k] == true)
             end
         end
