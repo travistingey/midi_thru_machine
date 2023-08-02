@@ -1,3 +1,6 @@
+local path_name = 'Foobar/lib/'
+local App = require(path_name .. 'app')
+
 Mute = {
     grid_start = {x = 1, y = 1},
     grid_end = {x = 4, y = 4},
@@ -53,8 +56,8 @@ Mute = {
         Mute.grid_map[4][4] = {note = 51, index = 16}
 
     end,
-    transport_event = function(data)
-        local alt = get_alt()
+    midi_event = function(data)
+        local alt = App:get_alt()
         -- react only to drum pads
         if data.ch == 10 and Mute.note_map[data.note] then
             local target = Mute.note_map[data.note]
@@ -63,18 +66,18 @@ Mute = {
                 
                 -- Mute is off
                 if data.type == 'note_on' then
-                    g.led[target.x][target.y] = 3 -- note_on unmuted.
+                    App.grid.led[target.x][target.y] = 3 -- note_on unmuted.
                 elseif data.type == 'note_off' then
-                    g.led[target.x][target.y] = 0 -- note_on unmuted.
+                    App.grid.led[target.x][target.y] = 0 -- note_on unmuted.
                 end
             else
                 -- Mute is on
-                midi_out:note_off(data.note, 64, 10)
+                App.midi_out:note_off(data.note, 64, 10)
                 if data.type == 'note_on' then
-                    g.led[target.x][target.y] = rainbow_on[Preset.select] -- note_on muted.
+                    App.grid.led[target.x][target.y] = MidiGrid.rainbow_on[App.preset] -- note_on muted.
                     data.type = 'note_off'
                 elseif data.type == 'note_off' then
-                    g.led[target.x][target.y] = rainbow_off[Preset.select] -- note_off muted.
+                    App.grid.led[target.x][target.y] = MidiGrid.rainbow_off[App.preset] -- note_off muted.
                 end
             end
         end
@@ -85,24 +88,24 @@ Mute = {
 
         local x = data.x
         local y = data.y
-        local alt = get_alt()
+        local alt = App:get_alt()
     
         if data.state and MidiGrid.in_bounds(data, Mute.bounds) then
     
             if alt then 
-                set_alt(false)
+                App:set_alt(false)
             else
                 local index = Mute.grid_map[x][y].note
                 Mute.state[index] = s.toggled[x][y]
         
                 if Mute.state[index] then 
-                    g.led[x][y] = rainbow_off[Preset.select]
+                    App.grid.led[x][y] = MidiGrid.rainbow_off[App.preset]
                 else
-                    g.led[x][y] = 0
+                    App.grid.led[x][y] = 0
                 end
                 
                 if Mute.state[index] and Mute.note_map[index].x == data.x and Mute.note_map[index].y == data.y then
-                    midi_out:note_off(Chord.last_note,0,14)
+                    App.midi_out:note_off(App.chord.last_note,0,14)
                 end
         
             end
@@ -116,9 +119,9 @@ Mute = {
             local y = Mute.note_map[i].y
 
             if state then
-                g.led[x][y] = rainbow_off[Preset.select]
+                App.grid.led[x][y] = MidiGrid.rainbow_off[App.preset]
             else
-                g.led[x][y] = 0
+                App.grid.led[x][y] = 0
             end
         end
     end

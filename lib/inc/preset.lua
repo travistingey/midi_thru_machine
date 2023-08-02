@@ -1,3 +1,7 @@
+local path_name = 'Foobar/lib/'
+local App = require(path_name .. 'app')
+local MidiGrid = require(path_name .. 'midigrid')
+
 Preset = {
     grid_start = {x = 5, y = 4},
     grid_end = {x = 8, y = 1},
@@ -23,112 +27,109 @@ Preset = {
         local x = data.x
         local y = data.y
         local index = MidiGrid.grid_to_index({x = x, y = y}, Preset.grid_start, Preset.grid_end)
-        local alt = get_alt()
+        local alt = App:get_alt()
     
         if (index ~= false and data.state) then
 
             if alt then
                 -- Save Preset
-                print('Saved Preset ' .. Preset.select .. ' ' .. x .. ',' .. y)
+                print('Saved Preset ' .. App.preset .. ' ' .. x .. ',' .. y)
                 Preset.save( index )
             else
                 -- Load Preset
-                print('Load Preset ' .. Preset.select .. ' ' .. x .. ',' .. y)
-                Preset.select = index
-                Preset.load( Preset.select )
+                print('Load Preset ' .. App.preset .. ' ' .. x .. ',' .. y)
+                App:set('preset',index)
+                Preset.load( App.preset )
 
             end
         elseif data.state and data.x ~= 9 and data.y ~= 9 then
             if(Preset.options['auto_save']) then
-                Preset.save(Preset.select)
+                Preset.save(App.preset)
             end
         end
     end,
     bounds = MidiGrid.get_bounds({x = 5, y = 4}, {x = 8, y = 1}),
     set_grid = function()
        
-        local current  = MidiGrid.index_to_grid(Preset.select,Preset.grid_start,Preset.grid_end)
+        local current  = MidiGrid.index_to_grid(App.preset,Preset.grid_start,Preset.grid_end)
         for px = math.min(Preset.grid_start.x,Preset.grid_end.x), math.max(Preset.grid_start.x,Preset.grid_end.x) do
             for py = math.min(Preset.grid_start.y,Preset.grid_end.y), math.max(Preset.grid_start.y,Preset.grid_end.y) do
                 
                 if(current.x == px and current.y == py) then
-                    g.led[px][py] = rainbow_off[Preset.select]
+                    App.grid.led[px][py] = MidiGrid.rainbow_off[App.preset]
                 else
-                    g.led[px][py] = {20,20,20}
+                    App.grid.led[px][py] = {20,20,20}
                 end
                 
             end 
         end
 
-        g:redraw()
+        App.grid:redraw()
     end,
     load = function (i)
-        Preset.select = i
+        App:set('preset',i)
         local bank = 'bank_' .. i .. '_'
 
         if Preset.options['set_pattern'] then
             local pattern = params:get( bank .. 'drum_pattern')
             local channel = params:get('bsp_drum_channel')
-            transport:program_change(pattern - 1, channel)
+            App.midi_in:program_change(pattern - 1, channel)
         end
 
         if Preset.options['set_seq1'] then
             local pattern = params:get( bank .. 'seq1_pattern')
             local channel = params:get( 'bsp_seq1_channel')
-            transport:program_change(pattern - 1, channel)
+            App.midi_in:program_change(pattern - 1, channel)
         end
 
         if Preset.options['set_seq2'] then
             local pattern = params:get( bank .. 'seq2_pattern')
             local channel = params:get( 'bsp_seq2_channel')
-            transport:program_change(pattern - 1, channel)
+            App.midi_in:program_change(pattern - 1, channel)
         end
 
         if Preset.options['set_scales'] then
+            App.scale[1].bits = params:get(bank .. 'scale_1')
+            App.scale[2].bits = params:get(bank .. 'scale_2')
+            App.scale[1].root = params:get(bank .. 'scale_1_root')
+            App.scale[2].root = params:get(bank .. 'scale_2_root')
+            App.scale[1].follow = params:get(bank .. 'scale_1_follow')
+            App.scale[2].follow = params:get(bank .. 'scale_2_follow')
+            App.chord.root = params:get(bank .. 'chord_root')
             
-            Scale[1].bits = params:get(bank .. 'scale_1')
-            Scale[2].bits = params:get(bank .. 'scale_2')
-            Scale[1].root = params:get(bank .. 'scale_1_root')
-            Scale[2].root = params:get(bank .. 'scale_2_root')
-            Scale[1].follow = params:get(bank .. 'scale_1_follow')
-            Scale[2].follow = params:get(bank .. 'scale_2_follow')
-            Chord.root = params:get(bank .. 'chord_root')
-            
-            set_scale(Scale[1].bits,1)
-            set_scale(Scale[2].bits,2)
-            
-            
-            
+            App:set_scale(App.scale[1].bits,1)
+            App:set_scale(App.scale[2].bits,2)
+                       
         end
                
         if Preset.options['set_mute'] then
-            local pset = Preset.bank[Preset.select]
+            local pset = Preset.bank[App.preset]
             if (pset) then
                 for k, v in pairs(pset) do
                     local target = Mute.note_map[k]
                     Mute.state[k] = pset[k]
-                    g.toggled[target.x][target.y] = pset[k]
+                    App.grid.toggled[target.x][target.y] = pset[k]
 
                     if pset[k] then
-                        g.led[target.x][target.y] = rainbow_off[Preset.select]
+                        App.grid.led[target.x][target.y] = MidiGrid.rainbow_off[App.preset]
                     else
-                        g.led[target.x][target.y] = 0
+                        App.grid.led[target.x][target.y] = 0
                     end
                 end
             else
                 for k, v in pairs(Mute.note_map) do
                     local target = v
                     Mute.state[k] = false
-                    g.toggled[target.x][target.y] = false
-                    g.led[target.x][target.y] = 0
+                    App.grid.toggled[target.x][target.y] = false
+                    App.grid.led[target.x][target.y] = 0
                 end
             end
         end
         Preset:set_grid()
-        g:redraw()
+        App.grid:redraw()
     end,
     save = function (i)
-        local current_bank = 'bank_' .. Preset.select .. '_'
+        local current_bank = 'bank_' .. App.preset .. '_'
         local bank = 'bank_' .. i .. '_'
 
         if(Preset.options['save_pattern']) then
@@ -147,14 +148,14 @@ Preset = {
         end
         
         if(Preset.options['save_scales']) then
-            params:set( bank .. 'scale_1_root', Scale[1].root )
-            params:set( bank .. 'scale_1', Scale[1].bits )
-            params:set( bank .. 'scale_2_root', Scale[2].root )
-            params:set( bank .. 'scale_2', Scale[2].bits )
+            params:set( bank .. 'scale_1_root', App.scale[1].root )
+            params:set( bank .. 'scale_1', App.scale[1].bits )
+            params:set( bank .. 'scale_2_root', App.scale[2].root )
+            params:set( bank .. 'scale_2', App.scale[2].bits )
             
-            params:set( bank .. 'scale_1_follow', Scale[1].follow )
-            params:set( bank .. 'scale_2_follow', Scale[2].follow )
-            params:set( bank .. 'chord_root', Chord.root )
+            params:set( bank .. 'scale_1_follow', App.scale[1].follow )
+            params:set( bank .. 'scale_2_follow', App.scale[2].follow )
+            params:set( bank .. 'chord_root', App.chord.root )
             
         end
 
@@ -166,7 +167,7 @@ Preset = {
             end
         end
         
-        set_alt(false)
+        App:set_alt(false)
         screen_dirty = true
     end
 }

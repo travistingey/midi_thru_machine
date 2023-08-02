@@ -1,3 +1,6 @@
+local path_name = 'Foobar/lib/'
+local App = require(path_name .. 'app')
+
 Mode = {}
 Mode.types = {{
 	name = 'Song Mode',
@@ -10,7 +13,6 @@ Mode.types = {{
 		end
 	end,
 	on_grid = function(s,data)
-	    
 	    local x = data.x
         local y = data.y
         local index = MidiGrid.grid_to_index({x = x, y = y}, Preset.grid_start, Preset.grid_end)
@@ -18,9 +20,8 @@ Mode.types = {{
         if (index ~= false and data.state) then
             
     	    s.select_action = index
-            g.led[9][9] = rainbow_on[index]
-            
-            g:redraw()
+            App.grid.led[9][9] = MidiGrid.rainbow_on[index]
+            App.grid:redraw()
         end
         
     end
@@ -31,7 +32,7 @@ Mode.types = {{
 	actions = 4,
 	action = function(s,d)
        if(d == 1) then
-            transport:cc(9,26,16)
+            App.midi_in:cc(9,6,16)
        elseif(d == 2) then
 			transport:cc(9,50,16)
        elseif(d == 3) then
@@ -46,7 +47,7 @@ Mode.types = {{
 	    local x = data.x
         local y = data.y
         local index = MidiGrid.grid_to_index({x = x, y = y}, Mute.grid_start, Mute.grid_end)
-        local alt = get_alt()
+        local alt = App:get_alt()
         
         if (index ~= false and data.state and alt) then
            print('set drum effects bank ' .. index)
@@ -58,11 +59,11 @@ Mode.types = {{
         
         for i = 1, 16 do
             local  c = MidiGrid.index_to_grid(i, Mute.grid_start, Mute.grid_end) 
-            g.led[c.x][c.y] = 0
+            App.grid.led[c.x][c.y] = 0
         end
         
 		if(alt) then
-			g.led[current.x][current.y] = rainbow_on[s.bank]
+			App.grid.led[current.x][current.y] = MidiGrid.rainbow_on[s.bank]
 		else
 			Mute:set_grid()
 		end
@@ -89,6 +90,7 @@ function Mode:load(data)
 		self[i].on_grid = self.types[t].on_grid
 		self[i].on_alt = self.types[t].on_alt
 		self[i].on_transport = self.types[t].on_transport
+		self[i].on_midi = self.types[t].on_midi
 		self[i].action = self.types[t].action
 		self[i].actions = self.types[t].actions
 		self[i].id = i
@@ -104,34 +106,32 @@ function Mode:load(data)
 	end
 	
 	self[1].display = true
-	g.led[5][9] = 3
-    
-	self.select = 1
-	self[self.select]:set_grid()
+	App.grid.led[5][9] = 3
 	
-	Mode:set_mode(1)
+	self:set_mode(1)
 end
 
 function Mode:set_mode(d)
+	App:set('mode',d)
 	for i = 1, 4 do
-		if i == self.select then
+		if i == App.mode then
 			self[i].display = true
 		else
 			self[i].display = false
 		end
 	end
 
-	self[self.select].grid.led[self.select + 4][9] = 3
-	self[self.select]:set_grid()
-	self[self.select].select_action = Preset.select
-	self[self.select].grid.led[9][9] = rainbow_on[Preset.select]
+	App.grid.led[App.mode + 4][9] = 3
+	self[App.mode]:set_grid()
+	self[App.mode].select_action = App.preset
+	self[App.mode].grid.led[9][9] = MidiGrid.rainbow_on[App.preset]
 	Mode:set_grid()
 end
 
 function Mode:grid_event(data)
 	local x = data.x
 	local y = data.y
-	local alt = get_alt()
+	local alt = App:get_alt()
 
 	-- Mode Select
 	if x > 4 and y == 9 and data.state then
@@ -139,17 +139,17 @@ function Mode:grid_event(data)
 		
 		if(alt) then 
 			self[m].enabled = (not self[m].enabled)
-			set_alt(false)
+			App:set_alt(false)
 		else
-			self.select = m
+			
 			self:set_mode(m)
 		end
 		
 		self:set_grid()
 	end
 	
-	if self[self.select].on_grid ~= nil then
-	    self[self.select]:on_grid(data)
+	if self[App.mode].on_grid ~= nil then
+	    self[App.mode]:on_grid(data)
 	end
 
 end
@@ -157,15 +157,15 @@ end
 function Mode:set_grid()
 	for i = 5, 8 do 
 		local m = i - 4
-		if self.select == m and self[m].enabled then
-			g.led[i][9] = 3
+		if App.mode == m and self[m].enabled then
+			App.grid.led[i][9] = 3
 		elseif self[m].enabled then
-			g.led[i][9] = 0
-		elseif self.select == m then
-			g.led[i][9] = {5, true}
+			App.grid.led[i][9] = 0
+		elseif App.mode == m then
+			App.grid.led[i][9] = {5, true}
 		else
-			g.led[i][9] = {7, true}
+			App.grid.led[i][9] = {7, true}
 		end
 	end
-	g:redraw()
+	App.grid:redraw()
 end

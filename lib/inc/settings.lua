@@ -1,41 +1,47 @@
+local path_name = 'Foobar/lib/'
+local musicutil = require(path_name .. 'musicutil-extended')
+local App = require(path_name .. 'app')
+
 -- PROJECT ------------------------------------------------------------------
 params:add_separator('Project')
 
 params:add_number('project_bank', 'Project',1,16,1)
-params:set_action('project_bank', function(i)  transport:cc(0,i-1,16) end)
+params:set_action('project_bank', function(i)  App.midi_in:cc(0,i-1,16) end)
 
 params:add_number('drum_bank', 'Drum Bank',1,7,1)
 params:set_action('drum_bank', function(i)
-    midi_out:program_change(i-1,10)
+    App.midi_out:program_change(i-1,10)
     for y=1,8 do
-        g.led[9][y] = 0
+        App.grid.led[9][y] = 0
     end    
-    g.led[9][9 - i] = 3 -- Set Drum Bank
+    App.grid.led[9][9 - i] = 3 -- Set Drum Bank
     current_bank = i
-	g:redraw()
+	App.grid:redraw()
 end)
 
 chord_follow_options = {'No','Transpose','Degree','Chord','Pentatonic'}
 
-params:add_group('chord', 'Chords', 29)
+params:add_group('chord', 'Chords', 30)
 params:add_number( 'chord_root', 'Root', -24,24,0)
 
 params:set_action('chord_root', function(d)
-    if Chord.last_note ~= nil then
-        midi_out:note_off(Chord.last_note,0,14)
+    if App.chord.last_note ~= nil then
+        App.midi_out:note_off(App.chord.last_note,0,14)
     end
-    Chord.root = d
+    App.chord.root = d
 end)
 
 params:add_option( 'scale_1_follow', 'Scale 1 Follow', chord_follow_options,1)
 params:set_action( 'scale_1_follow', function(d)
-    Scale[1].follow = d    
+    App.scale[1].follow = d    
 end)
 
 params:add_option( 'scale_2_follow', 'Scale 2 Follow', chord_follow_options,1)
-params:set_action( 'scale_2_follow', function(d) Scale[2].follow = d end)
+params:set_action( 'scale_2_follow', function(d) App.scale[2].follow = d end)
 
-params:add_number( 'chord_mute', 'Mute Channel', 0,127,38)
+params:add_number( 'chord_mute', 'Mute', 0,127,38)
+params:add_number('chord_channel','Channel' ,1,16,14)
+
 
 params:add_separator('Chord Map')
 
@@ -50,8 +56,8 @@ for i=1,12 do
     
     params:set_action('chord_note_' .. i,
         function(d)
-            if Chord[i] ~= nil then
-                Chord[i].note = d
+            if App.chord[i] ~= nil then
+                App.chord[i].note = d
             end
         end
     )
@@ -60,7 +66,7 @@ for i=1,12 do
         function(param)
             local chord = params:get('eo_slot_' .. param:get())
 
-            return CHORDS[chord].name .. ' ('.. param:get() ..')'
+            return musicutil.CHORDS[chord].name .. ' ('.. param:get() ..')'
         end
         )
     
@@ -68,15 +74,15 @@ for i=1,12 do
         function(d)
             local selection = params:get('eo_slot_' .. d)
             
-            if Chord[i] == nil then
-                Chord[i] = {}
+            if App.chord[i] == nil then
+                App.chord[i] = {}
             end
             
-            Chord[i].note = params:get('chord_note_' .. i) or i - 1
-            Chord[i].name = CHORDS[selection].name
-            Chord[i].intervals = CHORDS[selection].intervals
-            Chord[i].slot = d
-            Chord[i].index = selection
+            App.chord[i].note = params:get('chord_note_' .. i) or i - 1
+            App.chord[i].name = musicutil.CHORDS[selection].name
+            App.chord[i].intervals = musicutil.CHORDS[selection].intervals
+            App.chord[i].slot = d
+            App.chord[i].index = selection
         
         end
     )
@@ -91,26 +97,26 @@ params:add_group('bsp', 'Beatstep Pro', 4)
 params:add_option("bsp_touchstrip_mode", "Touchstrip Mode", {'Looper','Roller'}, 1)
 params:set_action("bsp_touchstrip_mode",function(x)
     if x == 1 then
-        transport:send({0xF0,0x00,0x20,0x6B,0x7F,0x42,0x02,0x00,0x41,0x17,0x00,0xF7})
+        App.midi_in:send({0xF0,0x00,0x20,0x6B,0x7F,0x42,0x02,0x00,0x41,0x17,0x00,0xF7})
     elseif x == 2 then
-        transport:send({0xF0,0x00,0x20,0x6B,0x7F,0x42,0x02,0x00,0x41,0x17,0x01,0xF7})
+        App.midi_in:send({0xF0,0x00,0x20,0x6B,0x7F,0x42,0x02,0x00,0x41,0x17,0x01,0xF7})
     end
 end)
 params:add_number("bsp_seq1_channel", "Seq 1 Ch", 1,16,1)
 params:set_action("bsp_seq1_channel",function(x)
-    transport:send({0xF0,0x00,0x20,0x6B,0x7F,0x42,0x02,0x00,0x41,0x40,x - 1,0xF7})      
-    transport:send({0xF0,0x00,0x20,0x6B,0x7F,0x42,0x02,0x00,0x41,0x41,x - 1,0xF7})    
+    App.midi_in:send({0xF0,0x00,0x20,0x6B,0x7F,0x42,0x02,0x00,0x41,0x40,x - 1,0xF7})      
+    App.midi_in:send({0xF0,0x00,0x20,0x6B,0x7F,0x42,0x02,0x00,0x41,0x41,x - 1,0xF7})    
 end)
 params:add_number("bsp_seq2_channel", "Seq 2 Ch", 1,16,5)
 params:set_action("bsp_seq2_channel",function(x)
-    transport:send({0xF0,0x00,0x20,0x6B,0x7F,0x42,0x02,0x00,0x41,0x42,x - 1,0xF7})
-    transport:send({0xF0,0x00,0x20,0x6B,0x7F,0x42,0x02,0x00,0x41,0x43,x - 1,0xF7}) 
+    App.midi_in:send({0xF0,0x00,0x20,0x6B,0x7F,0x42,0x02,0x00,0x41,0x42,x - 1,0xF7})
+    App.midi_in:send({0xF0,0x00,0x20,0x6B,0x7F,0x42,0x02,0x00,0x41,0x43,x - 1,0xF7}) 
 end)
 
 params:add_number("bsp_drum_channel", "Drum Ch", 1,16,10)
 params:set_action("bsp_drum_channel",function(x)
-    transport:send({0xF0,0x00,0x20,0x6B,0x7F,0x42,0x02,0x00,0x41,0x44,x - 1,0xF7})   
-    transport:send({0xF0,0x00,0x20,0x6B,0x7F,0x42,0x02,0x00,0x41,0x45,x - 1,0xF7})   
+    App.midi_in:send({0xF0,0x00,0x20,0x6B,0x7F,0x42,0x02,0x00,0x41,0x44,x - 1,0xF7})   
+    App.midi_in:send({0xF0,0x00,0x20,0x6B,0x7F,0x42,0x02,0x00,0x41,0x45,x - 1,0xF7})   
 end)
 
 
@@ -122,15 +128,15 @@ params:add_number('eo_program_select', 'Program', 1,10,1, function(param)
     local slot = param:get()
     local chord = params:get('eo_slot_' .. slot)
 
-    return CHORDS[ chord ].name .. ' (' .. slot .. ')'
+    return musicutil.CHORDS[ chord ].name .. ' (' .. slot .. ')'
 
 end)
 params:add_trigger('eo_program','Go')
 params:add_separator('')
 
 for i = 1, 10 do
-    params:add_number('eo_slot_' .. i, 'Scale ' .. i, 1,#CHORDS,1, function(param)
-       return CHORDS[param:get()].name
+    params:add_number('eo_slot_' .. i, 'Scale ' .. i, 1, #musicutil.CHORDS,1, function(param)
+       return musicutil.CHORDS[param:get()].name
     end)
 end
 
@@ -140,27 +146,27 @@ params:set_action('eo_program', function(d)
     local slot = params:get('eo_program_select')
     local selection = params:get('eo_slot_' .. slot)
     local step = 0 
-    local intervals = CHORDS[selection].intervals
+    local intervals = musicutil.CHORDS[selection].intervals
     
-    midi_out:cc(21,util.clamp((slot - 1) * 14,0,127),14)
+    App.midi_out:cc(21,util.clamp((slot - 1) * 14,0,127),14)
         
-    print('Programming ' .. CHORDS[selection].name .. ' on Scale ' .. slot)
+    print('Programming ' .. musicutil.CHORDS[selection].name .. ' on Scale ' .. slot)
     metro[1].event = function(c)
         EO_Learn = true
         step = step + c%2
         if(step <= #intervals) then
             if(c%2 == 1)then
                 print(intervals[step])
-                midi_out:note_on(intervals[step] + 60,127,14)
+                App.midi_out:note_on(intervals[step] + 60,127,14)
             else
-                midi_out:note_off(intervals[step] + 60,127,14)
+                App.midi_out:note_off(intervals[step] + 60,127,14)
             end
         else
             if(c%2 == 1)then
                 print((math.floor(intervals[#intervals]/12) + 1) * 12)
-                midi_out:note_on((math.floor(intervals[#intervals]/12) + 1) * 12 + 60,127,14)
+                App.midi_out:note_on((math.floor(intervals[#intervals]/12) + 1) * 12 + 60,127,14)
             else
-                midi_out:note_off((math.floor(intervals[#intervals]/12) + 1) * 12 + 60,127,14)
+                App.midi_out:note_off((math.floor(intervals[#intervals]/12) + 1) * 12 + 60,127,14)
                 print('done.')
             end
         end
@@ -230,7 +236,7 @@ for i = 1,4 do
             crow.output[i].action = "to(dyn{note=0},dyn{slew=0})"
         end
 
-        Output[i].type = crow_options[d]
+        App.crow_out[i].type = crow_options[d]
         
         _menu.rebuild_params()
     end)
@@ -260,12 +266,12 @@ for i = 1,4 do
     }
 
     params:add_control(out .. 'slew_up',"Slew Up",slew)
-    params:set_action( out .. 'slew_up', function(d) Output[i].slew_up = d end )
+    params:set_action( out .. 'slew_up', function(d) App.crow_out[i].slew_up = d end )
     params:add_control(out .. 'slew_down',"Slew Down",slew)
-    params:set_action( out .. 'slew_down', function(d) Output[i].slew_down = d end )
+    params:set_action( out .. 'slew_down', function(d) App.crow_out[i].slew_down = d end )
     params:add_number(out .. 'range','Range',1,5,2)
-    params:set_action( out .. 'range', function(d) Output[i].range = d end )
-    params:set_action( out .. 'source', function(d) Output[i].source = d end )
+    params:set_action( out .. 'range', function(d) App.crow_out[i].range = d end )
+    params:set_action( out .. 'source', function(d) App.crow_out[i].source = d end )
 
     if i == 1 then
         params:add_number( out .. 'trigger', 'Trigger',1,128,36)
@@ -277,14 +283,14 @@ for i = 1,4 do
         params:add_number( out .. 'trigger', 'Trigger',1,128,37)
     end
 
-    params:set_action( out .. 'trigger',function(d) Output[i].trigger = d end )
+    params:set_action( out .. 'trigger',function(d) App.crow_out[i].trigger = d end )
 
 end
 
 -- MODES ------------------------------------------------------------------------- 
 
 local mode_types = {'song', 'drum', 'keys',}
-function format_div(param)
+local function format_div(param)
     local index = param:get()
 
     if index > 5 then
@@ -386,36 +392,36 @@ for i = 1,16 do
     
     params:add_number( bank .. 'drum_pattern', 'Drum Pattern',1,16, i)
     params:set_action( bank .. 'drum_pattern', function(d)
-        if(Preset.select and Preset.select == i) then
-            transport:program_change(d-1,10)
+        if(App.preset and App.preset == i) then
+            App.midi_in:program_change(d-1,10)
         end    
     end)
 
     params:add_number( bank .. 'seq1_pattern', 'Seq 1 Pattern',1,16, i)
     params:set_action( bank .. 'seq1_pattern', function(d)
-        if(Preset.select and Preset.select == i) then
-            transport:program_change(d-1,10)
+        if(App.preset and App.preset == i) then
+            App.midi_in:program_change(d-1,10)
         end    
     end)
 
     params:add_number( bank .. 'seq2_pattern', 'Seq 2 Pattern',1,16, i)
     params:set_action( bank .. 'seq2_pattern', function(d)
-        if(Preset.select and Preset.select == i) then
-            transport:program_change(d-1,10)
+        if(App.preset and App.preset == i) then
+            App.midi_in:program_change(d-1,10)
         end    
     end)
     
     
     params:add_number( bank .. 'chord_root', 'Chord Root',-24,24,0)
     params:set_action( bank .. 'chord_root', function(d)
-        if(Preset.select and Preset.select == i) then
-            if Chord.last_note ~= nil then
-               midi_out:note_off(Chord.last_note,0,14) 
+        if(App.preset and App.preset == i) then
+            if App.chord.last_note ~= nil then
+               App.midi_out:note_off(App.chord.last_note,0,14) 
             end
 
             for s=1,2 do
                 if(params:get('scale_' .. s .. '_follow') > 1) then
-                    Scale[s].root = d
+                    App.scale[s].root = d
                 end
             end
             
@@ -430,29 +436,29 @@ for i = 1,16 do
     
     params:add_number( bank .. 'scale_1_root', 'Scale One Root',-24,24,0)
     params:set_action( bank .. 'scale_1_root', function(d)
-        if(Preset.select and Preset.select == i) then
-            Scale[1].root = d
+        if(App.preset and App.preset == i) then
+            App.scale[1].root = d
         end    
     end)
     
     params:add_number( bank .. 'scale_1', 'Scale One',1,4095,1) -- end scale one
-    params:set_action( bank .. 'scale_1', function(s) if (Preset.select and Preset.select == i) then set_scale(s,1) end end)
+    params:set_action( bank .. 'scale_1', function(s) if (App.preset and App.preset == i) then App:set_scale(s,1) end end)
     
     params:add_option( bank .. 'scale_1_follow', 'Scale One Follow', chord_follow_options,1) -- end scale one
-    params:set_action( bank .. 'scale_1_follow', function(d) if (Preset.select and Preset.select == i) then Scale[1].follow = d end end)
+    params:set_action( bank .. 'scale_1_follow', function(d) if (App.preset and App.preset == i) then App.scale[1].follow = d end end)
     
     params:add_number( bank .. 'scale_2_root', 'Scale Two Root',-24,24,0)
     params:set_action( bank .. 'scale_2_root', function(d)
-        if(Preset.select and Preset.select == i) then
-            Scale[2].root = d 
+        if(App.preset and App.preset == i) then
+            App.scale[2].root = d 
         end    
     end)
     
     params:add_number( bank .. 'scale_2', 'Scale Two',1,4095,1) -- end scale two
-    params:set_action(bank .. 'scale_2', function(s) if(Preset.select and Preset.select == i) then set_scale(s,2) end end)
+    params:set_action(bank .. 'scale_2', function(s) if(App.preset and App.preset == i) then App:set_scale(s,2) end end)
     
      params:add_option( bank .. 'scale_2_follow', 'Scale Two Follow', chord_follow_options,1) -- end scale one
-    params:set_action( bank .. 'scale_2_follow', function(d) if (Preset.select and Preset.select == i) then Scale[2].follow = d end end)
+    params:set_action( bank .. 'scale_2_follow', function(d) if (App.preset and App.preset == i) then App.scale[2].follow = d end end)
     
 end
 

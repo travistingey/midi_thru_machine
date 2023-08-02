@@ -1,6 +1,9 @@
--- Keys 
+local path_name = 'Foobar/lib/'
+local App = require(path_name .. 'app')
+local musicutil = require(path_name .. 'musicutil-extended')
 
-Keys = {}
+-- Keys 
+local Keys = {}
 
 function Keys:new (o)
     o = o or {}
@@ -9,7 +12,7 @@ function Keys:new (o)
     self.__index = self
 	
 	o.id = o.id or 1
-    o.grid = g
+    o.grid = App.grid
     o.grid_start = o.grid_start or {x = 1, y = 8}
     o.grid_end = o.grid_end or {x = 8, y = 5}
 	o.bounds = o.bounds or o.grid.get_bounds(o.grid_start,o.grid_end)
@@ -68,6 +71,7 @@ function Keys:new (o)
     o.display = o.display or false
 	o.on_grid = o.on_grid
 	o.on_transport = o.on_transport
+	o.on_midi = o.on_midi
 	o.data = o.data or {}
 	
 	
@@ -94,32 +98,32 @@ function Keys:set_grid()
 		end
 
 		for s = 1,2 do
-			local scale =  bits_to_intervals(Scale[s].bits)
+			local scale =  musicutil.bits_to_intervals(App.scale[s].bits)
 			for i, v in pairs(self.note_map) do
 				self.grid.led[ v['scale_' .. s].x ][ v['scale_' .. s] .y] = {5,5,5}
 			end
 
 			for i, v in pairs(scale) do
-				local n = (24 + v + Scale[s].root) % 12
+				local n = (24 + v + App.scale[s].root) % 12
 				local c = self.note_map[n]
 
-				if (n == math.fmod(Scale[s].root,12) ) then
-					self.grid.led[c['scale_'..s].x][c['scale_'..s].y] = rainbow_on[math.fmod(Preset.select,#rainbow_on + 1)]
+				if (n == math.fmod(App.scale[s].root,12) ) then
+					self.grid.led[c['scale_'..s].x][c['scale_'..s].y] = MidiGrid.rainbow_on[math.fmod(App.preset,#MidiGrid.rainbow_on + 1)]
 					
 					if n == 0 then
 						if s%2 == 1 then
-							self.grid.led[8][7] = rainbow_on[math.fmod(Preset.select,#rainbow_on + 1)]
+							self.grid.led[8][7] = MidiGrid.rainbow_on[math.fmod(App.preset,#MidiGrid.rainbow_on + 1)]
 						else
-							self.grid.led[8][5] = rainbow_on[math.fmod(Preset.select,#rainbow_on + 1)]
+							self.grid.led[8][5] = MidiGrid.rainbow_on[math.fmod(App.preset,#MidiGrid.rainbow_on + 1)]
 						end
 					end
 				else
-					self.grid.led[c['scale_'..s].x][c['scale_'..s].y] = rainbow_off[math.fmod(Preset.select,#rainbow_off + 1)]
+					self.grid.led[c['scale_'..s].x][c['scale_'..s].y] = MidiGrid.rainbow_off[math.fmod(App.preset,#MidiGrid.rainbow_off + 1)]
 					if n == 0 then
 						if s%2 == 1 then
-							self.grid.led[8][7] = rainbow_on[math.fmod(Preset.select,#rainbow_off + 1)]
+							self.grid.led[8][7] = MidiGrid.rainbow_on[math.fmod(App.preset,#MidiGrid.rainbow_off + 1)]
 						else
-							self.grid.led[8][5] = rainbow_on[math.fmod(Preset.select,#rainbow_off + 1)]
+							self.grid.led[8][5] = MidiGrid.rainbow_on[math.fmod(App.preset,#MidiGrid.rainbow_off + 1)]
 						end
 					end
 				end
@@ -132,6 +136,12 @@ end
 function Keys:transport_event(data)
 	if self.on_transport ~= nil and self.enabled then
 		self:on_transport(data)
+	end
+end
+
+function Keys:midi_event(data)
+	if self.on_midi ~= nil and self.enabled then
+		self:on_midi(data)
 	end
 end
 
@@ -148,9 +158,9 @@ function Keys:grid_event(data)
     		local d = self.index_map[index]
 			
 			if alt then
-				Scale[d.scale].root = d.note
+				App.scale[d.scale].root = d.note
 			else
-				set_scale(Scale[d.scale].bits ~ (1 << (math.fmod(24 + d.note - Scale[d.scale].root,12))),d.scale)
+				App:set_scale(App.scale[d.scale].bits ~ (1 << (math.fmod(24 + d.note - App.scale[d.scale].root,12))),d.scale)
 			end
 
 			self:set_grid()

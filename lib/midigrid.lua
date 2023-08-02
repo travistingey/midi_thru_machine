@@ -1,4 +1,17 @@
-MidiGrid = {}
+local MidiGrid = {}
+local utilities = require('Foobar/lib/utilities')
+
+
+ 
+  
+MidiGrid.rainbow_on = {{127,0,0},{127,15,0},{127,45,0},{127,100,0},{75,127,0},{40,127,0},{0,127,0},{0,127,27},{0,127,127},{0,45,127},{0,0,127},{10,0,127},{27,0,127},{55,0,127},{127,0,75},{127,0,15}}
+MidiGrid.rainbow_off = {}
+
+ -- Creating the rainbow_off table by dividing the MidiGrid.rainbow_on values by 4
+ for i = 1, 16 do
+  MidiGrid.rainbow_off[i] = {math.floor(MidiGrid.rainbow_on[i][1]/4),math.floor(MidiGrid.rainbow_on[i][2]/4),math.floor(MidiGrid.rainbow_on[i][3]/4)}
+ end
+
 
 function MidiGrid:new (o)
   o = o or {}
@@ -7,19 +20,19 @@ function MidiGrid:new (o)
   self.__index = self
   
   o.event = o.event or function(s, data)
-      if data.state then 
-       s:led( data.x, data.y, s.default_on[data.x][data.y])
-      else
-        s:led( data.x, data.y, s.default_off[data.x][data.y])
-      end
+    tab.print(s)
+    if data.state then 
+      s:led( data.x, data.y, s.default_on[data.x][data.y])
+    else
+      s:led( data.x, data.y, s.default_off[data.x][data.y])
     end
-  
+  end
+ 
+
   o.channel = o.channel or 2
   o.led = {{},{},{},{},{},{},{},{},{}}
   o.toggled = {{},{},{},{},{},{},{},{},{}}
   o.down = {{},{},{},{},{},{},{},{},{}}
-  
-  o.state = {{},{},{},{},{},{},{},{},{}} -- KILL THIS ONE
   
   o.midi = midi.connect(o.channel)
   o.midi:send({240,0,32,41,2,13,0,127,247})  -- Set to Programmer Mode
@@ -70,7 +83,7 @@ function MidiGrid:new (o)
   return o
 end
 
-function MidiGrid.set_led(x,y,z)
+function MidiGrid:set_led(x,y,z)
   
     local target = math.fmod(x,10) + 10 * y
     local message = {}
@@ -78,31 +91,29 @@ function MidiGrid.set_led(x,y,z)
     if(type(z) == 'table')then
         if #z == 3 then
             -- length of 3, RGB
-            message = concat_table(message,{3,target})
-            message = concat_table(message,z)    
+            message = utilities.concat_table(message,{3,target})
+            message = utilities.concat_table(message,z)    
        
         elseif z[2] == true and #z == 2  then
             -- length of 2, second value is true
-            message = concat_table(message,{2,target})
-            message = concat_table(message,{z[1]})
+            message = utilities.concat_table(message,{2,target})
+            message = utilities.concat_table(message,{z[1]})
         
         elseif #z == 2 then
             -- length of 2
-            message = concat_table(message,{1,target})
-            message = concat_table(message,z)
+            message = utilities.concat_table(message,{1,target})
+            message = utilities.concat_table(message,z)
             
         else
             -- length of 1 
-            message = concat_table(message,{0,target})
-            message = concat_table(message,z)
+            message = utilities.concat_table(message,{0,target})
+            message = utilities.concat_table(message,z)
             
         end
       else
         -- send single value to led
-        tab.print(message)
-        
-        message = concat_table(message,{0,target})
-        message = concat_table(message,{z})
+        message = utilities.concat_table(message,{0,target})
+        message = utilities.concat_table(message,{z})
         
     end
 
@@ -116,16 +127,16 @@ function MidiGrid:redraw()
     for x = 1, 9 do
       for y = 1, 9 do
           if (self.led[x][y] == nil) then
-            local m = self.set_led(x,y,0)
-            message = concat_table(message,m)
+            local m = self:set_led(x,y,0)
+            message = utilities.concat_table(message,m)
           else
-              local m = self.set_led(x,y,self.led[x][y])
-              message = concat_table(message, m )
+              local m = self:set_led(x,y,self.led[x][y])
+              message = utilities.concat_table(message, m )
           end
       end
     end
     
-    message = concat_table(message,{247})
+    message = utilities.concat_table(message,{247})
     self.midi:send(message)
 end
 
@@ -181,16 +192,6 @@ function MidiGrid.index_to_grid(index,grid_start,grid_end)
   else
     return {x=x,y=y}
   end
-end
-
-
---
-
-function concat_table(t1,t2)
-   for i=1,#t2 do
-      t1[#t1+1] = t2[i]
-   end
-   return t1
 end
 
 return MidiGrid
