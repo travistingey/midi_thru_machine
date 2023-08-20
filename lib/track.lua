@@ -78,15 +78,32 @@ function Track:register_static_components(id)
         instance.seq = Seq:new({
             id = id,
             track = App.track[id],
-            grid = Grid:new({
-                grid_start = {x=1,y=1},
-                grid_end = {x=4,y=4},
+            clip_grid = Grid:new({
+                grid_start = {x=1,y=4},
+                grid_end = {x=4,y=1},
                 display_start = {x=1,y=1},
                 display_end = {x=4,y=4},
                 offset = {x=4,y=0},
                 midi = App.midi_grid,
                 event = function(s,d)
-                    instance.seq:grid_event(d)
+                    instance.seq:clip_grid_event(d)
+                end,
+                set_grid = function()
+                    instance.seq:set_clip_grid()
+                end
+            }),
+            seq_grid = Grid:new({
+                grid_start = {x=1,y=128},
+                grid_end = {x=8,y=1},
+                display_start = {x=1,y=41},
+                display_end = {x=8,y=44},
+                offset = {x=0,y=4},
+                midi = App.midi_grid,
+                event = function(s,d)
+                    instance.seq:seq_grid_event(d)
+                end,
+                set_grid = function()
+                    instance.seq:set_seq_grid()
                 end
             })
         })
@@ -101,6 +118,9 @@ function Track:register_static_components(id)
                 midi = App.midi_grid,
                 event = function(s,d)
                     instance.mute:grid_event(d)
+                end,
+                set_grid = function()
+                    instance.mute:set_grid()
                 end
             })
         })

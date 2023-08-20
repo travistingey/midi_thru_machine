@@ -61,10 +61,6 @@ function App:init()
 	
 	params:bang()
 	
-	
-
-
-
 	-- Set up transport event handler for incoming MIDI from the Transport device
     self.midi_in.event = function(msg)
 		local data = midi.to_msg(msg)
@@ -118,66 +114,157 @@ function App:init()
 	end
 	
 	-- Create the modes
-	-- Lets call this Mode 1
-
 	self.grid = Grid:new({
 		grid_start = {x=1,y=1},
-		grid_end = {x=4,y=32},
-		display_start = {x=1,y=10},
-		display_end = {x=4,y=13},
-		midi = self.midi_grid
+		grid_end = {x=9,y=9},
+		display_start = {x=1,y=1},
+		display_end = {x=9,y=9},
+		midi = self.midi_grid,
+		active = true
 	})
 
+	-- Track components are instantiated with parameter actions
+	params:default()
+
+
+	--[[
+		This is the start of a new Mode class. Let's describe the patterns that work so that we can make the mode class a better wrapper.
+		1.	The App's midi_grid event need to pass the raw event data to the Grid instances for the current mode using the :process method.
+		2.	Function Pads: the arrow pads, bank select, alt pad and indicator will switch functions between modes.
+			We can pass data from these grid events by calling other grid events directly using the components grid methods.
+			We should be careful since the indices for the function pads are outside the main grid, which could cause issues.
+			Can we use a callback pattern here?
+		3.	Mode select executes at an App level and is responsible for enabling and disabling a track component's grids.
+			This has been standardized by using the Grid enable/disable methods.
+			The mode class will register the specific grid components that will need to be enabled and disabled
+		4.	Initialization: Track components will assume to be disabled on load. We will need to enable the first mode
+
+		]]
+	
 	
 
 	-- We need to manage this at the App level
 	self.midi_grid.event = function(msg)
 		self.grid:process(msg)
 		
-		App.track[10].seq.grid:process(msg)
-		App.track[10].mute.grid:process(msg)
+		local mode = self.mode[self.current_mode]
 
+		for i,component in ipairs(mode.components) do
+			component:process(msg)
+		end
 	end
 	
-	-- local mode_select = self.grid:subgrid({x=5,y=9},{x=8,y=9},function(s,data)
-	-- 		print('yeah!')
-	-- 		local mode = s:grid_to_index(data)
-	-- 		if mode == 1 then
-	-- 			print('Session')
-	-- 		elseif mode == 2 then
-	-- 			print('Drums')
-	-- 		elseif mode == 3 then
-	-- 			print('Keys')
-	-- 		elseif mode == 4 then
-	-- 			print('User')
-	-- 		end
-	-- 	end
-	-- )
+	self.arrow_pads = self.grid:subgrid({x=1,y=9},{x=4,y=9},function(s,data)
 
-	-- tab.print(mode_select)
-	-- local doodle_pad = self.grid:subgrid({x=1,y=1},
-	--   {x=8,y=8},
-	-- 	function(s,data)
-	-- 		print('ueaj')
-	-- 		if data.toggled then
-	-- 			s.led[data.x][data.y] = 5
-	-- 		else
-	-- 			s.led[data.x][data.y] = 0
-	-- 		end		
-	-- 		s:refresh()
-	-- 	end
-	-- )
+		local mode = self.mode[self.current_mode]
 
+		for i,component in ipairs(mode.components) do
+			component:event(data)
+		end
+	end)
 
+	-- Mode setup and instantiation must happen after components are initialized with the params:default() execution
+	local session_mode = {
+		id = 1,
+		components = {App.track[10].seq.clip_grid, App.track[10].seq.seq_grid, App.track[10].mute.grid},
+		on_load = function() print('Mode one loaded') end,
+		on_reset = function() end,
+	}
 
+	local drum_mode = {
+		id = 2,
+		components = {},
+		on_load = function() print('Mode two loaded') end,
+	}
 
+	local key_mode = {
+		id = 3,
+		components = {},
+		on_load = function() print('Mode three loaded') end,
 
-	params:default()
+	}
 
-	self.grid.event = function(s,data)
-		
+	local user_mode = {
+		id = 4,
+		components = {},
+
+	}
+
+	self.mode = {session_mode,drum_mode,key_mode,user_mode}
 	
+	self.mode_select = self.grid:subgrid({x=5,y=9},{x=8,y=9},function(s,data)
+			if data.state then
+				local mode_select = s:grid_to_index(data)
+				
+				for i, mode in ipairs(App.mode) do
+					if mode_select ~= mode.id then
+						for i, component in ipairs(mode.components) do
+							component:disable()
+						end
+					end
+				end
+
+				for i, mode in ipairs(App.mode) do
+					if mode_select == mode.id then
+						
+						if mode.on_load ~= nil then
+							mode.on_load()
+						end
+
+						for i, component in ipairs(mode.components) do
+							component:enable()
+						end
+
+					end
+
+					
+				end
+
+				s:reset()
+				s.led[data.x][data.y] = 1
+				s:refresh()
+				
+				self.current_mode = mode_select
+
+
+			end
+		end
+	)
+
+	
+
+	local mode_led = self.mode_select:index_to_grid(self.current_mode)
+	self.mode_select.led[mode_led.x][mode_led.y] = 1
+
+	-- Alt pad
+	self.alt_pad = self.grid:subgrid({x=9,y=1},{x=9,y=1}, function(s,data)
+		if data.toggled then
+			s.led[data.x][data.y] = 1
+		else
+			s.led[data.x][data.y] = 0
+		end
+		App.alt = data.toggled
+		s:refresh()
+	end)
+
+	-- Using the on_reset callback in order to set App level properties.
+	self.alt_pad.on_reset = function(s)
+		App.alt = false
 	end
+
+	
+
+	
+	-- Enable Modes
+	
+	self.track[10].seq.clip_grid:enable()
+	self.track[10].seq.seq_grid:enable()
+	self.track[10].mute.grid:enable()
+	
+	-- swap a grid
+	-- change grid display
+	
+	
 end
 
 -- Start playback

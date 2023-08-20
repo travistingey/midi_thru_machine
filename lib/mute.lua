@@ -20,11 +20,17 @@ function Mute:set(o)
     end
 end
 
+function Mute:set_grid()
+
+    self.grid:refresh()
+end
+
 function Mute:midi_event(data)
     
     if data.note ~= nil then
         local target = self.grid:index_to_grid(data.note + 1)
         local state = self.state[data.note]
+        
         
         if (not state) then
             -- Mute is off
@@ -49,17 +55,19 @@ function Mute:midi_event(data)
 end
 
 function Mute:grid_event(data)
-    self.state[self.grid:grid_to_index(data) - 1] = data.toggled
+    if data.type == 'pad' then
+        self.state[self.grid:grid_to_index(data) - 1] = data.toggled
 
-    local state = data.toggled
-    if state then 
-        self.grid.led[data.x][data.y] = Grid.rainbow_off[self.id]
-    else
-        self.grid.led[data.x][data.y] = 0
+        local state = data.toggled
+        
+        if state then 
+            self.grid.led[data.x][data.y] = Grid.rainbow_off[self.id]
+        else
+            self.grid.led[data.x][data.y] = 0
+        end
+        
+        self.grid:refresh()
     end
-
-    self.grid:refresh()
-    
 end
 
 return Mute
