@@ -26,7 +26,7 @@ function Seq:set(o)
 	o.length = o.length or 96
     o.tick = o.tick or 0
     o.step = o.step or o.length
-	o.quantize = o.quantize or 96
+	o.quantize_step = o.quantize_step or 96
     o.div = o.div or 6
 	
 	o.page = o.page or 1
@@ -71,18 +71,29 @@ end
 function Seq:save_bank(id)
 	local was = #self.value
 		self.value = self.buffer
-		self:reduce_values()
+		if not self.overdub then
+			self.length = self.buffer_length
+			self.bounce = false
+		end
+
+		-- if self.overdub then
+		-- 	self:reduce_values()
+		-- end
 		self.recording = false
 		self.overdub = false
-		self.bounce = false
-		self.bank[id] = self.value or {}
+
+		
+
+		self.bank[id] = {value = self.value, length = self.length} or {}
 		print('Save bank ' .. id)
 	
 end
 
 -- Load bank to values
 function Seq:load_bank(id)
-	self.value = self.bank[id] or {}
+	local bank = self.bank[id] or { value = {}, length = self.quantize_step }
+	self.value = bank.value
+	self.length = bank.length
 	print('Load bank ' .. id)
 end
 
@@ -91,14 +102,21 @@ function Seq:record()
 	self.recording = true
 	if not self.overdub and not self.bounce then
 	  self.value = {}
-	end
-
-	if self.overdub then
+	  self.buffer = self.value
+	  self.length = self.quantize_step
+	  self.buffer_length = self.quantize_step
+	elseif self.overdub then
 		self.buffer = self.value
-	else
+		self.buffer_length = self.length
+	elseif self.bounce then
 		self.buffer = {}
+		self.buffer_length = self.quantize_step
 	end
 	
+	if self.bounce then
+		self.buffer_length = self.quantize_step
+	end
+
 	local n = self.clip_grid:index_to_grid(self.next_bank)
 	self.clip_grid.led[n.x][n.y] = 10
 	print('Recording bank ' .. self.next_bank)
@@ -144,6 +162,7 @@ function Seq:transport_event(data)
 		-- Enter new step. c = current step, l = last step
 
 		
+
 		-- clock > seq > midi
 		if next_step > last_step or next_step == 1 and last_step == self.length then
 			
@@ -171,18 +190,41 @@ function Seq:transport_event(data)
 							if c.delta > 0 then
 								clock.sync(c.delta)
 							end
-							
-							if self.recording and self.bounce then
-								if not (c.note and self.track.mute.state[c.note]) then
-									self.buffer[#self.buffer + 1] = c
-								end
-						  	end
-							
+														
 							-- manage note on/off
 							if c.type == 'note_on' and  self.note_on[c.note] == nil then
 								self.note_on[c.note] = c
+								
+								if self.recording and self.bounce and not self.track.mute.state[c.note] then
+									local val = {}
+							
+									for prop,v in pairs(c) do
+										val[prop] = v
+									end
+									
+									val.tick = self.tick
+									val.step = (self.tick - 1) % self.buffer_length + 1
+									val.offset = clock.get_beats() - App.last_time
+
+									self.buffer[#self.buffer + 1] = val
+						    end
+						  
 								self.track:send(c)	
 							elseif c.type == 'note_off' and self.note_on[c.note] ~= nil then
+							  if self.recording and self.bounce then
+									local val = {}
+							
+									for prop,v in pairs(c) do
+										val[prop] = v
+									end
+									
+									val.tick = self.tick
+									val.step = (self.tick - 1) % self.buffer_length + 1
+									val.offset = clock.get_beats() - App.last_time
+
+									self.buffer[#self.buffer + 1] = val
+							  end
+							  
 								self.note_on[c.note] = nil
 								self.track:send(c)	
 							end
@@ -194,8 +236,15 @@ function Seq:transport_event(data)
 				self:on_step(current)
 				
 				-- Handle arm events
-				if (self.armed and self.tick % self.quantize == 0) then
-					self:arm_event()
+				if self.tick % self.quantize_step == 0 then
+					if self.armed then
+						self:arm_event()
+					elseif self.recording and not self.overdub  then
+						self.buffer_length = self.buffer_length + self.quantize_step
+						if not self.bounce then
+							self.length = self.buffer_length
+						end
+					end				
 				end
 			end
 		end
@@ -263,25 +312,23 @@ function Seq:midi_event(data)
 
 	if self.recording then
 
-		if data.note and self.track.mute.state[data.note] then
-			goto continue
-		end
+		if(data.type == 'note_off' and self.note_on[data.note] ~= nil) or not (data.note and self.track.mute.state[data.note])  then
+			local val = {}
+	
+			for prop,v in pairs(data) do
+				val[prop] = v
+			end
+			
+			val.tick = self.tick
+			val.step = (self.tick - 1) % self.buffer_length + 1
+			val.offset = clock.get_beats() - App.last_time
 
-		data.tick = self.tick
-		data.step = (self.tick - 1) % self.length + 1
-		data.offset = clock.get_beats() - App.last_time
-
-		local val = {}
-
-		for i,v in pairs(data) do
-			val[i] = v
+			self.buffer[#self.buffer + 1] = val
 		end
     
-    if not self.bounce then
-		   self.value[#self.value + 1] = val
-    end
-	
-		self.buffer[#self.buffer + 1] = val
+		if not self.bounce then
+			self.value[#self.value + 1] = val
+		end
 
 		::continue::
 	end
@@ -291,30 +338,65 @@ function Seq:midi_event(data)
 end
 
 function Seq:seq_grid_event(data)
-	
+	local wrap = grid.display_end.x - grid.display_start.x + 1
+	local page_count = math.ceil( math.ceil(self.length/self.div) / wrap)
+	local grid = self.seq_grid
+
 	--handle function pads
 	if data.type ~= 'pad' then
 		print(data.type ..' seq')
 	end
 
-	self.seq_grid:refresh()
+	if data.state and data.type == 'right' and self.page < page_count then
+		self.page = self.page + 1
+	end
+
+	if data.state and data.type == 'left' and self.page > 1 then
+		self.page = self.page - 1
+	end
+
+	if data.state and data.type == 'down' then
+		local current_Y = math.max(grid.display_start.y, grid.display_end.y)
+		local max_Y = math.max(grid.grid_start.y, grid.grid_end.y)
+		
+		if current_Y < max_Y then
+			
+			grid.display_start.y = grid.display_start.y - 1
+			grid.display_end.y = grid.display_end.y - 1
+			
+		end
+	end
+
+	if data.state and data.type == 'up' then
+		local current_Y = math.min(grid.display_start.y, grid.display_end.y)
+		local min_Y = math.min(grid.grid_start.y, grid.grid_end.y)
+		
+		if current_Y > min_Y then	
+			grid.display_start.y = grid.display_start.y + 1
+			grid.display_end.y = grid.display_end.y + 1
+		end
+	end
+
+	grid:refresh()
 end
 
 
 function Seq:set_seq_grid()
 	
-	local wrap = 8
-	local page_count = math.ceil( math.ceil(self.length/self.div) / wrap)
-
 	local grid = self.seq_grid
 	local seq = self
+	local wrap = grid.display_end.x - grid.display_start.x + 1
+	local current_step = (math.ceil(self.tick/self.div) - 1) % math.ceil(self.length/self.div) + 1
 
 	if grid.active then
 		grid:for_each(function(s,x,y)
 			local page = math.ceil( math.ceil(seq.step/seq.div) / wrap)
 
-			grid.led[x][y] = 0
-			
+			if x == current_step - (self.page - 1) * wrap then
+				grid.led[x][y] = {5,5,5}
+			else
+				grid.led[x][y] = 0
+			end
 		end)
 
 		for i,v in ipairs(self.value) do
@@ -324,10 +406,16 @@ function Seq:set_seq_grid()
 				if self.page == page then 
 					local x = math.ceil(v.step / self.div) - (page - 1) * wrap
 					local y = v.note + 1
-					grid.led[x][y] = 1
+					
+					if current_step == math.ceil(v.step/self.div) then
+					  grid.led[x][y] = Grid.rainbow_on[v.note % 16 + 1]
+					else
+					  grid.led[x][y] = Grid.rainbow_off[v.note % 16 + 1]
+					end
 				end
 			end
 		end
+
 
 		grid:refresh()
 	end
@@ -340,16 +428,16 @@ function Seq:set_clip_grid()
 		if(self.bank[i])then
 			s.led[x][y] = 1
 		else
-			s.led[x][y] = 0
+			s.led[x][y] = {5,5,5}
 		end
 
 		if i == self.current_bank then
 			if self.recording then
-				s.led[x][y] = 5
+				s.led[x][y] = {3,true}
 			elseif (self.bank[i]) then
-				s.led[x][y] = 3
+				s.led[x][y] = Grid.rainbow_on[i]
 			else
-				s.led[x][y] = 0
+				s.led[x][y] = {5,5,5}
 			end
 		end
 
@@ -365,13 +453,8 @@ function Seq:set_clip_grid()
 
 		for _,action in ipairs(actions) do
 			if i == self.next_bank then
-				if action == 'record' or action == 'save' then
-					s.led[x][y] = {7,true}
-				elseif  action == 'overdub' then
-					s.led[x][y] = {83,true}
-
-				elseif  action == 'bounce' then
-					s.led[x][y] = {45,true}
+				if action == 'load' then
+					s.led[x][y] = {3,true}
 				else
 					s.led[x][y] = {1,true}
 				end
@@ -385,7 +468,11 @@ function Seq:set_clip_grid()
 	end
 end
 
--- Recording clip
+-- Provides a grid with state machine logic to control the launching and recording of clips.
+-- By default, actions are armed when playing to execute during a quantized step.
+-- Record: Empty clips will start recording when pressed. Length is set by when the next quantized step is pressed
+-- Bounce: Alt + Empty will keep the current sequence but record into the new bank.
+-- Overdub: Alt + Recorded bank will record over existing steps
 function Seq:clip_grid_event(data)
 
 	if data.type == 'pad' then
@@ -419,9 +506,7 @@ function Seq:clip_grid_event(data)
 					
 					if App.alt then
 					   self.armed = 'bounce'
-					   App.alt_pad:reset()
-					 else
-					   
+					   App.alt_pad:reset()					   
 					 end
 					print('arm record')
 				elseif not same then
@@ -485,9 +570,8 @@ function Seq:clip_grid_event(data)
 					print('same')
 					-- arm save
 					if App.alt then
-					  self:clear()
+					  self:clear(self.current_bank)
 					  self.recording = false
-					  self.bank[self.current_bank] = nil
 					  App.alt_pad:reset()
 				  end
 					self.armed = 'save'
@@ -495,7 +579,7 @@ function Seq:clip_grid_event(data)
 				elseif not same and empty then
 					self.armed = {'save','record'}
 				  if App.alt then
-				    self.armed ={'save','bounce'}
+				    self.armed = {'save','bounce'}
 				    App.alt_pad:reset()
 				  end
 				else
@@ -509,8 +593,8 @@ function Seq:clip_grid_event(data)
 				end
 			end
 
-			if not App.playing then
-				self.current_bank = index
+			if not App.playing and self.armed ~= 'record' and self.armed ~= 'bounce' then
+				self:arm_event()
 			end
 		
 			self:set_clip_grid()
@@ -523,9 +607,13 @@ end
 
 
 -- Reset the sequencer values
-function Seq:clear()
+function Seq:clear(id)
 	self.value = {}
 	self.next_bank = 0
+	
+	if id and id > 0 then
+	  self.bank[id] = nil
+	end
 end
 
 -- Returns a table of values for a specified step
@@ -537,7 +625,8 @@ function Seq:get_step(step, div)
 		for i,v in ipairs(self.value) do
 			
 			if (math.ceil(v.tick / div) - 1) % self.length + 1 == step then
-
+        
+        
 				step_value[ v.type .. '-' .. v.note] = v
 				
 			end

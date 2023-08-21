@@ -250,7 +250,7 @@ function Grid:set(x,y,z,offset)
 	return self:set_raw(x,y,z)
 end
 
-function Grid:set_raw(x,y,z)
+function Grid:set_raw(x,y,z, force)
 	local target = math.fmod(x,10) + 10 * y
 	local message = {}
 
@@ -282,8 +282,17 @@ function Grid:set_raw(x,y,z)
 		message = utilities.concat_table(message,{z})
 		
 	end
+	
+	if force then
+		local send = {240,0,32,41,2,13,3}
+		send =  utilities.concat_table(send, message)
+		send = utilities.concat_table(send,{247})
+		self.midi:send(send)
+	else
+		return message
+	end
 
-	return message
+	
 end
 
 function Grid:refresh()
