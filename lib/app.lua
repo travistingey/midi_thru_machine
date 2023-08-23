@@ -163,6 +163,16 @@ function App:init()
 		end
 	end)
 
+	self.row_pads = self.grid:subgrid({x=9,y=8},{x=9,y=2},function(s,data)
+
+		local mode = self.mode[self.current_mode]
+
+		for i,component in ipairs(mode.components) do
+			component:event(data)
+		end
+	end)
+
+
 	-- Mode setup and instantiation must happen after components are initialized with the params:default() execution
 	local session_mode = {
 		id = 1,

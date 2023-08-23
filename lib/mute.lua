@@ -56,15 +56,28 @@ end
 
 function Mute:grid_event(data)
     if data.type == 'pad' then
-        self.state[self.grid:grid_to_index(data) - 1] = data.toggled
+        
+        local note = self.grid:grid_to_index(data) - 1
+        self.state[note] = data.toggled
 
         local state = data.toggled
         
         if state then 
             self.grid.led[data.x][data.y] = Grid.rainbow_off[self.id]
+            
+            local on = self.track.seq.note_on[note] -- added check to help preserve note on/off while recording
+            
+            if on then
+                local off = {type='note_off', ch = on.ch, note = on.note, vel = on.vel}
+                print('note was on when mute was pressed')
+                self.track:process_midi(off)
+            end
         else
             self.grid.led[data.x][data.y] = 0
         end
+        
+        
+        
         
         self.grid:refresh()
     end
