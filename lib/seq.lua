@@ -67,19 +67,26 @@ end
 -- BASE METHODS ---------------
 
 -- Returns a table of values for a specified step
-function Seq:get_step(step, div)
+function Seq:get_step(step, div, note)
 	div = div or 1
 	local step_value = {}
 	local value = {}
-	if type(self.value) == 'table' then
-		for i,v in pairs(self.value) do
-			if (math.ceil(v.tick / div) - 1) % self.length + 1 == step then     
-				step_value[ v.type .. '-' .. v.note] = v
+
+	if note then
+		if self.value[step * div] and self.value[step * div][note] then
+			for _,e in pairs(self.value[step * div][note]) do
+				value[#value + 1] = e
 			end
 		end
-
-		for i,v in pairs(step_value) do
-			value[#value + 1] = v
+	else
+		for i = step, step + (div - 1) do
+			if self.value[i] then
+				for note,event in pairs(self.value[i]) do
+					for _,e in pairs(event)do
+						value[#value + 1] = e
+					end
+				end
+			end
 		end
 	end
 
@@ -120,11 +127,11 @@ function Seq:save_bank(id)
 	
 	if not self.overdub then
 		self.length = self.buffer_length
-		self.bounce = false
 	end
 
 	self.recording = false
 	self.overdub = false
+	self.bounce = false
 
 	self.bank[id] = {value = self.value, length = self.length} or {}
 	print('Save bank ' .. id .. ' on track ' .. self.track.id)
@@ -211,32 +218,35 @@ function Seq:transport_event(data)
 				local last_value = nil
 				
 				for i,c in pairs(current) do
-					clock.run(function()
-						
-						if c.offset > 0 then
-				    		clock.sync(c.offset)
-						end
-								
-						-- manage note on/off
-						-- if bouncing a track, record sequence to buffer if note is not muted
-						if c.type == 'note_on' and  self.note_on[c.note] == nil then
-							self.note_on[c.note] = c
-							
-							if self.recording and self.bounce and not self.track.mute.state[c.note] then
-								self:record_event(c)
-					    	end
-					  
-							self.track:send(c)	
-						elseif c.type == 'note_off' and self.note_on[c.note] ~= nil then
-							if self.recording and self.bounce then
-								self:record_event(c)
-							end
-						  
-							self.note_on[c.note] = nil
-							self.track:send(c)	
-						end
-					
-					end)
+				  
+				  if c.enabled then
+  					clock.run(function()
+  						
+  						if c.offset > 0 then
+  				    		clock.sync(c.offset)
+  						end
+  								
+  						-- manage note on/off
+  						-- if bouncing a track, record sequence to buffer if note is not muted
+  						if c.type == 'note_on' and  self.note_on[c.note] == nil then
+  							self.note_on[c.note] = c
+  							
+  							if self.recording and self.bounce and not self.track.mute.state[c.note] then
+  								self:record_event(c)
+  					    	end
+  					  
+  							self.track:send(c)	
+  						elseif c.type == 'note_off' and self.note_on[c.note] ~= nil then
+  							if self.recording and self.bounce then
+  								self:record_event(c)
+  							end
+  						  
+  							self.note_on[c.note] = nil
+  							self.track:send(c)	
+  						end
+  					
+  					end)
+					end
 				end
 				
 				self:on_step(current)
@@ -267,9 +277,6 @@ function Seq:midi_event(data)
 	if self.recording then
         -- process note_off events when a note_on occurs OR any note_on/note_off event that isn't muted
 		if(data.type == 'note_off' and self.note_on[data.note] ~= nil) or not (data.note and self.track.mute.state[data.note])  then
-			if (data.type == 'note_off' and self.note_on[data.note] ~= nil) then
-				print('we caught:', data.note)
-			end
 			self:record_event(data)
 		end
     
@@ -345,12 +352,21 @@ function Seq:record_event(event)
 		val[prop] = v -- copy tables to prevent wierdness
 	end
 	
-	val.tick = self.tick
-	val.step = step
+	val.enabled = true
+	val.tick = val.tick or self.tick
+	val.step = val.step or step
 	val.offset = clock.get_beats() - App.last_time
 	
-	self.buffer[#self.buffer + 1] = val
+	if self.buffer[step] == nil then
+		self.buffer[step] = {}
+	end
+
+	if self.buffer[step][val.note] == nil then
+		self.buffer[step][val.note] = {}
+	end
 	
+	self.buffer[step][val.note][val.type] = val
+
 end
 
 
@@ -370,34 +386,66 @@ function Seq:seq_grid_event(data)
 
 	
 	if data.state and data.type == 'right' and self.page < page_count then
-		self.page = self.page + 1
+		
+		 if App.alt then
+	        self.follow = not self.follow
+	        App.alt_pad:reset()
+	    else
+		    self.page = self.page + 1
+		    print('page: ' .. self.page)
+		 end
+	    
 	end
 
 	if data.state and data.type == 'left' and self.page > 1 then
-	    if App.alt then
-	        self.follow = not follow
+		  if App.alt then
+	        self.page = 1
 	        App.alt_pad:reset()
 	    else
 		    self.page = self.page - 1
-		end
+		  end
+		  	print('page: ' .. self.page)
 	end
 
-	print('page: ' .. self.page)
+
 
 	if data.state and data.type == 'down' then
-		if grid.display_end.y > grid.grid_end.y and grid.display_start.y > 1 then
-			grid.display_start.y = grid.display_start.y - 1
-			grid.display_end.y = grid.display_end.y - 1
-		end
+		 if App.alt then
+	        if self.div > 3 then
+	        	self.div = self.div / 2
+	        elseif self.div > 2 then
+           		self.div = self.div - 1
+	        end
+			page_count = math.ceil( math.ceil(self.length/self.div) / wrap)
+			if self.page > page_count then self.page = page_count end
+	    elseif grid.display_end.y > grid.grid_end.y and grid.display_start.y > 1 then
+    			grid.display_start.y = grid.display_start.y - 1
+    			grid.display_end.y = grid.display_end.y - 1
+		  end
 	end
 
 	if data.state and data.type == 'up' then
-		if grid.display_start.y < grid.grid_start.y then	
+		print(self.div)
+		if App.alt then
+	        if self.div < 24 and self.div > 2 then
+	          self.div = self.div * 2
+	        elseif self.div > 1  and self.div < 24 then
+            self.div = self.div + 1
+	        end
+			page_count = math.ceil( math.ceil(self.length/self.div) / wrap)
+			if self.page > page_count then self.page = page_count end
+		elseif grid.display_start.y < grid.grid_start.y then	
 			grid.display_start.y = grid.display_start.y + 1
 			grid.display_end.y = grid.display_end.y + 1
 		end
 	end
-
+	
+	if data.state and data.type == 'pad' then
+	  local tick = data.x + (self.page - 1) * wrap
+	  local note = data.y - 1
+	  local step = self:get_step(tick, self.div, note)
+	end
+	self:set_seq_grid()
 	grid:refresh()
 end
 
@@ -412,17 +460,16 @@ function Seq:set_seq_grid()
     
 	if grid.active then
 	    
-	    -- Follow playhead
-        if self.follow then
-            local pos = math.ceil( (self.tick % self.length) / self.div)
-            local page = math.ceil(pos / wrap)
-            
-            --wait until playhead is one step past the display and change the page
-            if pos % wrap == 1 then
-                self.page = page
-			end
-  
-        end
+    -- Follow playhead
+      if self.follow then
+          local pos = math.ceil( (self.tick % self.length) / self.div)
+          local page = math.ceil(pos / wrap)
+          
+          --wait until playhead is one step past the display and change the page
+          if pos % wrap == 1 then
+              self.page = page
+		      end
+      end
 	    
 	-- Set base pads
 	
@@ -464,24 +511,32 @@ function Seq:set_seq_grid()
 		end
 
 		App.arrow_pads:refresh() -- reminder that arrow pads are a shared grid and need to be refreshed separately
-	
-        -- place notes from value on grid
-		for i,v in ipairs(self.value) do
-			if v.type == 'note_on' then
-				local page = math.ceil( math.ceil(v.step/self.div) / wrap)
-			
-				if self.page == page then 
-					local x = math.ceil(v.step / self.div) - (page - 1) * wrap
-					local y = v.note + 1
+		
+
+		
+		for s=0,self.length do
+			local step = self:get_step( s * self.div + (self.page - 1) * wrap,self.div)
+			if #step > 0 then
+				for i,v in ipairs(step) do
+					if v.type == 'note_on' then
+						local page = math.ceil( math.ceil(v.step/self.div) / wrap)
 					
-					if current_step == math.ceil(v.step/self.div) then
-					  grid.led[x][y] = Grid.rainbow_on[v.note % 16 + 1]
-					else
-					  grid.led[x][y] = Grid.rainbow_off[v.note % 16 + 1]
+						if self.page == page then 
+							local x = math.ceil(v.step / self.div) - (page - 1) * wrap
+							local y = v.note + 1
+							if current_step == math.ceil(v.step/self.div) then
+							  grid.led[x][y] = Grid.rainbow_on[v.note % 16 + 1]
+							else
+							  grid.led[x][y] = Grid.rainbow_off[v.note % 16 + 1]
+							end
+						end
 					end
 				end
 			end
 		end
+
+        -- place notes from value on grid
+		
 
 
 		grid:refresh()
@@ -673,9 +728,6 @@ function Seq:set_clip_grid()
 		self.clip_grid:refresh()
 	end
 end
-
-
-
 
 return Seq
 
