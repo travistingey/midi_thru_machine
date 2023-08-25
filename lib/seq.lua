@@ -124,6 +124,7 @@ end
 -- Save values to bank
 function Seq:save_bank(id)
 	self.value = self.buffer
+	self.tick = 0
 	
 	if not self.overdub then
 		self.length = self.buffer_length
@@ -148,15 +149,15 @@ end
 
 -- start recording incoming Midi into Seq
 function Seq:record()
-	
 	self.recording = true
 	
 	-- recording a new clip in empty bank
 	if not self.overdub and not self.bounce then
-	  self.value = {}
-	  self.buffer = self.value -- this points to the same table
-	  self.length = self.quantize_step
-	  self.buffer_length = self.quantize_step
+		self.tick = 0
+		self.value = {}
+		self.buffer = self.value -- this points to the same table
+		self.length = self.quantize_step
+		self.buffer_length = self.quantize_step
 	
 	-- recording over existing clip
 	elseif self.overdub then
@@ -165,6 +166,7 @@ function Seq:record()
 		
 	-- bounces performance of one clip into a new bank
 	elseif self.bounce then
+		self.bounce_start = self.tick
 		self.buffer = {}
 		self.buffer_length = self.quantize_step
 	end
@@ -253,6 +255,8 @@ function Seq:transport_event(data)
 				
 				-- Handle arm events
 				if self.tick % self.quantize_step == 0 then
+					print(self.tick / self.quantize_step)
+					print(#self.note_on)
 					if self.armed then
 						self:arm_event()
 					elseif self.recording and not self.overdub  then
@@ -346,14 +350,26 @@ end
 function Seq:record_event(event)
 
 	local val = {}
+	
 	local step = (self.tick - 1) % self.buffer_length + 1
-							
+	
+	if self.bounce then
+		step = (self.tick - self.bounce_start - 1) % self.buffer_length + 1
+
+		print(self.step .. ' vs ' ..  step)
+	end
+
 	for prop,v in pairs(event) do
 		val[prop] = v -- copy tables to prevent wierdness
 	end
 	
 	val.enabled = true
 	val.tick = val.tick or self.tick
+
+	if self.bounce then
+		val.tick = val.tick or self.tick - self.bounce_start
+	end
+
 	val.step = val.step or step
 	val.offset = clock.get_beats() - App.last_time
 	
@@ -511,11 +527,19 @@ function Seq:set_seq_grid()
 		end
 
 		App.arrow_pads:refresh() -- reminder that arrow pads are a shared grid and need to be refreshed separately
-		
+			
+		for s= (self.page - 1 * wrap) + wrap, self.page * wrap do
+			for y=1,8 do
+				local x = s
+				if x == current_step - (self.page - 1) * wrap then
+					grid.led[x][y] = {5,5,5}
+				else
+					grid.led[x][y] = 0
+				end
+			end
 
-		
-		for s=0,self.length do
-			local step = self:get_step( s * self.div + (self.page - 1) * wrap,self.div)
+			local step = self:get_step( (s * self.div + (self.page - 1) * wrap) - self.div + 1,self.div)
+			
 			if #step > 0 then
 				for i,v in ipairs(step) do
 					if v.type == 'note_on' then
