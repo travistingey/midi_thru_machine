@@ -28,12 +28,13 @@ function Seq:set(o)
     o.buffer = o.buffer or {} -- holds recorded sequence of events
     o.bank = o.bank or {} -- stores value tables for reloading
 	
-	o.current_bank = o.current_bank or 0
+	o.current_bank = o.current_bank or 1
 	o.next_bank = o.next_bank or 0
 	o.last_bank = o.last_bank or 0
 	
 	o.length = o.length or 96 -- in ticks, 96 = 24 ppqn x 4
-    
+	o.buffer_length = o.length or 96
+
     o.arm_time = 0
     o.tick = o.tick or 0 
     o.step = o.step or o.length
@@ -67,47 +68,148 @@ end
 -- BASE METHODS ---------------
 
 -- Returns a table of values for a specified step
-function Seq:get_step(step, div, note)
+function Seq:get_step(step, div)
 	div = div or 1
 	local step_value = {}
 	local value = {}
-
-	if note then
-		if self.value[step * div] and self.value[step * div][note] then
-			for _,e in pairs(self.value[step * div][note]) do
-				value[#value + 1] = e
+	
+	for i = (step - 1) * div + 1, step * div do
+		if self.value[i] then
+			for n,event in pairs(self.value[i]) do
+				for _,e in pairs(event)do
+					value[#value + 1] = e
+				end
 			end
 		end
+	end
+	
+
+	return value
+end
+
+function Seq:calculate_swing(tick)
+	local swing = App.swing
+	local swing_div = App.swing_div
+	local set  = 2 * swing_div
+	local tick_time = 1 / App.ppqn
+	local odd =  set * swing / swing_div-- Scaling factor for first subdivision of set
+	local even = set * (1 - swing) / swing_div -- Scaling factor for first subdivision of set
+	local step = (tick - 1) % set + 1 -- tick order within set
+	local set_order = math.ceil(tick / set) -- current set's order
+
+	if step <= swing_div then
+		-- tick is an odd subdivision
+		local t = (step - 1) * odd
+		local offset = t % 1 / App.ppqn 
+		tick = math.floor(t) + 1 + (set_order - 1) * set
+		return {tick = tick, offset = offset}
 	else
-		for i = step, step + (div - 1) do
-			if self.value[i] then
-				for note,event in pairs(self.value[i]) do
-					for _,e in pairs(event)do
-						value[#value + 1] = e
+		-- tick is an even subdivision
+		local t = (step - swing_div - 1) * even + (odd * swing_div)
+		local offset = t % 1 / App.ppqn 
+		tick = math.floor(t) + 1 + (set_order - 1) * set
+		return {tick = tick, offset = offset}
+	end
+
+	
+	
+end
+
+function Seq:print_values(target_note)
+	for i = 1, self.length do
+		if self.value[i] then
+			for note,n in pairs(self.value[i]) do
+				if target_note == note or target_note == nil then
+					for event,e in pairs(n) do
+						print(i .. ' ' .. note .. ' ' .. e.type)
 					end
 				end
 			end
 		end
 	end
-
-	return value
 end
 
-
+--unquantized	|-o--x-|o--x--|---o--|-x--ox|-o-x-ox|o--x-o|-x--o-|x-----|------|--ox--|--o---|---x--|ox-ox-|-----o|-----x|
+--				  s		s		  s		  s   s   d  s    d     s				   s      s           s  d        s
+--quantized 	|o--x--|o--x--|o---x-|ox----|o-x----|o--x--|o-x---|------|------|ox----|o-----|x-----|ox----|o-----|x-----|
+ 
 -- Reduces seq value to unique events per step
 -- This will slow down a running sequence for large tables
-function Seq:reduce_values()
-	local new_value = {}
+function Seq:quantize(div)
+	local note_on = {}
+	local reduced = {}
+	local note_on = {}
+	local length = math.ceil(self.length/div)
+	
+	for step = 1, length do
 		
-	for step = 1, self.length do
-		local step_value = self:get_step(step)
+		local tick = (step-1) * div + 1
+		local value = self:get_step(step, div)
+		local step_on = {}
 
-		for i,v in ipairs(step_value) do
-			new_value[#new_value + 1] = v
-		end
-	end
+		for i,v in pairs(value)do
+			-- for each step get the first on note
+			if v.type == 'note_on' and not step_on[v.note] then
 
-	self.value = new_value
+				--and save the new tick location and the old tick location in the note_on array
+				note_on[v.note] = { old = {tick = v.tick, offset = v.offset}, new = self:calculate_swing(tick)}
+
+				local new_tick = note_on[v.note].new.tick
+
+				-- set values
+				local new_value = {}
+				for prop,val in pairs(v) do
+					 new_value[prop] = val -- copy tables to prevent wierdness
+				end
+				
+				new_value.tick =  note_on[v.note].new.tick
+				new_value.offset =  note_on[v.note].new.offset
+
+				--check to make sure the reduced stuff exists
+				if reduced[new_tick]  == nil then
+					reduced[new_tick] = {}
+				end
+
+				if reduced[new_tick][v.note] == nil then
+					reduced[new_tick][v.note] = {}
+				end
+
+				reduced[new_tick][v.note]['note_on'] = new_value
+				step_on[v.note] = true
+				
+			elseif v.type == 'note_off' and note_on[v.note] and note_on[v.note].off == nil then
+				-- new_tick + current_tick - old_tick
+				local duration = v.tick - note_on[v.note].old.tick
+				local new = self:calculate_swing(note_on[v.note].new.tick + duration)
+				
+				-- set values
+				local new_value = {}
+				for prop,val in pairs(v) do
+					 new_value[prop] = val -- copy tables to prevent wierdness
+				end
+				
+				new_value.tick =  new.tick
+				new_value.offset =  new.offset
+
+				--check to make sure the reduced stuff exists
+				if reduced[new.tick]  == nil then
+					reduced[new.tick] = {}
+				end
+
+				if reduced[new.tick][v.note] == nil then
+					reduced[new.tick][v.note] = {}
+				end
+
+				reduced[new.tick][v.note]['note_off'] = new_value
+				reduced[note_on[v.note].new.tick][v.note]['note_on'].duration = duration
+
+				note_on[v.note].off = new.tick
+			end 
+
+		end -- end value loop
+	end -- end step loop
+
+	self.value = reduced
 end
 
 
@@ -122,19 +224,22 @@ function Seq:clear(id)
 end
 
 -- Save values to bank
-function Seq:save_bank(id)
-	self.value = self.buffer
-	self.tick = 0
-	
-	if not self.overdub then
-		self.length = self.buffer_length
+function Seq:save_bank(id, save_current)
+	if not save_current then
+		self.value = self.buffer
 	end
+
+	if not self.overdub  not save_current then
+		self.length = self.buffer_length
+		self.step = self.length
+	end
+	
 
 	self.recording = false
 	self.overdub = false
 	self.bounce = false
-
-	self.bank[id] = {value = self.value, length = self.length} or {}
+	
+	self.bank[id] = {value = self.value, length = self.length}
 	print('Save bank ' .. id .. ' on track ' .. self.track.id)
 end
 
@@ -143,6 +248,7 @@ function Seq:load_bank(id)
 	local bank = self.bank[id] or { value = {}, length = self.quantize_step }
 	self.value = bank.value
 	self.length = bank.length
+	self.step = bank.length
 	self.tick = 0
 	print('Load bank ' .. id .. ' on track ' .. self.track.id)
 end
@@ -179,6 +285,7 @@ end
 -- Transport process chain
 function Seq:transport_event(data)
 	-- Tick based sequencer
+
 	if data.type == 'start' then
 		self.note_on = {}	
 		self.tick = 0
@@ -205,7 +312,10 @@ function Seq:transport_event(data)
 		self.note_on = {}
 		
 	elseif data.type == 'clock' then
+		
 		self.tick = self.tick + 1
+		
+
 		local next_step = (self.tick - 1 ) % self.length + 1
 		local last_step = self.step
 		self.step = next_step
@@ -255,8 +365,6 @@ function Seq:transport_event(data)
 				
 				-- Handle arm events
 				if self.tick % self.quantize_step == 0 then
-					print(self.tick / self.quantize_step)
-					print(#self.note_on)
 					if self.armed then
 						self:arm_event()
 					elseif self.recording and not self.overdub  then
@@ -267,6 +375,11 @@ function Seq:transport_event(data)
 					end				
 				end
 			end
+		else
+			print('next_step', next_step)
+			print('last_step', last_step)
+			print('tick', self.tick)
+			print('length', self.length)
 		end
 	end	
 
@@ -277,7 +390,6 @@ end
 
 -- Midi process chain
 function Seq:midi_event(data)
-	
 	if self.recording then
         -- process note_off events when a note_on occurs OR any note_on/note_off event that isn't muted
 		if(data.type == 'note_off' and self.note_on[data.note] ~= nil) or not (data.note and self.track.mute.state[data.note])  then
@@ -348,15 +460,15 @@ end
 
 -- Recording step events into buffer
 function Seq:record_event(event)
-
+	
 	local val = {}
-	
-	local step = (self.tick - 1) % self.buffer_length + 1
-	
-	if self.bounce then
-		step = (self.tick - self.bounce_start - 1) % self.buffer_length + 1
+	local tick = event.tick or self.tick
+	local step = (tick - 1) % self.buffer_length + 1
 
-		print(self.step .. ' vs ' ..  step)
+
+	
+	if self.bounce and tick == self.tick then
+		step = (tick - self.bounce_start - 1) % self.buffer_length + 1
 	end
 
 	for prop,v in pairs(event) do
@@ -364,14 +476,13 @@ function Seq:record_event(event)
 	end
 	
 	val.enabled = true
-	val.tick = val.tick or self.tick
+	val.tick = tick
 
-	if self.bounce then
-		val.tick = val.tick or self.tick - self.bounce_start
+	if self.bounce and tick == self.tick then
+		val.tick = tick - self.bounce_start
 	end
 
-	val.step = val.step or step
-	val.offset = clock.get_beats() - App.last_time
+	val.offset = math.floor((clock.get_beats() - App.last_time) * 100) / 100
 	
 	if self.buffer[step] == nil then
 		self.buffer[step] = {}
@@ -441,7 +552,6 @@ function Seq:seq_grid_event(data)
 	end
 
 	if data.state and data.type == 'up' then
-		print(self.div)
 		if App.alt then
 	        if self.div < 24 and self.div > 2 then
 	          self.div = self.div * 2
@@ -455,11 +565,88 @@ function Seq:seq_grid_event(data)
 			grid.display_end.y = grid.display_end.y + 1
 		end
 	end
-	
 	if data.state and data.type == 'pad' then
-	  local tick = data.x + (self.page - 1) * wrap
-	  local note = data.y - 1
-	  local step = self:get_step(tick, self.div, note)
+		
+		local s = data.x + (self.page - 1) * wrap
+		local note = data.y - 1
+		
+		local on_tick = (s - 1) * self.div + 1
+		local off_tick = on_tick + math.floor(self.div/2)
+		local on_swing = self:calculate_swing(on_tick)
+		local off_swing = self:calculate_swing(off_tick)
+		
+		local step = self:get_step(s, self.div)
+		local empty_step = true
+		local step_on = false
+		local step_off = false
+
+		for i,v in pairs(step) do
+			if v.note == note then
+				v.enabled = not v.enabled
+				if v.type == 'note_on' then
+					empty_step = false
+					step_on = true
+				elseif v.type == 'note_off' then
+					empty_step = false
+					step_off = true
+				end
+			end
+		end
+
+		if not empty_step then
+			for i,v in ipairs(step) do
+				print(step_on, step_off)
+				tab.print(v)
+			end
+		end
+		
+		if empty_step then
+			local on = {
+				type = 'note_on',
+				note = note,
+				tick = on_swing.tick,
+				vel = 100,
+				offset = on_swing.offset,
+				ch = self.track.midi_in,
+				enabled = true
+			}
+
+			local off = {
+				type = 'note_off',
+				note = note,
+				tick = off_swing.tick,
+				vel = 100,
+				offset = off_swing.offset,
+				ch = self.track.midi_in,
+				enabled = true
+			}
+			
+			if self.value == nil then
+				self.value = {}
+			end
+
+			if self.value[on.tick]  == nil then
+				self.value[on.tick] = {}
+			end
+
+			if self.value[on.tick][on.note] == nil then
+				self.value[on.tick][on.note] = {}
+			end
+			
+			self.value[on.tick][on.note][on.type] = on
+			
+			if self.value[off.tick]  == nil then
+				self.value[off.tick] = {}
+			end
+
+			if self.value[off.tick][off.note] == nil then
+				self.value[off.tick][off.note] = {}
+			end
+
+			self.value[off.tick][off.note][off.type] = off
+
+			
+		end
 	end
 	self:set_seq_grid()
 	grid:refresh()
@@ -477,30 +664,17 @@ function Seq:set_seq_grid()
 	if grid.active then
 	    
     -- Follow playhead
-      if self.follow then
-          local pos = math.ceil( (self.tick % self.length) / self.div)
-          local page = math.ceil(pos / wrap)
+      	if self.follow then
+        	local pos = math.ceil( (self.tick % self.length) / self.div)
+    		local page = math.ceil(pos / wrap)
           
-          --wait until playhead is one step past the display and change the page
-          if pos % wrap == 1 then
-              self.page = page
-		      end
-      end
-	    
-	-- Set base pads
+        	--wait until playhead is one step past the display and change the page
+        	if pos % wrap == 1 then
+            	self.page = page
+		    end
+      	end
 	
 	
-		grid:for_each(function(s,x,y)
-			local page = math.ceil( math.ceil(seq.step/seq.div) / wrap)
-            
-            --transport
-			if x == current_step - (self.page - 1) * wrap then
-				grid.led[x][y] = {5,5,5}
-			else
-				grid.led[x][y] = 0
-			end				
-		end)
-
 		-- Set arrow pads
 		if self.page  == 1 then
 			App.arrow_pads.led[3][9] = 0 
@@ -527,41 +701,44 @@ function Seq:set_seq_grid()
 		end
 
 		App.arrow_pads:refresh() -- reminder that arrow pads are a shared grid and need to be refreshed separately
+		
+		for  s = (self.page - 1) * wrap + 1, self.page * wrap do
+		  
+			local x = (s-1) % wrap + 1
 			
-		for s= (self.page - 1 * wrap) + wrap, self.page * wrap do
-			for y=1,8 do
-				local x = s
-				if x == current_step - (self.page - 1) * wrap then
+			-- draw playhead
+			for y = grid.display_start.y, grid.display_end.y do
+				if s == current_step then
 					grid.led[x][y] = {5,5,5}
 				else
 					grid.led[x][y] = 0
 				end
 			end
-
-			local step = self:get_step( (s * self.div + (self.page - 1) * wrap) - self.div + 1,self.div)
 			
-			if #step > 0 then
-				for i,v in ipairs(step) do
-					if v.type == 'note_on' then
-						local page = math.ceil( math.ceil(v.step/self.div) / wrap)
-					
-						if self.page == page then 
-							local x = math.ceil(v.step / self.div) - (page - 1) * wrap
-							local y = v.note + 1
-							if current_step == math.ceil(v.step/self.div) then
-							  grid.led[x][y] = Grid.rainbow_on[v.note % 16 + 1]
-							else
-							  grid.led[x][y] = Grid.rainbow_off[v.note % 16 + 1]
-							end
-						end
+			local step = self:get_step(s,self.div)
+		
+			for i,v in ipairs(step) do
+				if v.type == 'note_on' then
+					local page = math.ceil( math.ceil(v.tick/self.div) / wrap)
+					local x = math.ceil(v.tick / self.div) - (page - 1) * wrap
+					local y = v.note + 1
+					local is_current = current_step == math.ceil(v.tick/self.div)
+
+					if  is_current and v.enabled then
+						grid.led[x][y] = Grid.rainbow_on[v.note % 16 + 1]
+					elseif v.enabled then
+						grid.led[x][y] = Grid.rainbow_off[v.note % 16 + 1]
+					elseif is_current then
+						grid.led[x][y] = {5,5,5}
+					else
+						grid.led[x][y] = 0
 					end
+					
 				end
 			end
+
+			
 		end
-
-        -- place notes from value on grid
-		
-
 
 		grid:refresh()
 	end
@@ -741,7 +918,7 @@ function Seq:set_clip_grid()
 				if action == 'load' then
 					s.led[x][y] = {3,true}
 				else
-					s.led[x][y] = {1,true}
+					s.led[x][y] = {4,true}
 				end
 			end
 		end
@@ -751,6 +928,19 @@ function Seq:set_clip_grid()
 	if self.clip_grid.active then
 		self.clip_grid:refresh()
 	end
+end
+
+function Seq:for_each(func)
+	local val = {}
+	for step,v in pairs(self.value) do
+		for note,t in pairs(v) do
+			for e,event in pairs(t) do
+				val[#val + 1] = func(event)
+			end
+		end
+	end
+
+	return val
 end
 
 return Seq

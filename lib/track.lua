@@ -195,6 +195,7 @@ function Track:chain_components(objects, process_name)
         local value = input
         for i, obj in ipairs(objects) do
             if obj[process_name] then
+               
                 value = obj[process_name](obj, value)
             end
         end

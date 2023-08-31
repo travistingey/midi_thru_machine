@@ -22,6 +22,8 @@ function App:init()
 	self.preset = 1
 	
 	self.ppqn = 24
+	self.swing = 0.5
+	self.swing_div = 6 -- 1/16 note swing
 
 	-- start_time, last_time are represented in beat time
 	self.tick = 0
@@ -286,27 +288,32 @@ function App:start(continue)
 	self.start_time = clock.get_beats()
 	self.last_time = clock.get_beats()
 
+
+	local event
+	if continue then
+		event = { type ='continue' }
+		self.midi_in:continue()
+		self.midi_out:continue()
+	else
+		event = { type ='start' }
+		self.midi_in:start()
+		self.midi_out:start()
+	end
+	
+	-- handle ticks
 	if params:get('clock_source') == 1 then
-		
 		self.clock = clock.run(function()
 			while(true) do
 				clock.sync(1/self.ppqn)
 				App:send_tick()
 			end
 		end)
-
-		local event
-		if continue then
-			event = { type ='continue' }
-			self.midi_in:continue()
-		else
-			event = { type ='start' }
-			self.midi_in:start()
-		end
-
+		
 		for i = 1, #self.track do
 			self.track[i]:process_transport(event)
 		end
+	else
+		self.midi_out:clock()
 	end
 end
 
@@ -321,9 +328,12 @@ function App:stop()
 		end
 
 		self.midi_in:stop()
+		self.midi_out:stop()
 
-		for i = 1, #self.track do
-			self.track[i]:process_transport({ type ='stop' })
+		if params:get('clock_source') == 1 then
+			for i = 1, #self.track do
+				self.track[i]:process_transport({ type ='stop' })
+			end
 		end
 	end
 end
@@ -331,7 +341,7 @@ end
 -- Send tick event through system
 function App:send_tick()
 	local data = midi.to_data({ type ='clock' })
-	self.midi_in.event(data)
+	
 	self.midi_out:clock()
 end
 
@@ -468,75 +478,75 @@ function App:handle_key(press_fn,long_fn,alt_fn,k,z)
 end
 
 
--- toggle the alt pad and trigger alt functions for modes
-function App:set_alt(state)
-	if(state) then
-		self.grid.led[9][1] = {3,true}
-		self.grid.toggled[9][1] = true
-		if(Mode[Mode.select].alt_event ~= nil) then
-			Mode[Mode.select]:alt_event(true)
-		end
-	else
-		self.grid.led[9][1] = 0
-		self.grid.toggled[9][1] = false
-		if(Mode[App.mode].alt_event ~= nil) then
-			Mode[App.mode]:alt_event(false)
-		end
-	end
-end
+-- -- toggle the alt pad and trigger alt functions for modes
+-- function App:set_alt(state)
+-- 	if(state) then
+-- 		self.grid.led[9][1] = {3,true}
+-- 		self.grid.toggled[9][1] = true
+-- 		if(Mode[Mode.select].alt_event ~= nil) then
+-- 			Mode[Mode.select]:alt_event(true)
+-- 		end
+-- 	else
+-- 		self.grid.led[9][1] = 0
+-- 		self.grid.toggled[9][1] = false
+-- 		if(Mode[App.mode].alt_event ~= nil) then
+-- 			Mode[App.mode]:alt_event(false)
+-- 		end
+-- 	end
+-- end
 
 
-function App:get_alt()
-	return self.grid.toggled[9][1]
-end
+-- function App:get_alt()
+-- 	return self.grid.toggled[9][1]
+-- end
 
--- The Alt button is the grid pad used to access secondary functions. 
--- Based on the toggle state, tapping Alt will toggle on or off
--- Methods using Alt check if the toggle state is true and should reset toggle state to false after event completes
-function App:handle_function_grid(data)
-	local x = data.x
-	local y = data.y
-	local alt = self:get_alt()
+-- -- The Alt button is the grid pad used to access secondary functions. 
+-- -- Based on the toggle state, tapping Alt will toggle on or off
+-- -- Methods using Alt check if the toggle state is true and should reset toggle state to false after event completes
+-- function App:handle_function_grid(data)
+-- 	local x = data.x
+-- 	local y = data.y
+-- 	local alt = self:get_alt()
 
-	-- Alt button
-	if x == 9 and y == 1 and data.state then
-		if(alt)then
-			self:set_alt(true)
-		else
-			self:set_alt(false)
-		end
-	end
+-- 	-- Alt button
+-- 	if x == 9 and y == 1 and data.state then
+-- 		if(alt)then
+-- 			self:set_alt(true)
+-- 		else
+-- 			self:set_alt(false)
+-- 		end
+-- 	end
 
-	--Bank Select
-	if x == 9 and y > 1 and data.state then
+-- 	--Bank Select
+-- 	if x == 9 and y > 1 and data.state then
 
-		local bank_select = 9 - y
+-- 		local bank_select = 9 - y
 
-		if(alt) then
-			if bank_select == self.current_bank then
-				print('we gonna save this PSET')
-			else
-				print('we gonna load this PSET')
-			end
+-- 		if(alt) then
+-- 			if bank_select == self.current_bank then
+-- 				print('we gonna save this PSET')
+-- 			else
+-- 				print('we gonna load this PSET')
+-- 			end
 			
-			self:set_alt(false)
+-- 			self:set_alt(false)
 			
-		elseif bank_select ~= self.current_bank then
-			self.current_bank = bank_select
-            Preset:set_grid()
-            Mute:set_grid()
+-- 		elseif bank_select ~= self.current_bank then
+-- 			self.current_bank = bank_select
+--             Preset:set_grid()
+--             Mute:set_grid()
             
-			for i = 2, 8 do			
-				self.grid.led[9][i] = 0
-			end
+-- 			for i = 2, 8 do			
+-- 				self.grid.led[9][i] = 0
+-- 			end
 
-			self.grid.led[9][y] = 3
-			params:set('drum_bank', self.current_bank)
-		end
-	end
+-- 			self.grid.led[9][y] = 3
+-- 			params:set('drum_bank', self.current_bank)
+-- 		end
+-- 	end
 
-	Mode:grid_event(data)
-end
+-- 	Mode:grid_event(data)
+-- end
 
 
 
@@ -545,61 +555,61 @@ end
 -- Event triggered for every pad up and down event — TRUE state is a pad up event, FALSE state is a pad up event.
 -- param s = self, MidiGrid instance
 -- param data = { x = 1-9, y = 1-9, state = boolean }
-function grid_event(s, data)
-	screen:ping()
-	App:handle_function_grid(data)
+-- function grid_event(s, data)
+-- 	screen:ping()
+-- 	App:handle_function_grid(data)
 	
-	Mode[App.mode]:grid_event(data)
+-- 	Mode[App.mode]:grid_event(data)
 	
-	Mute.grid_event(s, data) -- Sets display of mute buttons
-	Preset.grid_event(s, data) -- Manages loading and saving of mute states
+-- 	Mute.grid_event(s, data) -- Sets display of mute buttons
+-- 	Preset.grid_event(s, data) -- Manages loading and saving of mute states
 
-	App.grid:redraw()
-end
+-- 	App.grid:redraw()
+-- end
 
 
--- Transport Event occurs when a MIDI event is sent from the input device
-function transport_event(data)
+-- -- Transport Event occurs when a MIDI event is sent from the input device
+-- function transport_event(data)
 
-	-- track whether transport is playing
-	if(data.type == 'start' or data.type == 'continue') then
-        App:play()
-    elseif(data.type == 'stop') then
-        App:stop()
-    end
+-- 	-- track whether transport is playing
+-- 	if(data.type == 'start' or data.type == 'continue') then
+--         App:play()
+--     elseif(data.type == 'stop') then
+--         App:stop()
+--     end
 
 	
     
-	-- process modes
-	for i = 1, 4 do
-		if Mode[i].transport_event ~= nil then
-        	Mode[i]:transport_event(data)
-		end
-    end
+-- 	-- process modes
+-- 	for i = 1, 4 do
+-- 		if Mode[i].transport_event ~= nil then
+--         	Mode[i]:transport_event(data)
+-- 		end
+--     end
 
-    App.grid:redraw()
-end
+--     App.grid:redraw()
+-- end
 
 --
-function midi_event(data)
-	-- process mutes
-	Mute.midi_event(data)
+-- function midi_event(data)
+-- 	-- process mutes
+-- 	Mute.midi_event(data)
 	
-	for i = 1, 4 do
-		if Mode[i].midi_event ~= nil then
-        	Mode[i]:midi_event(data)
-		end
-    end
+-- 	for i = 1, 4 do
+-- 		if Mode[i].midi_event ~= nil then
+--         	Mode[i]:midi_event(data)
+-- 		end
+--     end
 
-	if (data.ch == params:get('bsp_drum_channel')) then
-        process_drum_channel(data)
-    elseif(data.ch == params:get('bsp_seq1_channel'))then
-        process_seq_1_channel(data)
-    else
-        process_other_channels(data)
-    end
+-- 	if (data.ch == params:get('bsp_drum_channel')) then
+--         process_drum_channel(data)
+--     elseif(data.ch == params:get('bsp_seq1_channel'))then
+--         process_seq_1_channel(data)
+--     else
+--         process_other_channels(data)
+--     end
 
-	App.grid:redraw()
-end
+-- 	App.grid:redraw()
+-- end
 
 return App
