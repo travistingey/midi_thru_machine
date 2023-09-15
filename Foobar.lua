@@ -7,7 +7,6 @@
 script_name = 'Foobar'
 path_name = script_name .. '/lib/'
 
-local MidiGrid = require(path_name .. 'midigrid')
 local Seq = require(path_name .. 'seq')
 local Keys = require(path_name .. 'keys')
 
@@ -56,7 +55,6 @@ function init()
 
     -- Redraw grid
     ]]
-	App.grid:refresh()
 
 
 end -- end Init
@@ -446,10 +444,9 @@ function r() ----------------------------- execute r() in the repl to quickly re
 	utilities.unrequire(path_name .. 'output')
 	utilities.unrequire(path_name .. 'grid')
 	utilities.unrequire(path_name .. 'mode')
-	utilities.unrequire(path_name .. 'midigrid')
 	utilities.unrequire(path_name .. 'seq')
 	utilities.unrequire(path_name .. 'mute')
-	utilities.unrequire(path_name .. 'keys')
+	utilities.unrequire(path_name .. 'scale')
 	utilities.unrequire(path_name .. 'musicutil-extended')
 	utilities.unrequire(path_name .. 'utilities')
 	norns.script.load(norns.state.script) -- https://github.com/monome/norns/blob/main/lua/core/state.lua

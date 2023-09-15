@@ -35,11 +35,11 @@ function Seq:set(o)
 	o.length = o.length or 96 -- in ticks, 96 = 24 ppqn x 4
 	o.buffer_length = o.length or 96
 
-    o.arm_time = 0
-    o.tick = o.tick or 0 
-    o.step = o.step or o.length
-	o.quantize_step = o.quantize_step or 96
-    o.div = o.div or 6
+	o.arm_time = 0
+	o.tick = o.tick or 0 
+	o.step = o.step or o.length
+		o.quantize_step = o.quantize_step or 96
+	o.div = o.div or 6
 	
 	o.follow = false
 	o.page = o.page or 1
@@ -48,7 +48,8 @@ function Seq:set(o)
 	o.armed	= false
 	o.arm = {}
     
-    
+	self.playing = false
+
 	o.on_step = o.on_step or function(s,value)  end
     
 	o.note_on = {}
@@ -59,7 +60,7 @@ function Seq:set(o)
 		o.enabled = false
 	end
 
-    o:load_bank(1)
+    -- o:load_bank(1)
 
 	return o
 end
@@ -138,7 +139,6 @@ end
 function Seq:quantize(div)
 	local note_on = {}
 	local reduced = {}
-	local note_on = {}
 	local length = math.ceil(self.length/div)
 	
 	for step = 1, length do
@@ -215,7 +215,9 @@ end
 
 -- Reset the sequencer values
 function Seq:clear(id)
+	self.playing = false
 	self.value = {}
+	self.current_bank = 0
 	self.next_bank = 0
 	
 	if id and id > 0 then
@@ -225,11 +227,26 @@ end
 
 -- Save values to bank
 function Seq:save_bank(id, save_current)
+	self.playing = true
+	for note,event in pairs(self.note_on) do
+		local off = {
+			note = event.note,
+			type = 'note_off',
+			vel = event.vel,
+			ch = self.track.midi_out,
+		}
+
+		self.track:send(off)
+		self:record_event(off)
+	end
+
+	self.note_on = {}
+
 	if not save_current then
 		self.value = self.buffer
 	end
 
-	if not self.overdub  not save_current then
+	if not self.overdub  and not save_current then
 		self.length = self.buffer_length
 		self.step = self.length
 	end
@@ -240,23 +257,23 @@ function Seq:save_bank(id, save_current)
 	self.bounce = false
 	
 	self.bank[id] = {value = self.value, length = self.length}
-	print('Save bank ' .. id .. ' on track ' .. self.track.id)
 end
 
 -- Load bank to values
 function Seq:load_bank(id)
+	self.playing = true
 	local bank = self.bank[id] or { value = {}, length = self.quantize_step }
 	self.value = bank.value
+	self.page = 1
 	self.length = bank.length
 	self.step = bank.length
 	self.tick = 0
-	print('Load bank ' .. id .. ' on track ' .. self.track.id)
 end
 
 -- start recording incoming Midi into Seq
 function Seq:record()
 	self.recording = true
-	
+	self.playing = false
 	-- recording a new clip in empty bank
 	if not self.overdub and not self.bounce then
 		self.tick = 0
@@ -272,16 +289,19 @@ function Seq:record()
 		
 	-- bounces performance of one clip into a new bank
 	elseif self.bounce then
+		self.playing = true
 		self.bounce_start = self.tick
 		self.buffer = {}
 		self.buffer_length = self.quantize_step
 	end
-
-	print('Recording bank ' .. self.next_bank)
 end
 
 
--- EVENTS ---------------
+------------------------
+
+-- MAIN EVENTS
+
+-------------------------
 -- Transport process chain
 function Seq:transport_event(data)
 	-- Tick based sequencer
@@ -295,8 +315,6 @@ function Seq:transport_event(data)
 			self:arm_event()
 		end
 	elseif data.type == 'stop' then
-		self.recording = false
-		self.armed = false
 
 		for i,c in pairs(self.note_on) do
 			-- send off
@@ -307,14 +325,24 @@ function Seq:transport_event(data)
 				ch = c.ch
 			}
 			self.track:send(off)
+
+			if self.recording then
+				self:record_event(off)
+			end
 		end
 		
 		self.note_on = {}
-		
+		if self.recording then
+			self:save_bank(self.current_bank)
+			self:load_bank(self.current_bank)
+		end
+
+		self.recording = false
+		self.armed = false
+		self:clip_set_grid()
 	elseif data.type == 'clock' then
 		
 		self.tick = self.tick + 1
-		
 
 		local next_step = (self.tick - 1 ) % self.length + 1
 		local last_step = self.step
@@ -356,7 +384,6 @@ function Seq:transport_event(data)
   							self.note_on[c.note] = nil
   							self.track:send(c)	
   						end
-  					
   					end)
 					end
 				end
@@ -375,37 +402,70 @@ function Seq:transport_event(data)
 					end				
 				end
 			end
-		else
-			print('next_step', next_step)
-			print('last_step', last_step)
-			print('tick', self.tick)
-			print('length', self.length)
 		end
 	end	
 
-	self:set_seq_grid()
+  if self.seq_grid ~= nil then
+	  self:seq_set_grid()
+	end
 
 	return data
 end
+
 
 -- Midi process chain
 function Seq:midi_event(data)
 	if self.recording then
         -- process note_off events when a note_on occurs OR any note_on/note_off event that isn't muted
-		if(data.type == 'note_off' and self.note_on[data.note] ~= nil) or not (data.note and self.track.mute.state[data.note])  then
+		
+		if self.track.triggered then
+			if not self.track.mute.state[self.track.trigger] or (data.type == 'note_off' and self.note_on[data.note] ~= nil)  then
+				if self.bounce and self.track.midi_thru then
+					self:record_event(data)
+				elseif not self.bounce then
+					self:record_event(data)
+				end
+			end
+		elseif(data.type == 'note_off' and self.note_on[data.note] ~= nil) or not (data.note and self.track.mute.state[data.note])  then
 			self:record_event(data)
 		end
     
 	end
 
-	-- update note events
-	if data.type == 'note_on' then
-		self.note_on[data.note] = data
-	elseif data.type == 'note_off' and self.note_on[data.note] ~= nil then
-		self.note_on[data.note] = nil  
-	end
+	if not self.playing or self.track.midi_thru then
+		if self.track.mono and data.type == 'note_on' then
+			for i,e in pairs(self.note_on) do
+				local off = {
+					type = 'note_off',
+					note = e.note,
+					vel = e.vel,
+					ch = e.ch,
+				}
+				self.note_on = {}
+				self.track:send(off)
+			end
+		elseif self.note_on[data.note] ~= nil then
+			local off = {
+				type = 'note_off',
+				note = data.note,
+				vel = data.vel,
+				ch = data.ch,
+			}
+			self.note_on[data.note] = nil
+			self.track:send(off)
+		end
+			
+		-- update note events
+		if data.type == 'note_on' then
+			self.note_on[data.note] = data
+		elseif data.type == 'note_off' and self.note_on[data.note] ~= nil then
+			self.note_on[data.note] = nil  
+		end
 
-	return data
+	
+	
+		return data
+	end
 end
 
 -- Handle arm events
@@ -424,10 +484,14 @@ function Seq:arm_event()
 	end
 
 	local actions = {}
+	local save_current = false
 
 	if self.armed then
 		if type(self.armed) == 'table' then
 			actions = self.armed
+			if actions[1] == 'save' then
+				save_current = true
+			end
 		else
 			actions = {self.armed}
 		end
@@ -443,18 +507,22 @@ function Seq:arm_event()
 		  self.overdub = true
 		  self:record()
 		elseif action == 'save' then
-			self:save_bank(self.next_bank)
+			if save_current then
+				self:save_bank(self.current_bank)
+			else
+				self:save_bank(self.next_bank)
+			end
 		elseif action == 'load' then
 			self:load_bank(self.next_bank)
-			self:set_seq_grid()
-		elseif action == 'cancel' then
+			self:seq_set_grid()
+		elseif action == 'clear' then
 			self:clear()
 		end
 	end
 	
 	self.current_bank = self.next_bank
 	self.next_bank = 0
-	self:set_clip_grid()
+	self:clip_set_grid()
 	self.armed = false
 end
 
@@ -462,7 +530,7 @@ end
 function Seq:record_event(event)
 	
 	local val = {}
-	local tick = event.tick or self.tick
+	local tick = self.tick
 	local step = (tick - 1) % self.buffer_length + 1
 
 
@@ -483,16 +551,19 @@ function Seq:record_event(event)
 	end
 
 	val.offset = math.floor((clock.get_beats() - App.last_time) * 100) / 100
-	
+
 	if self.buffer[step] == nil then
 		self.buffer[step] = {}
 	end
 
-	if self.buffer[step][val.note] == nil then
-		self.buffer[step][val.note] = {}
-	end
+	-- Record
+	if val.note then
+		if self.buffer[step][val.note] == nil then
+			self.buffer[step][val.note] = {}
+		end
 	
-	self.buffer[step][val.note][val.type] = val
+		self.buffer[step][val.note][val.type] = val
+	end
 
 end
 
@@ -506,11 +577,7 @@ function Seq:seq_grid_event(data)
 	local wrap = 8
 	local page_count = math.ceil( math.ceil(self.length/self.div) / wrap)
 
-	--handle function pads
-	if data.type ~= 'pad' then
-		print(data.type ..' seq')
-	end
-
+	
 	
 	if data.state and data.type == 'right' and self.page < page_count then
 		
@@ -534,7 +601,8 @@ function Seq:seq_grid_event(data)
 		  	print('page: ' .. self.page)
 	end
 
-
+	
+	
 
 	if data.state and data.type == 'down' then
 		 if App.alt then
@@ -545,8 +613,10 @@ function Seq:seq_grid_event(data)
 	        end
 			page_count = math.ceil( math.ceil(self.length/self.div) / wrap)
 			if self.page > page_count then self.page = page_count end
-	    elseif grid.display_end.y > grid.grid_end.y and grid.display_start.y > 1 then
-    			grid.display_start.y = grid.display_start.y - 1
+
+	    elseif grid.display_end.y > grid.grid_end.y and grid.display_start.y > 1 and grid.display_start.y > self.track.note_range_lower + 1  then
+    		
+				grid.display_start.y = grid.display_start.y - 1
     			grid.display_end.y = grid.display_end.y - 1
 		  end
 	end
@@ -560,11 +630,12 @@ function Seq:seq_grid_event(data)
 	        end
 			page_count = math.ceil( math.ceil(self.length/self.div) / wrap)
 			if self.page > page_count then self.page = page_count end
-		elseif grid.display_start.y < grid.grid_start.y then	
+		elseif grid.display_start.y < grid.grid_start.y and grid.display_end.y < self.track.note_range_upper + 1 then	
 			grid.display_start.y = grid.display_start.y + 1
 			grid.display_end.y = grid.display_end.y + 1
 		end
 	end
+
 	if data.state and data.type == 'pad' then
 		
 		local s = data.x + (self.page - 1) * wrap
@@ -590,13 +661,6 @@ function Seq:seq_grid_event(data)
 					empty_step = false
 					step_off = true
 				end
-			end
-		end
-
-		if not empty_step then
-			for i,v in ipairs(step) do
-				print(step_on, step_off)
-				tab.print(v)
 			end
 		end
 		
@@ -645,15 +709,16 @@ function Seq:seq_grid_event(data)
 
 			self.value[off.tick][off.note][off.type] = off
 
-			
+			if not self.recording then
+				self:save_bank(self.current_bank, true)
+			end
 		end
 	end
-	self:set_seq_grid()
-	grid:refresh()
+	self:seq_set_grid()
 end
 
 -- Set current value LEDs
-function Seq:set_seq_grid()
+function Seq:seq_set_grid()
 	
 	local grid = self.seq_grid
 	local seq = self
@@ -661,7 +726,7 @@ function Seq:set_seq_grid()
 	local current_step = (math.ceil(self.tick/self.div) - 1) % math.ceil(self.length/self.div) + 1
 	local page_count = math.ceil( math.ceil(self.length/self.div) / wrap)
     
-	if grid.active then
+	if grid and grid.active then
 	    
     -- Follow playhead
       	if self.follow then
@@ -700,7 +765,7 @@ function Seq:set_seq_grid()
 			App.arrow_pads.led[1][9] = 1
 		end
 
-		App.arrow_pads:refresh() -- reminder that arrow pads are a shared grid and need to be refreshed separately
+		App.arrow_pads:refresh('sequencer ' .. self.id) -- reminder that arrow pads are a shared grid and need to be refreshed separately
 		
 		for  s = (self.page - 1) * wrap + 1, self.page * wrap do
 		  
@@ -740,7 +805,7 @@ function Seq:set_seq_grid()
 			
 		end
 
-		grid:refresh()
+		grid:refresh('set grid')
 	end
 end
 
@@ -751,8 +816,9 @@ end
 -- Record: Empty clips will start recording when pressed. Length is set by when the next quantized step is pressed
 -- Bounce: Alt + Empty will keep the current sequence but record into the new bank.
 -- Overdub: Alt + Recorded bank will record over existing steps
-function Seq:clip_grid_event(data)
 
+function Seq:clip_grid_event(data)
+  
 	if data.type == 'pad' then
 
 		local grid = self.clip_grid
@@ -763,170 +829,120 @@ function Seq:clip_grid_event(data)
 		
 		self.next_bank = index
 
-		local same = (self.current_bank == self.next_bank)  -- button press was the same as loaded bank
-		local empty= (self.bank[self.next_bank] == nil) -- next bank is empty
-		local last_empty = (last_bank == nil) -- current bank is full
 		
-		local recording = (self.recording) -- currently recording
-		local armed = (self.armed) -- currently armed
-
-		local c = self.clip_grid:index_to_grid(self.current_bank)
-		local l = self.clip_grid:index_to_grid(last)
-		local n = self.clip_grid:index_to_grid(self.next_bank)
-
+		local lookup = {
+			[1]		=	{'load', 'overdub'},
+			[2]		=	{'load', 'overdub'},
+			[4]		=	{{'save','load'}, {'save','overdub'}},
+			[5]		=	{'load','overdub'},
+			[6]		=	{'load','overdub'},
+			[8]		=	{ {'save', 'load'},{'save','overdub'}},
+			[9]		=	{'record','bounce'},
+			[10]	=	{'record','bounce'},
+			[12]	=	{{'save','record'},{'save','bounce'}},
+			[13]	=	{'record','bounce'},
+			[14]	=	{'record','bounce'},
+			[16]	=	{{'save','record'},{'save','bounce'}},
+			[17]	=	{'clear','overdub'},
+			[18]	=	{'clear','overdub'},
+			[20]	=	{'save','delete'},
+			[21]	=	{'cancel', 'delete'},
+			[22]	=	{'cancel', 'delete'},
+			[24]	=	{'cancel', 'delete'},
+			[25]	=	{'record','bounce'},
+			[26]	=	{'record','bounce'},
+			[28]	=	{'save', 'delete'},
+			[29]	=	{'cancel', 'cancel'},
+			[30]	=	{'cancel', 'delete'},
+			[32]	=	{'cancel', 'delete'}
+		}
+				
 		if data.state then
-			print('current: ' .. self.current_bank .. ', next: ' .. self.next_bank )
-			if not armed and not recording then
-				print('1 STATE: not armed and not recording')
-				if empty then
-					print('pad was empty')
-					self.armed = 'record'
-					
-					if App.alt then
-					   self.armed = 'bounce'
-					   App.alt_pad:reset()					   
-					 end
-					print('arm record')
-				elseif not same then
-					print('pad has bank')
-					-- assumes we're just playing
-					self.armed = 'load'
-					print('arm load')
-					
-					if App.alt then
-					  self.armed = 'overdub'
-					  App.alt_pad:reset()
-					end
-				else
-					print('clear')
-				  if App.alt then
-				    self.armed = 'overdub'
-				    App.alt_pad:reset()
-				  else
-					  self.armed = 'cancel'
-					end
-				end
 
-			elseif armed and not recording	then
-				print('2 STATE: armed and not recording')
-        
-        	if App.alt then
-					  if empty then
-					    self.armed = 'bounce'
-					    App.alt_pad:reset()
-					  else
-					    self.armed='overdub'
-					  end
-				  
-				    App.alt_pad:reset()
+			local score = 0 
+
+			if App.playing then score = score + (1<<0) end
+			if self.recording then score = score + (1<<1) end
+			if self.armed then score = score + (1<<2) end
+			if (self.bank[index] == nil) then score = score + (1<<3) end
+			if (last == index) or (self.current_bank == index) then score = score + (1<<4) end
 			
-				elseif same then
-					print('same cancel arm')
-					-- cancel arm
-					
-					self.armed = false
-					
-
-				elseif self.current_bank == 0 then
-					self:clear()
-					self.armed = false
-				elseif not same and empty then
-					print('not same and empty')
-					-- arm record for new pad
-					self.armed = 'record'
-					
-					print('arm record')
-
+			
+			if lookup[score + 1] ~= nil then
+				if App.alt == true then
+					self.armed = lookup[score + 1][2]
 				else
-					-- arm load
-					self.armed = 'load'
-					print('arm load')
+					self.armed = lookup[score + 1][1]
 				end
-			elseif not armed and recording then
-				print('3 STATE: not armed and recording')
-				if same then
-					print('same')
-					-- arm save
-					if App.alt then
-					  self:clear(self.current_bank)
-					  self.recording = false
-					  App.alt_pad:reset()
-				  end
-					self.armed = 'save'
-					print('arm save')
-				elseif not same and empty then
-					self.armed = {'save','record'}
-				  if App.alt then
-				    self.armed = {'save','bounce'}
-				    App.alt_pad:reset()
-				  end
-				else
-					print('not (not same and empty)')
-					self.armed = {'save','load'}
-					print('arm save then load')
-			       if App.alt then
-				    self.armed ={'save','overdub'}
-				    App.alt_pad:reset()
-				  end
-				end
+			end
+
+			App.alt_pad:reset()
+			
+			if self.armed == 'cancel' then
+				self.next_bank = 0
+				self.armed = false
+			elseif self.armed == 'delete' then
+				self.armed = false
+				self:clear(self.current_bank)
 			end
 
 			if not App.playing and self.armed ~= 'record' and self.armed ~= 'bounce' then
 				self:arm_event()
 			end
-		
-			self:set_clip_grid()
 
+			self:clip_set_grid()
+
+			
 		end
 
-		grid:refresh()
 	end
 end
 
 -- Set the clip grid LEDs
-function Seq:set_clip_grid()
-	self.clip_grid:for_each(function(s,x,y,i)
-
-		if(self.bank[i])then
-			s.led[x][y] = 1
-		else
-			s.led[x][y] = {5,5,5}
-		end
-
-		if i == self.current_bank then
-			if self.recording then
-				s.led[x][y] = {3,true}
-			elseif (self.bank[i]) then
-				s.led[x][y] = Grid.rainbow_on[i]
+function Seq:clip_set_grid()
+	if self.clip_grid then
+		self.clip_grid:for_each(function(s,x,y,i)
+			
+			if(self.bank[i])then
+				s.led[x][y] = 1
 			else
 				s.led[x][y] = {5,5,5}
 			end
-		end
 
-		local actions = {}
-
-		if self.armed then
-			if type(self.armed) == 'table' then
-				actions = self.armed
-			else
-				actions = {self.armed}
-			end
-		end
-
-		for _,action in ipairs(actions) do
-			if i == self.next_bank then
-				if action == 'load' then
+			if i == self.current_bank then
+				if self.recording then
 					s.led[x][y] = {3,true}
+				elseif (self.bank[i]) then
+					s.led[x][y] = Grid.rainbow_on[(i - 1) % 16 + 1 ]
 				else
-					s.led[x][y] = {4,true}
+					s.led[x][y] = {5,5,5}
 				end
 			end
-		end
 
-	end)
+			local actions = {}
 
-	if self.clip_grid.active then
-		self.clip_grid:refresh()
+			if self.armed then
+				if type(self.armed) == 'table' then
+					actions = self.armed
+				else
+					actions = {self.armed}
+				end
+			end
+
+			for _,action in ipairs(actions) do
+				if i == self.next_bank then
+					if action == 'load' then
+						s.led[x][y] = {3,true}
+					else
+						s.led[x][y] = {4,true}
+					end
+				end
+			end
+
+		end)
+
+		
+		self.clip_grid:refresh('set grid')
 	end
 end
 

@@ -15,7 +15,7 @@ function Output:set(o)
 end
 
 
-function Output:process_midi(data)
+function Output:process_midi(data, track)
     if data ~= nil then
         
         if data.type == 'note_on' then    
@@ -24,17 +24,45 @@ function Output:process_midi(data)
             self.note_on[data.note] = nil
         end
 
-        data = self:midi_event(data)
+        data = self:midi_event(data, track)
         return data
     end
 end
 
 function Output:kill()
     for i,v in pairs(self.note_on) do
-        local data = v
-        v.type = 'note_off'
-        self:midi_out(v)
+        local off = {
+            type = 'note_off',
+            note = v.note,
+            vel = v.vel,
+            ch = v.ch
+        }
+
+        
+        App.midi_out:send(off)
     end
+
+    self.note_on = {}
+end
+
+function Output:panic()
+    clock.run(function()
+    for c = 0,16 do
+        for i = 0, 128 do
+            
+
+            local off = {
+                note = i,
+                type = 'note_off',
+                ch = c,
+                vel = 0
+            }
+            
+            App.midi_out:send(off)
+            clock.sync(.01)
+        end
+    end
+end)
 
     self.note_on = {}
 end
@@ -46,9 +74,10 @@ Output.types = {}
 
 Output.types['midi'] = {
     props = {'midi_out'},
-    midi_event = function(s,data)
+    midi_event = function(s,data, track)
         if data ~= nil then
-            data.ch = s.track.midi_out
+            data.ch = track.midi_out
+
             App.midi_out:send(data)
         end
         return data

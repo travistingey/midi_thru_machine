@@ -16,6 +16,7 @@ function Grid:new (o)
 	setmetatable(o, self)
 	self.__index = self
 
+	o.name = o.name or 'unnamed grid'
 	o.event = o.event or function(data) end
 	o.active = o.active or false
 	o.grid_start = o.grid_start or {x = 1,y = 1}
@@ -27,11 +28,11 @@ function Grid:new (o)
 
 	o.set = o.set or function(s) end
 
-	local min_x = math.min(o.display_start.x,o.display_end.x)
-	local min_y = math.min(o.display_start.y,o.display_end.y)
+	local min_x = math.min(o.grid_start.x,o.grid_end.x)
+	local min_y = math.min(o.grid_start.y,o.grid_end.y)
 
-	local max_x = math.max(o.display_start.x,o.display_end.x)
-	local max_y = math.max(o.display_start.y,o.display_end.y)
+	local max_x = math.max(o.grid_start.x,o.grid_end.x)
+	local max_y = math.max(o.grid_start.y,o.grid_end.y)
 
 	local grid_width = max_x - min_x + 1
 	local grid_height = max_y - min_y + 1
@@ -65,25 +66,48 @@ function Grid:new (o)
 	return o
 end
 
-function Grid:subgrid(grid_start,grid_end,event)
+function Grid:update_bounds()
+
+	self.bounds = {
+		width = math.max(self.grid_start.x,self.grid_end.x) - math.min(self.grid_start.x,self.grid_end.x) + 1,
+		height = math.max(self.grid_start.y,self.grid_end.y) - math.min(self.grid_start.y,self.grid_end.y) + 1,
+		max_x = math.max(self.grid_start.x,self.grid_end.x),
+		max_y = math.max(self.grid_start.y,self.grid_end.y),
+		min_x = math.min(self.grid_start.x,self.grid_end.x),
+		min_y = math.min(self.grid_start.y,self.grid_end.y)
+	}
+
+	self.display_bounds = {
+		width = math.max(self.display_start.x,self.display_end.x) - math.min(self.display_start.x,self.display_end.x) + 1,
+		height = math.max(self.display_start.y,self.display_end.y) - math.min(self.display_start.y,self.display_end.y) + 1,
+		max_x = math.max(self.display_start.x,self.display_end.x),
+		max_y = math.max(self.display_start.y,self.display_end.y),
+		min_x = math.min(self.display_start.x,self.display_end.x),
+		min_y = math.min(self.display_start.y,self.display_end.y)
+	}
+
+end
+function Grid:subgrid(o)
 	-- Create a new instance of Grid
 	local subgrid = Grid:new({
 		midi = self.midi,
-		grid_start = grid_start, 
-		grid_end = grid_end,
-		display_start = grid_start,
-		display_end = grid_end,
-		offset = {x = grid_start.x - 1, y = grid_start.y - 1},
+		grid_start = o.grid_start or self.grid_start, 
+		grid_end = o.grid_end or self.grid_end,
+		display_start = o.display_start or o.grid_start,
+		display_end = o.display_end or o.grid_end,
+		offset = {x = o.grid_start.x - 1, y = o.grid_start.y - 1},
 		led = self.led,  -- sharing the same map with parent grid
 		toggled = self.toggled,      -- sharing the same toggled status with parent grid
 		down = self.down             -- sharing the same down status with parent grid
 	})
 
-	event = event or function(data) end
+	o.event = o.event or function(s, data) end
 
 	subgrid.event = function(s,data)
+		s:update_bounds()
+
 		if s:in_bounds(data) then
-			event(s,data)
+			o.event(s,data)
 		end
 	end
 
@@ -106,8 +130,10 @@ function Grid:enable()
 		end
 	end
 
-	self.set_grid()
-	self:refresh()
+  if self.set_grid then
+	  self:set_grid()
+	end
+	
 end
 
 function Grid:disable()
@@ -235,7 +261,7 @@ function Grid:reset()
 	if self.on_reset ~= nil then
 		self:on_reset()
 	end
-
+	
 	self:refresh()
 end
 
@@ -295,8 +321,19 @@ function Grid:set_raw(x,y,z, force)
 	
 end
 
-function Grid:refresh()
+function Grid:refresh(debug)
 	if self.active then
+		
+		--[[ Use this to debug grid refreshes to make sure we're not needlessly itterating through grid tables.
+		
+		if debug ~= nil then
+			print(self.name .. ' refresh from ' .. debug)
+		else	
+			print(self.name .. ' refresh')
+		end
+		
+		--]]
+
 		local message = {240,0,32,41,2,13,3}
 
 		local minX = math.min(self.display_start.x,self.display_end.x)
@@ -357,7 +394,13 @@ function Grid:clear()
 end
 
 function Grid:in_bounds(pos)
-return ( pos.x >= self.bounds.min_x and pos.x <= self.bounds.max_x and pos.y >= self.bounds.min_y and pos.y <= self.bounds.max_y )
+	self:update_bounds()
+	return ( pos.x >= self.bounds.min_x and pos.x <= self.bounds.max_x and pos.y >= self.bounds.min_y and pos.y <= self.bounds.max_y )
+end
+
+function Grid:in_display(pos)
+	self:update_bounds()
+	return ( pos.x >= self.display_bounds.min_x and pos.x <= self.display_bounds.max_x and pos.y >= self.display_bounds.min_y and pos.y <= self.display_bounds.max_y )
 end
 
 function Grid:grid_to_index(pos)

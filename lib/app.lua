@@ -2,6 +2,8 @@ local path_name = 'Foobar/lib/'
 local MidiGrid = require(path_name .. 'midigrid')
 local Grid = require(path_name .. 'grid')
 local Track = require(path_name .. 'track')
+local Scale = require(path_name .. 'scale')
+local Output = require(path_name .. 'output')
 local Mode = require(path_name .. 'mode')
 
 local musicutil = require(path_name .. 'musicutil-extended')
@@ -12,13 +14,15 @@ local App = {}
 function App:init()
 	-- Model
 	self.chord = {}
-	self.scale = {{bits = 1, root = 0}, {bits = 1, root = 0}}
+	self.scale = {}
+	self.output = {}
 	self.track = {}
 	self.mode = {}
 
-	self.current_bank = 1
+
 	self.current_mode = 1
-	self.current_track = 1
+	self.current_track = 10
+	
 	self.preset = 1
 	
 	self.ppqn = 24
@@ -30,13 +34,13 @@ function App:init()
 	self.start_time = 0
 	self.last_time = 0
 	
-	
+	self.triggers = {} -- Track which notes are used for triggers
+
+
 	self.context = {}
 	self.key = {}
 	self.alt_down = false
 	self.key_down = 0
-
-	self:set_scale(1,1)
 
 	local midi_device = {} -- container for connected midi devices
   	local midi_device_names = {}
@@ -109,12 +113,56 @@ function App:init()
 	crow.input[1].mode('none')
 	crow.input[2].mode('none')
 	
+
+	--[[
+		Certain TrackComponent instances can be shared between Tracks.
+	    To do so, they need to avoid reliance on the 'self.track' references
+		and solely rely on 'track' being passed.
+		
+		TODO:
+		What if made param actions being set a function of the TrackComponent itself?
+		If a track.id is specified, we register the component under the track,
+		otherwise we have the components register themselves.
+		
+		There are other implications for instantiation, loading and
+		changing these things on the fly that need to be considered.
+
+		How do we track scales changing for a song?
+		Limiting scale slots may be the way to go to better manage the UI
+		default = no scale
+		chord voicing
+		voice 1
+		voice 2 
+		]]
+
+	-- Create shared scales
+	for i = 1, 16 do
+		self.scale[i] = Scale:new({id = i})
+	end
+
+	-- Create shared outputs
+	for i = 1, 16 do
+		self.output[i] = Output:new({
+			id = i,
+			midi_event = Output.types['midi'].midi_event
+		})
+	end
+
 	-- Create the tracks
 	params:add_separator('tracks','Tracks')
 	for i = 1, 16 do
 		self.track[i] = Track:new({id = i})
 	end
 	
+	-- Create the modes
+
+	for i = 1, 4 do
+		self.mode[i] = Mode:new({id = i, type = i})
+		self.mode[i]:set_action()
+	end
+	
+	params:bang()
+
 	-- Create the modes
 	self.grid = Grid:new({
 		grid_start = {x=1,y=1},
@@ -129,23 +177,6 @@ function App:init()
 	params:default()
 
 
-	--[[
-		This is the start of a new Mode class. Let's describe the patterns that work so that we can make the mode class a better wrapper.
-		1.	The App's midi_grid event need to pass the raw event data to the Grid instances for the current mode using the :process method.
-		2.	Function Pads: the arrow pads, bank select, alt pad and indicator will switch functions between modes.
-			We can pass data from these grid events by calling other grid events directly using the components grid methods.
-			We should be careful since the indices for the function pads are outside the main grid, which could cause issues.
-			Can we use a callback pattern here?
-		3.	Mode select executes at an App level and is responsible for enabling and disabling a track component's grids.
-			This has been standardized by using the Grid enable/disable methods.
-			The mode class will register the specific grid components that will need to be enabled and disabled
-		4.	Initialization: Track components will assume to be disabled on load. We will need to enable the first mode
-
-		]]
-	
-	
-
-	-- We need to manage this at the App level
 	self.midi_grid.event = function(msg)
 		self.grid:process(msg)
 		
@@ -155,129 +186,87 @@ function App:init()
 			component:process(msg)
 		end
 	end
-	
-	self.arrow_pads = self.grid:subgrid({x=1,y=9},{x=4,y=9},function(s,data)
+
+
+	self.arrow_pads = self.grid:subgrid({grid_start = {x=1,y=9}, grid_end = {x=4,y=9},event = function(s,data)
 
 		local mode = self.mode[self.current_mode]
 
 		for i,component in ipairs(mode.components) do
 			component:event(data)
 		end
-	end)
+	end})
 
-	self.row_pads = self.grid:subgrid({x=9,y=8},{x=9,y=2},function(s,data)
+	self.arrow_pads.name = 'arrows grid'
+
+	self.row_pads = self.grid:subgrid({grid_start = {x=9,y=8}, grid_end = {x=9,y=2},event = function(s,data)
 
 		local mode = self.mode[self.current_mode]
 
 		for i,component in ipairs(mode.components) do
 			component:event(data)
 		end
-	end)
+	end})
 
+	self.row_pads.name = 'row grid'
 
-	-- Mode setup and instantiation must happen after components are initialized with the params:default() execution
-	local session_mode = {
-		id = 1,
-		components = {App.track[10].seq.clip_grid, App.track[10].seq.seq_grid, App.track[10].mute.grid},
-		on_load = function() print('Mode one loaded') end,
-		on_reset = function() end,
-	}
-
-	local drum_mode = {
-		id = 2,
-		components = {},
-		on_load = function() print('Mode two loaded') end,
-	}
-
-	local key_mode = {
-		id = 3,
-		components = {},
-		on_load = function() print('Mode three loaded') end,
-
-	}
-
-	local user_mode = {
-		id = 4,
-		components = {},
-
-	}
-
-	self.mode = {session_mode,drum_mode,key_mode,user_mode}
-	
-	self.mode_select = self.grid:subgrid({x=5,y=9},{x=8,y=9},function(s,data)
+	self.mode_select = self.grid:subgrid({grid_start = {x=5,y=9},grid_end = {x=8,y=9}, event = function(s,data)
 			if data.state then
-				local mode_select = s:grid_to_index(data)
-				
-				for i, mode in ipairs(App.mode) do
-					if mode_select ~= mode.id then
-						for i, component in ipairs(mode.components) do
-							component:disable()
-						end
-					end
-				end
-
-				for i, mode in ipairs(App.mode) do
-					if mode_select == mode.id then
-						
-						if mode.on_load ~= nil then
-							mode.on_load()
-						end
-
-						for i, component in ipairs(mode.components) do
-							component:enable()
-						end
-
-					end
-
-					
-				end
-
 				s:reset()
+				self.arrow_pads:reset()
+				self.alt_pad:reset()
+				self.row_pads:reset()
+				self.main_grid:reset()
+
+				self.current_mode = s:grid_to_index(data)
+				for i = 1, #self.mode do
+					if i ~= self.current_mode then
+						self.mode[i]:disable()
+					end					
+				end
+				self.mode[self.current_mode]:enable()
 				s.led[data.x][data.y] = 1
 				s:refresh()
-				
-				self.current_mode = mode_select
-
-
 			end
 		end
-	)
+	})
 
+	self.mode_select.name = 'Mode Select'
 	
-
-	local mode_led = self.mode_select:index_to_grid(self.current_mode)
-	self.mode_select.led[mode_led.x][mode_led.y] = 1
-
 	-- Alt pad
-	self.alt_pad = self.grid:subgrid({x=9,y=1},{x=9,y=1}, function(s,data)
+	self.alt_pad = self.grid:subgrid({grid_start = {x=9,y=1},grid_end = {x=9,y=1}, event = function(s,data)
 		if data.toggled then
 			s.led[data.x][data.y] = 1
 		else
 			s.led[data.x][data.y] = 0
 		end
 		App.alt = data.toggled
-		s:refresh()
-	end)
+		s:refresh('alt event')
+	end } )
+
+	self.alt_pad.name = 'Alt pad'
 
 	-- Using the on_reset callback in order to set App level properties.
 	self.alt_pad.on_reset = function(s)
 		App.alt = false
 	end
-
 	
 
-	
-	-- Enable Modes
-	
-	self.track[10].seq.clip_grid:enable()
-	self.track[10].seq.seq_grid:enable()
-	self.track[10].mute.grid:enable()
-	
-	-- swap a grid
-	-- change grid display
+	-- Alt pad
+	self.main_grid = self.grid:subgrid({grid_start = {x=1,y=1},grid_end = {x=8,y=8}} )
+	self.main_grid.name = 'main grid'
 	
 	
-end
+
+	for i = 1, #self.mode do
+		if i ~= self.current_mode then
+			self.mode[i]:disable()
+		end					
+	end
+	self.mode_select:event({x=5,y=9, state = true})
+
+	
+end -- end App:init
 
 -- Start playback
 function App:start(continue)
@@ -375,14 +364,6 @@ function App:on_tick()
 	self.tick = self.tick + 1
 	self.midi_out:clock()
 
-	-- self.grid.toggled[9][9] = not self.grid.toggled[9][9]
-
-	-- if self.grid.toggled[9][9] then
-	-- 	self.grid.led[9][9] = 5
-	-- else
-	-- 	self.grid.led[9][9] = 3
-	-- end
-
 	for i = 1, #self.track do
 		self.track[i]:process_transport({type = 'clock'})
 	end
@@ -395,37 +376,7 @@ end
 -- Setter for static variables
 function App:set(prop, value) self[prop] = value end
 
--- METHODS --
--- Sets the current scale from bits
--- i = bits
--- d = scale selection
-function App:set_scale(i,d)
-	self.scale[d].bits = i
-	self.scale[d].intervals = musicutil.bits_to_intervals(i)
-	self.scale[d].notes = {}
 
-	for i=1,5 do
-		for j=1,#self.scale[d].intervals do
-			self.scale[d].notes[(i - 1) * #self.scale[d].intervals + j] = self.scale[d].intervals[j] + (i-1) * 12
-		end
-	end
-	
-	-- crow.input[d].mode('scale',scale)
-	screen_dirty = true
-
---[[
-	-- Update leds for Keys mode
-	if Mode and Mode.select == 3 then
-		Mode[3]:set_grid()
-	end]]
-end
-
--- shifts a App.scale to the target note degree
-function App:shift_scale_to_note(s, n)
-	local scale = musicutil.shift_scale(self.scale[s].bits, n - self.scale[s].root)
-	self.scale[s].root = n - 48
-	self:set_scale(scale, s)
-end
 
 -- CONTROL HANDLING --
 function App:set_context(newContext)
@@ -476,140 +427,5 @@ function App:handle_key(press_fn,long_fn,alt_fn,k,z)
 		end
 	end
 end
-
-
--- -- toggle the alt pad and trigger alt functions for modes
--- function App:set_alt(state)
--- 	if(state) then
--- 		self.grid.led[9][1] = {3,true}
--- 		self.grid.toggled[9][1] = true
--- 		if(Mode[Mode.select].alt_event ~= nil) then
--- 			Mode[Mode.select]:alt_event(true)
--- 		end
--- 	else
--- 		self.grid.led[9][1] = 0
--- 		self.grid.toggled[9][1] = false
--- 		if(Mode[App.mode].alt_event ~= nil) then
--- 			Mode[App.mode]:alt_event(false)
--- 		end
--- 	end
--- end
-
-
--- function App:get_alt()
--- 	return self.grid.toggled[9][1]
--- end
-
--- -- The Alt button is the grid pad used to access secondary functions. 
--- -- Based on the toggle state, tapping Alt will toggle on or off
--- -- Methods using Alt check if the toggle state is true and should reset toggle state to false after event completes
--- function App:handle_function_grid(data)
--- 	local x = data.x
--- 	local y = data.y
--- 	local alt = self:get_alt()
-
--- 	-- Alt button
--- 	if x == 9 and y == 1 and data.state then
--- 		if(alt)then
--- 			self:set_alt(true)
--- 		else
--- 			self:set_alt(false)
--- 		end
--- 	end
-
--- 	--Bank Select
--- 	if x == 9 and y > 1 and data.state then
-
--- 		local bank_select = 9 - y
-
--- 		if(alt) then
--- 			if bank_select == self.current_bank then
--- 				print('we gonna save this PSET')
--- 			else
--- 				print('we gonna load this PSET')
--- 			end
-			
--- 			self:set_alt(false)
-			
--- 		elseif bank_select ~= self.current_bank then
--- 			self.current_bank = bank_select
---             Preset:set_grid()
---             Mute:set_grid()
-            
--- 			for i = 2, 8 do			
--- 				self.grid.led[9][i] = 0
--- 			end
-
--- 			self.grid.led[9][y] = 3
--- 			params:set('drum_bank', self.current_bank)
--- 		end
--- 	end
-
--- 	Mode:grid_event(data)
--- end
-
-
-
-
--- MidiGrid Event Handler
--- Event triggered for every pad up and down event — TRUE state is a pad up event, FALSE state is a pad up event.
--- param s = self, MidiGrid instance
--- param data = { x = 1-9, y = 1-9, state = boolean }
--- function grid_event(s, data)
--- 	screen:ping()
--- 	App:handle_function_grid(data)
-	
--- 	Mode[App.mode]:grid_event(data)
-	
--- 	Mute.grid_event(s, data) -- Sets display of mute buttons
--- 	Preset.grid_event(s, data) -- Manages loading and saving of mute states
-
--- 	App.grid:redraw()
--- end
-
-
--- -- Transport Event occurs when a MIDI event is sent from the input device
--- function transport_event(data)
-
--- 	-- track whether transport is playing
--- 	if(data.type == 'start' or data.type == 'continue') then
---         App:play()
---     elseif(data.type == 'stop') then
---         App:stop()
---     end
-
-	
-    
--- 	-- process modes
--- 	for i = 1, 4 do
--- 		if Mode[i].transport_event ~= nil then
---         	Mode[i]:transport_event(data)
--- 		end
---     end
-
---     App.grid:redraw()
--- end
-
---
--- function midi_event(data)
--- 	-- process mutes
--- 	Mute.midi_event(data)
-	
--- 	for i = 1, 4 do
--- 		if Mode[i].midi_event ~= nil then
---         	Mode[i]:midi_event(data)
--- 		end
---     end
-
--- 	if (data.ch == params:get('bsp_drum_channel')) then
---         process_drum_channel(data)
---     elseif(data.ch == params:get('bsp_seq1_channel'))then
---         process_seq_1_channel(data)
---     else
---         process_other_channels(data)
---     end
-
--- 	App.grid:redraw()
--- end
 
 return App
