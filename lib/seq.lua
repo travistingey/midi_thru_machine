@@ -18,7 +18,7 @@ function Seq:set(o)
 	o.id = o.id or 1
     
     -- instances of grids are defined in track during track initialization
-    -- consider offloading grid implementations to sub-classes?
+    -- consider offloading grid implementations to sub-classes? 
 	o.clip_grid = o.clip_grid
 	o.seq_grid = o.seq_grid
 
@@ -257,6 +257,11 @@ function Seq:save_bank(id, save_current)
 	self.bounce = false
 	
 	self.bank[id] = {value = self.value, length = self.length}
+
+	if self.on_save ~= nil then
+		-- self.page = 1
+		self:on_save()
+	end
 end
 
 -- Load bank to values
@@ -268,6 +273,13 @@ function Seq:load_bank(id)
 	self.length = bank.length
 	self.step = bank.length
 	self.tick = 0
+	
+	
+	-- TODO: Tie this into seq_grid, then remove page assignment above
+	if self.on_load ~= nil then
+		-- self.page = 1
+		self:on_load()
+	end
 end
 
 -- start recording incoming Midi into Seq
@@ -293,6 +305,10 @@ function Seq:record()
 		self.bounce_start = self.tick
 		self.buffer = {}
 		self.buffer_length = self.quantize_step
+	end
+
+	if self.on_record ~= nil then
+		self:on_record()
 	end
 end
 
@@ -404,9 +420,13 @@ function Seq:transport_event(data)
 			end
 		end
 	end	
+ 
+  	if self.seq_grid ~= nil then
+		self:seq_set_grid()
+	end
 
-  if self.seq_grid ~= nil then
-	  self:seq_set_grid()
+	if self.on_transport ~= nil then
+		self:on_transport(data)
 	end
 
 	return data
@@ -416,7 +436,7 @@ end
 -- Midi process chain
 function Seq:midi_event(data)
 	if self.recording then
-        -- process note_off events when a note_on occurs OR any note_on/note_off event that isn't muted
+        -- process note_off events when a note_on occurs OR any note_on/note_off event that isn't muted 
 		
 		if self.track.triggered then
 			if not self.track.mute.state[self.track.trigger] or (data.type == 'note_off' and self.note_on[data.note] ~= nil)  then
@@ -431,7 +451,8 @@ function Seq:midi_event(data)
 		end
     
 	end
-
+ 
+ 
 	if not self.playing or self.track.midi_thru then
 		if self.track.mono and data.type == 'note_on' then
 			for i,e in pairs(self.note_on) do
@@ -472,16 +493,6 @@ end
 function Seq:arm_event()
 	
 	self.arm_time = clock.get_beats()
-	
-	local c = self.clip_grid:index_to_grid(self.current_bank)
-    					
-	if c then
-		if self.bank[self.current_bank] == nil then
-			self.clip_grid.led[c.x][c.y] = 0
-		else
-			self.clip_grid.led[c.x][c.y] = 1
-		end
-	end
 
 	local actions = {}
 	local save_current = false
@@ -514,7 +525,8 @@ function Seq:arm_event()
 			end
 		elseif action == 'load' then
 			self:load_bank(self.next_bank)
-			self:seq_set_grid()
+			
+			self:seq_set_grid() --TODO: Delete after move
 		elseif action == 'clear' then
 			self:clear()
 		end
@@ -524,6 +536,10 @@ function Seq:arm_event()
 	self.next_bank = 0
 	self:clip_set_grid()
 	self.armed = false
+	
+	if self.on_arm ~= nil then
+	  self:on_arm()
+	end
 end
 
 -- Recording step events into buffer

@@ -1,10 +1,11 @@
 local path_name = 'Foobar/lib/'
-local MidiGrid = require(path_name .. 'midigrid')
 local Grid = require(path_name .. 'grid')
 local Track = require(path_name .. 'track')
 local Scale = require(path_name .. 'scale')
 local Output = require(path_name .. 'output')
 local Mode = require(path_name .. 'mode')
+
+
 
 local musicutil = require(path_name .. 'musicutil-extended')
 
@@ -89,19 +90,6 @@ function App:init()
 
 	-- Crow Setup
 	self.crow_in = {{},{}}
-	self.crow_out = {{},{},{},{}}
-
-	self.crow_in[1] = {}
-	self.crow_in[2] = {}
-	
-	--[[ for i = 1, 4 do
-		local out = 'crow_out_' .. i .. '_'
-		self.crow_out[i] = {
-			type = params:get(out .. 'type'),
-			source = params:get(out .. 'source'),
-			trigger = params:get(out .. 'trigger')
-		}
-	end ]]
 
 	-- Set Crow device input queries and stream handlers
 	crow.send("input[1].query = function() stream_handler(1, input[1].volts) end")
@@ -116,7 +104,7 @@ function App:init()
 
 	--[[
 		Certain TrackComponent instances can be shared between Tracks.
-	    To do so, they need to avoid reliance on the 'self.track' references
+		To do so, they need to avoid reliance on the 'self.track' references
 		and solely rely on 'track' being passed.
 		
 		TODO:
@@ -157,11 +145,22 @@ function App:init()
 	-- Create the modes
 
 	for i = 1, 4 do
-		self.mode[i] = Mode:new({id = i, type = i})
-		self.mode[i]:set_action()
+		self.mode[i] = Mode:new()
 	end
 	
-	params:bang()
+
+	-- TODO: Modes required after App is instantiated. May want to fix this...
+	local AllClips = require(path_name .. 'modes/allclips') 
+	local SeqClip = require(path_name .. 'modes/seqclip') 
+	local SeqGrid = require(path_name .. 'modes/seqgrid') 
+	local ScaleGrid = require(path_name .. 'modes/scalegrid') 
+	local MuteGrid = require(path_name .. 'modes/mutegrid') 
+
+
+	self.mode[1].components = {AllClips:new({track=10}),MuteGrid:new({track=10})}
+	self.mode[2].components = {SeqGrid:new({track=10})}
+	self.mode[3].components = {ScaleGrid:new({id=1})}
+	self.mode[4].components = {SeqClip:new({track=1}),SeqClip:new({track=10,offset={x=1,y=0}})}
 
 	-- Create the modes
 	self.grid = Grid:new({
@@ -183,7 +182,7 @@ function App:init()
 		local mode = self.mode[self.current_mode]
 
 		for i,component in ipairs(mode.components) do
-			component:process(msg)
+			component.grid:process(msg)
 		end
 	end
 

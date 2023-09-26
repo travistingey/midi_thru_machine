@@ -29,46 +29,13 @@ function Mute:midi_event(data)
         local state = self.state[note] 
         
         if self.track.triggered then
-          state = self.state[self.track.trigger]
-        end
+            for i=1, #App.track do
+                local track = App.track[i]
 
-        for i = 1, #App.track do
-            local track = App.track[i]
-
-            if not self.track.triggered and self.track.midi_in == track.midi_in and note == track.trigger then
-                goto continue
-            end
-        end
-        
-
-        if grid then
-            
-            local target = self.grid:index_to_grid(note + 1)
-            
-            if self.track.triggered then
-                target = self.grid:index_to_grid(self.track.trigger + 1)
-            end
-
-            
-
-            if (not state) then
-                -- Mute is off
-                if data.type == 'note_on' then
-                    self.grid.led[target.x][target.y] = 3 -- note_on unmuted.
-                elseif data.type == 'note_off' then
-                    self.grid.led[target.x][target.y] = 0 -- note_on unmuted.
+                if track.midi_in == self.track.midi_in and track ~= self.track then
+                    state = track.mute.state[self.track.trigger]
+                    break
                 end
-            else
-                -- Mute is on
-                if data.type == 'note_on' then
-                    self.grid.led[target.x][target.y] = Grid.rainbow_on[self.track.id] -- note_on muted.
-                elseif data.type == 'note_off' then
-                    self.grid.led[target.x][target.y] = Grid.rainbow_off[self.track.id] -- note_off muted.
-                end
-            end
-            
-            if self.grid.active then
-                self.grid:refresh()
             end
         end
 
@@ -76,7 +43,6 @@ function Mute:midi_event(data)
             return data
         end
         
-        ::continue::
     end
 end
 
@@ -100,7 +66,7 @@ function Mute:grid_event(data)
         
             if state then
                 for n,e in pairs(self.track.seq.note_on) do
-                    local off = {type='note_off', ch = e.ch, note = e.note, vel = e.vel,penis = 'big'}
+                    local off = {type='note_off', ch = e.ch, note = e.note, vel = e.vel}
                     self.track:process_midi(off)
                     self.track.output:kill()
                 end

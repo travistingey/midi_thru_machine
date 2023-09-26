@@ -51,7 +51,8 @@ function Track:register_params()
     params:set_action(track .. '_midi_in', function(d)
         if App.track[id].output ~= nil then App.track[id].output:kill() end
             App.track[id].midi_in = d
-        end)
+        end
+    )
     
     params:add_number(track .. '_midi_out', 'MIDI Out', 1, 16, id)
     params:set_action(track .. '_midi_out', function(d)
@@ -77,7 +78,6 @@ function Track:register_params()
         end
     end)
 
-
     params:add_number(track .. '_scale', 'Scale', 1, 16, id)
     params:set_action(track .. '_scale', function(d)
         if App.track[id].output ~= nil then App.track[id].output:kill() end
@@ -102,8 +102,6 @@ function Track:register_params()
         end
         
     end)
-
-    
 
     params:add_number(track .. '_note_range_lower', 'From Note', 0, 127, 0)
     params:set_action(track .. '_note_range_lower',
@@ -140,7 +138,6 @@ function Track:register_params()
     self:register_static_components()
    -- self:register_component_set_actions(Output)
     
-    
 end
 
 --[[
@@ -173,54 +170,10 @@ function Track:register_static_components(id)
         instance.seq = Seq:new({
             id = id,
             track = App.track[id],
-            -- clip_grid = Grid:new({
-            --     name = 'Clip ' .. id,
-            --     grid_start = {x=1,y=4},
-            --     grid_end = {x=4,y=1},
-            --     display_start = {x=1,y=1},
-            --     display_end = {x=4,y=4},
-            --     offset = {x=4,y=0},
-            --     midi = App.midi_grid,
-            --     event = function(s,d)
-            --         instance.seq:clip_grid_event(d)
-            --     end,
-            --     set_grid = function()
-            --         instance.seq:clip_set_grid()
-            --     end
-            -- }),
-            -- seq_grid = Grid:new({
-            --     name = 'Sequence ' .. id,
-            --     grid_start = {x=1,y=128},
-            --     grid_end = {x=8,y=1},
-            --     display_start = {x=1,y=41},
-            --     display_end = {x=8,y=48},
-            --     offset = {x=0,y=0},
-            --     midi = App.midi_grid,
-            --     event = function(s,d)
-            --         instance.seq:seq_grid_event(d)
-            --     end,
-            --     set_grid = function()
-            --         instance.seq:seq_set_grid()
-            --     end
-            -- })
         })
         instance.mute = Mute:new({
             id = id,
             track = App.track[id],
-            -- grid = Grid:new({
-            --     name = 'Mute ' .. id,
-            --     grid_start = {x=1,y=1},
-            --     grid_end = {x=4,y=32},
-            --     display_start = {x=1,y=10},
-            --     display_end = {x=4,y=13},
-            --     midi = App.midi_grid,
-            --     event = function(s,d)
-            --         instance.mute:grid_event(d)
-            --     end,
-            --     set_grid = function()
-            --         instance.mute:set_grid()
-            --     end
-            -- })
         })
         instance:build_chain()
     end)
@@ -282,15 +235,6 @@ function Track:register_component_set_actions(component)
 
     end)
 end
-
--- function Track:set_params()
---     -- Set the initial value for the input parameter
---     params:set('track_' .. self.id .. '_input', self.input)
--- end
-
--- function Track:get_param(param_name)
---     return params:get('track_' .. self.id .. '_' .. param_name)
--- end
 
 function Track:chain_components(objects, process_name)
     local track = self

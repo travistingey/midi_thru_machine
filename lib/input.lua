@@ -52,8 +52,9 @@ Input.types['random'] = {
         params:set('track_' .. track.id .. '_voice',2) -- mono
         params:set('track_' .. track.id .. '_note_range_lower', 60)
         params:set('track_' .. track.id .. '_note_range_upper', 84)
-
+        params:set('track_' .. track.id .. '_exclude_trigger', 1)
         track.triggered = true
+
     end,
     transport_event = function(s, data)
         if data.type == 'stop' and s.last_note then
@@ -99,6 +100,5 @@ Input.types['random'] = {
         end
     end
 }
-
 
 return Input

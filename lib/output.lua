@@ -1,6 +1,4 @@
 local path_name = 'Foobar/lib/'
-local utilities = require(path_name .. 'utilities')
---local App = require(path_name .. 'app')
 local TrackComponent = require(path_name .. 'trackcomponent')
 
 -- Output Class

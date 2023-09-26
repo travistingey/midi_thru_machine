@@ -19,26 +19,37 @@ function Mode:new(o)
     return o
 end
 
+--[[
+    TODO: we're going to offload the options into individual mode components.
+    the new approach will be:
+        -   directly assign callbacks for a specified track component
+            (eg. App.track[1]['seq'].on_midi )
+        -   Remove references to grid inside track components!
+        -   Make mode switching arbitrary through a single call from the App
+        -   Mode will contain multiple grids and single context for display
+        -   Grids should not be a state machine, but modes can
+        -   Avoid dependencies on param actions
+]]
 function Mode:set(o)
     o.id = o.id
     o.components = o.components or {}
 
-    local mode = self.types[self.options[o.type]]
-    o.set_action = o.set_action or mode.set_action
-    o.on_load = o.on_load or mode.on_load
-    o.on_midi = o.on_midi or mode.on_midi
-    o.on_transport = o.on_transport or mode.on_transport
+    --local mode = self.types[self.options[o.type]]
+    local mode = nil
+    
+    o.set_action = o.set_action
+    o.on_load = o.on_load
+    o.on_midi = o.on_midi
+    o.on_transport = o.on_transport
 end
 
 function Mode:register_params(o)
-    local mode = 'mode_' .. o.id .. '_'
+    --local mode = 'mode_' .. o.id .. '_'
 end
 
 -- Methods
 function Mode:enable()
 
-    
-    
     if self.on_load ~= nil then
         self:on_load()
     end
