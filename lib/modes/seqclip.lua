@@ -15,14 +15,15 @@ function SeqClip:set(o)
 
     o.grid = Grid:new({
       name = 'Seq clips',
-      grid_start = o.grid_start or {x=1,y=16},
-      grid_end = o.grid_end or  {x=1,y=1},
-      display_start = o.display_start or {x=1,y=9},
-      display_end = o.display_end or {x=1,y=16},
+      grid_start = o.grid_start or {x=1,y=1},
+      grid_end = o.grid_end or  {x=16,y=1},
+      display_start = o.display_start or {x=1,y=1},
+      display_end = o.display_end or {x=8,y=1},
       offset = o.offset or {x=0,y=0},
       midi = App.midi_grid
   })
-  
+
+  o.page = 1
 end
 
 function SeqClip:transport_event(seq, data)
@@ -31,10 +32,24 @@ function SeqClip:transport_event(seq, data)
   end
 end
 
-function SeqClip:grid_event (seq, data)
-	if data.type == 'pad' then
+function SeqClip:grid_event (seq, data) 
+  local grid = self.grid
+  local page_count = 2
+  
+  if data.type == 'left' then
+    
+    if self.page > 1 then
+      self.page = self.page - 1
+      grid:left(8)
+    end
+  elseif data.type == 'right' then
+    if self.page < page_count then
+      self.page = self.page + 1
+      grid:right(8)
+    end
+  elseif data.type == 'pad' then
 
-		local grid = self.grid
+		
 		local index = grid:grid_to_index(data)
 
 		local last = seq.next_bank
@@ -82,14 +97,14 @@ function SeqClip:grid_event (seq, data)
 			
 			
 			if lookup[score + 1] ~= nil then
-				if App.alt == true then
+				if self.mode.alt == true then
 					seq.armed = lookup[score + 1][2]
 				else
 					seq.armed = lookup[score + 1][1]
 				end
 			end
 
-			App.alt_pad:reset()
+			self.mode.alt_pad:reset()
 			
 			if seq.armed == 'cancel' then
 				seq.next_bank = 0
@@ -110,46 +125,51 @@ function SeqClip:grid_event (seq, data)
 end
 
 function SeqClip:set_grid (seq)
-		local grid = self.grid
-	  	grid:for_each(function(s,x,y,i)
-			if(seq.bank[i])then
-				s.led[x][y] = 1
-			else
-				s.led[x][y] = {5,5,5}
-			end
-
-			if i == seq.current_bank then
-				if seq.recording then
-					s.led[x][y] = {3,true}
-				elseif (seq.bank[i]) then
-					s.led[x][y] = Grid.rainbow_on[(i - 1) % 16 + 1 ]
-				else
-					s.led[x][y] = {5,5,5}
-				end
-			end
-
-			local actions = {}
-
-			if seq.armed then
-				if type(seq.armed) == 'table' then
-					actions = seq.armed
-				else
-					actions = {seq.armed}
-				end
-			end
-
-			for _,action in ipairs(actions) do
-				if i == seq.next_bank then
-					if action == 'load' then
-						s.led[x][y] = {3,true}
-					else
-						s.led[x][y] = {4,true}
-					end
-				end
-			end
-
-		end)
-
+    local grid = self.grid
+    if seq.track.active then
+      
+  	  
+  	  grid:for_each(function(s,x,y,i)
+  			if(seq.bank[i])then
+  				s.led[x][y] = 1
+  			else
+  				s.led[x][y] = {5,5,5}
+  			end
+  
+  			if i == seq.current_bank then
+  				if seq.recording then
+  					s.led[x][y] = {3,true}
+  				elseif (seq.bank[i]) then
+  					s.led[x][y] = Grid.rainbow_on[(i - 1) % 16 + 1 ]
+  				else
+  					s.led[x][y] = {5,5,5}
+  				end
+  			end
+  
+  			local actions = {}
+  
+  			if seq.armed then
+  				if type(seq.armed) == 'table' then
+  					actions = seq.armed
+  				else
+  					actions = {seq.armed}
+  				end
+  			end
+  
+  			for _,action in ipairs(actions) do
+  				if i == seq.next_bank then
+  					if action == 'load' then
+  						s.led[x][y] = {3,true}
+  					else
+  						s.led[x][y] = {4,true}
+  					end
+  				end
+  			end
+  
+  	  end)
+		else
+		  grid:clear()
+    end
 		
 		grid:refresh('set grid')
 	  

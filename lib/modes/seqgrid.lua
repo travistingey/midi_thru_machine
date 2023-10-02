@@ -36,9 +36,9 @@ function SeqGrid:grid_event (seq,data)
 	
 	if data.state and data.type == 'right' and self.page < page_count then
 		
-		 if App.alt then
+		 if self.mode.alt then
 	        seq.follow = not seq.follow
-	        App.alt_pad:reset()
+	        self.mode.alt_pad:reset()
 	    else
 		    self.page = self.page + 1
 		    print('page: ' .. self.page)
@@ -47,9 +47,9 @@ function SeqGrid:grid_event (seq,data)
 	end
 
 	if data.state and data.type == 'left' and self.page > 1 then
-		  if App.alt then
+		  if self.mode.alt then
 	        self.page = 1
-	        App.alt_pad:reset()
+	        self.mode.alt_pad:reset()
 	    else
 		    self.page = self.page - 1
 		  end
@@ -60,7 +60,7 @@ function SeqGrid:grid_event (seq,data)
 	
 
 	if data.state and data.type == 'down' then
-		 if App.alt then
+		 if self.mode.alt then
 	        if seq.div > 3 then
 	        	seq.div = seq.div / 2
 	        elseif seq.div > 2 then
@@ -69,15 +69,13 @@ function SeqGrid:grid_event (seq,data)
 			page_count = math.ceil( math.ceil(seq.length/seq.div) / wrap)
 			if self.page > page_count then self.page = page_count end
 
-	    elseif grid.display_end.y > grid.grid_end.y and grid.display_start.y > 1 and grid.display_start.y > seq.track.note_range_lower + 1  then
-    		
-				grid.display_start.y = grid.display_start.y - 1
-    			grid.display_end.y = grid.display_end.y - 1
-		  end
+	    else
+			grid:down()
+		end
 	end
 
 	if data.state and data.type == 'up' then
-		if App.alt then
+		if self.mode.alt then
 	        if seq.div < 24 and seq.div > 2 then
 	          seq.div = seq.div * 2
 	        elseif seq.div > 1  and seq.div < 24 then
@@ -85,9 +83,8 @@ function SeqGrid:grid_event (seq,data)
 	        end
 			page_count = math.ceil( math.ceil(seq.length/seq.div) / wrap)
 			if self.page > page_count then self.page = page_count end
-		elseif grid.display_start.y < grid.grid_start.y and grid.display_end.y < seq.track.note_range_upper + 1 then	
-			grid.display_start.y = grid.display_start.y + 1
-			grid.display_end.y = grid.display_end.y + 1
+		else
+			grid:up()
 		end
 	end
 
@@ -193,33 +190,32 @@ function SeqGrid:set_grid(seq)
 		    end
       	end
 	
-	
 		-- Set arrow pads
 		if self.page  == 1 then
-			App.arrow_pads.led[3][9] = 0 
+			self.mode.arrow_pads.led[3][9] = 0 
 		else
-			App.arrow_pads.led[3][9] = 1
+			self.mode.arrow_pads.led[3][9] = 1
 		end
 		
 		if self.page  == page_count then
-			App.arrow_pads.led[4][9] = 0 
+			self.mode.arrow_pads.led[4][9] = 0 
 		else
-			App.arrow_pads.led[4][9] = 1
+			self.mode.arrow_pads.led[4][9] = 1
 		end
 
 		if grid.display_end.y == grid.grid_end.y then
-			App.arrow_pads.led[2][9] = 0 
+			self.mode.arrow_pads.led[2][9] = 0 
 		else
-			App.arrow_pads.led[2][9] = 1
+			self.mode.arrow_pads.led[2][9] = 1
 		end
 		
 		if grid.display_start.y == grid.grid_start.y then
-			App.arrow_pads.led[1][9] = 0 
+			self.mode.arrow_pads.led[1][9] = 0 
 		else
-			App.arrow_pads.led[1][9] = 1
+			self.mode.arrow_pads.led[1][9] = 1
 		end
 
-		App.arrow_pads:refresh('sequencer grid') -- reminder that arrow pads are a shared grid and need to be refreshed separately
+		self.mode.arrow_pads:refresh('sequencer grid') -- reminder that arrow pads are a shared grid and need to be refreshed separately
 		
 		for  s = (self.page - 1) * wrap + 1, self.page * wrap do
 		  

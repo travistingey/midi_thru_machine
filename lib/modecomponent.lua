@@ -21,7 +21,7 @@ function ModeComponent:set(o)
     o.component = o.component
     o.register = {'on_save'}
     ]]
-
+    
     o.register = o.register or {}
 end
 
@@ -36,45 +36,46 @@ function ModeComponent:get_component()
 end
 
 function ModeComponent:enable()
-    local mode = self
-    local component = self:get_component()
+    local mode_component = self
+    local track_component = self:get_component()
+    
+    mode_component.grid:enable()
 
-    mode.grid:enable()
-
-    mode.grid.event = function(s,d)
-        local component = self:get_component()
-        self:grid_event(component, d)
+    mode_component.grid.event = function(s,d)
+        local track_component = self:get_component()
+        self:grid_event(track_component, d)
     end
 
-    mode.grid.set_grid = function()
-        local component = self:get_component()
-        if mode.set_grid ~= nil then
-            self:set_grid(component)
+    mode_component.grid.set_grid = function()
+        local track_component = self:get_component()
+        if mode_component.set_grid ~= nil then
+            self:set_grid(track_component)
         end
     end
 
-    mode.grid:set_grid(component)
+    mode_component.grid:set_grid(track_component)
 
-    if mode.midi_event ~= nil then
-        component.on_midi = function(component, data)
-            mode:midi_event(component, data)
+    if mode_component.midi_event ~= nil then
+        track_component.on_midi = function(track_component, data)
+            mode_component:midi_event(track_component, data)
         end
     end
 
-    if mode.transport_event ~= nil then
-        component.on_transport = function(component, data)
-            mode:transport_event(component, data)
+    if mode_component.transport_event ~= nil then
+        track_component.on_transport = function(track_component, data)
+            mode_component:transport_event(track_component, data)
         end
     end
 
+    
     for i,on in ipairs(self.register)do
-        component[on] = function(component, data)
-            mode[on](mode, component, data)
+        track_component[on] = function(track_component, data)
+            mode_component[on](mode_component, track_component, data)
         end
     end
     
-    if mode.on_enable ~= nil then
-        mode:on_enable()
+    if mode_component.on_enable ~= nil then
+        mode_component:on_enable()
     end
 
 end

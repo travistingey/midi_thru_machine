@@ -10,8 +10,8 @@ ScaleGrid.name = 'Mode Name'
 function ScaleGrid:set(o)
 	self.__base.set(self, o) -- call the base set method first   
 
-   o.component = 'scale'
-
+   	o.component = 'scale'
+	
     o.grid = Grid:new({
         name = 'Scale ' .. o.id,
         grid_start = {x=1,y=2},
@@ -42,9 +42,9 @@ function ScaleGrid:grid_event (scale, data)
 		if(index and data.state and scale.index_map[index])then
     		local d = scale.index_map[index]
 			
-    		if App.alt then
+    		if self.mode.alt then
     			scale:shift_scale_to_note(d.note)
-    			App.alt_pad:reset()
+    			self.mode.alt_pad:reset()
     		else
 				  local bit_flag = (1 << ((24 + d.note - scale.root) % 12) ) -- bit representation for note
     			scale:set_scale(scale.bits ~ bit_flag )

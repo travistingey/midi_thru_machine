@@ -33,6 +33,7 @@ end
 function Track:set(o)
     -- Set static properties here
     -- Note: most properties will be initialized by params:bang() or params:default() called in the init script
+    o.active = o.active or false
     o.note_range_upper = o.note_range_upper or 127
     o.note_range_lower = o.note_range_lower or 0
     o.triggered = o.triggered or false
@@ -45,21 +46,62 @@ function Track:register_params()
     params:add_group('Track ' .. self.id, 13 )
 
     params:add_option(track .. '_input', 'Input Type', Input.options, 1)
-    params:add_option(track .. '_output', 'Output Type', Output.options, 1)
+    params:set_action(track .. '_input',function(d)
+        if App.mode[App.current_mode] then
+            App.mode[App.current_mode]:enable()
+        end
+    end)
     
-    params:add_number(track .. '_midi_in', 'MIDI In', 1, 16, id)
+    params:add_option(track .. '_output', 'Output Type', Output.options, 1)
+    params:set_action(track .. '_output',function(d)
+        if App.mode[App.current_mode] then
+            App.mode[App.current_mode]:enable()
+        end
+    end)
+
+    params:add_number(track .. '_midi_in', 'MIDI In', 0, 16, id, function(param)
+        local ch = param:get()
+        if ch == 0 then 
+           return 'off'
+        else
+           return ch
+        end
+    end)
+    
     params:set_action(track .. '_midi_in', function(d)
         if App.track[id].output ~= nil then App.track[id].output:kill() end
             App.track[id].midi_in = d
+
+            if App.mode[App.current_mode] then
+                App.mode[App.current_mode]:enable()
+            end
         end
     )
     
-    params:add_number(track .. '_midi_out', 'MIDI Out', 1, 16, id)
+    params:add_number(track .. '_midi_out', 'MIDI Out', 0, 16, 0, function(param)
+        local ch = param:get()
+        if ch == 0 then 
+           return 'off'
+        else
+           return ch
+        end
+    end)
+
     params:set_action(track .. '_midi_out', function(d)
+        if d == 0 then
+            App.track[id].active = false
+        else
+            App.track[id].active = true
+        end
+
         if App.track[id].output ~= nil then App.track[id].output:kill() end
         App.track[id].midi_out = d
         App.track[id].output = App.output[d]
         App.track[id]:build_chain()
+       
+        if App.mode[App.current_mode] then
+            App.mode[App.current_mode]:enable()
+        end
     end)
     
     params:add_binary(track .. '_midi_thru','MIDI THRU','toggle', 0)
@@ -78,7 +120,14 @@ function Track:register_params()
         end
     end)
 
-    params:add_number(track .. '_scale', 'Scale', 1, 16, id)
+    params:add_number(track .. '_scale', 'Scale', 0, 16, 0,function(param)
+        local ch = param:get()
+        if ch == 0 then 
+           return 'off'
+        else
+           return ch
+        end
+    end)
     params:set_action(track .. '_scale', function(d)
         if App.track[id].output ~= nil then App.track[id].output:kill() end
         App.track[id].scale = App.scale[d]
@@ -90,6 +139,11 @@ function Track:register_params()
     params:set_action(track .. '_trigger', function(d)
         if App.track[id].output ~= nil then App.track[id].output:kill() end
         App.track[id].trigger = d
+
+        if App.mode[App.current_mode] then
+            App.mode[App.current_mode]:enable()
+        end
+
     end)
     
     params:add_binary(track .. '_exclude_trigger','Exclude Trigger','toggle', 0)
@@ -99,6 +153,10 @@ function Track:register_params()
 
         if App.track[id].midi_in  == App.track[App.current_track].midi_in and App.track[id].exclude_trigger then
             App.track[id].mute.grid = App.mute_grid
+        end
+
+        if App.mode[App.current_mode] then
+            App.mode[App.current_mode]:enable()
         end
         
     end)
@@ -136,8 +194,7 @@ function Track:register_params()
 
     self:register_component_set_actions(Input)
     self:register_static_components()
-   -- self:register_component_set_actions(Output)
-    
+
 end
 
 --[[
@@ -239,14 +296,16 @@ end
 function Track:chain_components(objects, process_name)
     local track = self
     return function(s, input)
-        local value = input
-        for i, obj in ipairs(objects) do
-            if obj[process_name] then
-               
-                value = obj[process_name](obj, value, track)
+        if track.active then
+            local value = input
+            for i, obj in ipairs(objects) do
+                if obj[process_name] then
+                
+                    value = obj[process_name](obj, value, track)
+                end
             end
+            return value
         end
-        return value
     end
 end
 

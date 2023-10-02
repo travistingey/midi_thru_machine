@@ -12,7 +12,6 @@ function Output:set(o)
     self.note_on = {}
 end
 
-
 function Output:process_midi(data, track)
     if data ~= nil then
         
@@ -36,7 +35,6 @@ function Output:kill()
             ch = v.ch
         }
 
-        
         App.midi_out:send(off)
     end
 
@@ -48,7 +46,6 @@ function Output:panic()
     for c = 0,16 do
         for i = 0, 128 do
             
-
             local off = {
                 note = i,
                 type = 'note_off',

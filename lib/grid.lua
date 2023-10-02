@@ -87,27 +87,68 @@ function Grid:update_bounds()
 	}
 
 end
+
+function Grid:up(amount)
+  amount = amount or 1
+	print('up')
+	self:update_bounds()
+	if self.display_start.y < self.bounds.max_y and self.display_end.y < self.bounds.max_y then	
+		self.display_start.y = self.display_start.y + amount
+		self.display_end.y = self.display_end.y + amount
+	else
+		print('outta bounds')
+	end
+end
+
+function Grid:down(amount)
+  amount = amount or 1
+	print('down')
+	if self.display_start.y > self.bounds.min_y and self.display_end.y > self.bounds.min_y then	
+		self.display_start.y = self.display_start.y - amount
+    	self.display_end.y = self.display_end.y - amount
+	end
+end
+
+function Grid:left(amount)
+  amount = amount or 1
+	print('left')
+	if self.display_end.x > self.grid_end.x and self.display_start.x > 1 then
+		self.display_start.x = self.display_start.x - amount
+    	self.display_end.x = self.display_end.x - amount
+	end
+end
+
+function Grid:right(amount)
+  amount = amount or 1
+	print('right')
+	if self.display_start.x < self.grid_start.x and self.display_end.x < self.grid_end.x then	
+		self.display_start.x = self.display_start.x + amount
+		self.display_end.x = self.display_end.x + amount
+	end
+end
+
+
+
 function Grid:subgrid(o)
-	-- Create a new instance of Grid
-	local subgrid = Grid:new({
-		midi = self.midi,
-		grid_start = o.grid_start or self.grid_start, 
-		grid_end = o.grid_end or self.grid_end,
-		display_start = o.display_start or o.grid_start,
-		display_end = o.display_end or o.grid_end,
-		offset = {x = o.grid_start.x - 1, y = o.grid_start.y - 1},
-		led = self.led,  -- sharing the same map with parent grid
-		toggled = self.toggled,      -- sharing the same toggled status with parent grid
-		down = self.down             -- sharing the same down status with parent grid
-	})
-
-	o.event = o.event or function(s, data) end
-
+	
+	o.name = o.name or 'unnamed grid'	o.midi = self.midi
+	o.grid_start = o.grid_start or self.grid_start
+	o.grid_end = o.grid_end or self.grid_end
+	o.display_start = o.display_start or o.grid_start
+	o.display_end = o.display_end or o.grid_end
+	o.offset = {x = o.grid_start.x - 1, y = o.grid_start.y - 1}
+	o.led = self.led  -- sharing the same map with parent grid
+	o.toggled = self.toggled      -- sharing the same toggled status with parent grid
+	o.down = self.down             -- sharing the same down status with parent grid
+	
+	local subgrid = Grid:new(o) -- Create a new instance of Grid
+	local event = o.event
+	
 	subgrid.event = function(s,data)
 		s:update_bounds()
 
 		if s:in_bounds(data) then
-			o.event(s,data)
+			event(s,data)
 		end
 	end
 

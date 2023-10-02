@@ -100,31 +100,9 @@ function App:init()
 	
 	crow.input[1].mode('none')
 	crow.input[2].mode('none')
-	
-
-	--[[
-		Certain TrackComponent instances can be shared between Tracks.
-		To do so, they need to avoid reliance on the 'self.track' references
-		and solely rely on 'track' being passed.
-		
-		TODO:
-		What if made param actions being set a function of the TrackComponent itself?
-		If a track.id is specified, we register the component under the track,
-		otherwise we have the components register themselves.
-		
-		There are other implications for instantiation, loading and
-		changing these things on the fly that need to be considered.
-
-		How do we track scales changing for a song?
-		Limiting scale slots may be the way to go to better manage the UI
-		default = no scale
-		chord voicing
-		voice 1
-		voice 2 
-		]]
 
 	-- Create shared scales
-	for i = 1, 16 do
+	for i = 0, 16 do
 		self.scale[i] = Scale:new({id = i})
 	end
 
@@ -141,13 +119,19 @@ function App:init()
 	for i = 1, 16 do
 		self.track[i] = Track:new({id = i})
 	end
-	
-	-- Create the modes
 
-	for i = 1, 4 do
-		self.mode[i] = Mode:new()
+  params:set('track_1_midi_out',1)
+
+	-- Track components are instantiated with parameter actions
+	params:default()
+
+	self.midi_grid.event = function(msg)
+		local mode = self.mode[self.current_mode]
+		self.grid:process(msg)
+		mode.grid:process(msg)
 	end
-	
+
+	-- Create the modes
 
 	-- TODO: Modes required after App is instantiated. May want to fix this...
 	local AllClips = require(path_name .. 'modes/allclips') 
@@ -157,112 +141,71 @@ function App:init()
 	local MuteGrid = require(path_name .. 'modes/mutegrid') 
 
 
-	self.mode[1].components = {AllClips:new({track=10}),MuteGrid:new({track=10})}
-	self.mode[2].components = {SeqGrid:new({track=10})}
-	self.mode[3].components = {ScaleGrid:new({id=1})}
-	self.mode[4].components = {SeqClip:new({track=1}),SeqClip:new({track=10,offset={x=1,y=0}})}
+	self.mode[1] = Mode:new({
+		components = {AllClips:new({track=1}),MuteGrid:new({track=1})}
+	})
 
+	self.mode[2] = Mode:new({
+		components = {SeqGrid:new({track=1})}
+	})
+
+	self.mode[3] = Mode:new({
+		components = {ScaleGrid:new({id=1})}
+	})
+
+	self.mode[4] = Mode:new({
+		components = {
+		  SeqClip:new({ track = 1, offset = {x=0,y=7}, active = true  }),
+		  SeqClip:new({ track = 2, offset = {x=0,y=6} }),
+		  SeqClip:new({ track = 3, offset = {x=0,y=5} }),
+		  SeqClip:new({ track = 4, offset = {x=0,y=4} }),
+		  SeqClip:new({ track = 5, offset = {x=0,y=3} }),
+		  SeqClip:new({ track = 6, offset = {x=0,y=2} }),
+		  SeqClip:new({ track = 7, offset = {x=0,y=1} }),
+		  SeqClip:new({ track = 8, offset = {x=0,y=0} })
+		},
+		on_arrow = function(s,data)
+		  if data.type == 'down' then
+		    print('down town charlie brown')
+		  end
+		end
+	}) 
+	
 	-- Create the modes
 	self.grid = Grid:new({
 		grid_start = {x=1,y=1},
-		grid_end = {x=9,y=9},
+		grid_end = {x=4,y=1},
 		display_start = {x=1,y=1},
-		display_end = {x=9,y=9},
+		display_end = {x=4,y=1},
+		offset = {x=4,y=8},
 		midi = self.midi_grid,
-		active = true
-	})
-
-	-- Track components are instantiated with parameter actions
-	params:default()
-
-
-	self.midi_grid.event = function(msg)
-		self.grid:process(msg)
-		
-		local mode = self.mode[self.current_mode]
-
-		for i,component in ipairs(mode.components) do
-			component.grid:process(msg)
-		end
-	end
-
-
-	self.arrow_pads = self.grid:subgrid({grid_start = {x=1,y=9}, grid_end = {x=4,y=9},event = function(s,data)
-
-		local mode = self.mode[self.current_mode]
-
-		for i,component in ipairs(mode.components) do
-			component:event(data)
-		end
-	end})
-
-	self.arrow_pads.name = 'arrows grid'
-
-	self.row_pads = self.grid:subgrid({grid_start = {x=9,y=8}, grid_end = {x=9,y=2},event = function(s,data)
-
-		local mode = self.mode[self.current_mode]
-
-		for i,component in ipairs(mode.components) do
-			component:event(data)
-		end
-	end})
-
-	self.row_pads.name = 'row grid'
-
-	self.mode_select = self.grid:subgrid({grid_start = {x=5,y=9},grid_end = {x=8,y=9}, event = function(s,data)
+		event = function(s,data)
 			if data.state then
 				s:reset()
-				self.arrow_pads:reset()
-				self.alt_pad:reset()
-				self.row_pads:reset()
-				self.main_grid:reset()
+				local mode = App.mode[App.current_mode]
+				mode.arrow_pads:reset()
+				mode.alt_pad:reset()
+				mode.row_pads:reset()
 
-				self.current_mode = s:grid_to_index(data)
-				for i = 1, #self.mode do
-					if i ~= self.current_mode then
-						self.mode[i]:disable()
+				App.current_mode = s:grid_to_index(data)
+				for i = 1, #App.mode do
+					if i ~= App.current_mode then
+						App.mode[i]:disable()
 					end					
 				end
-				self.mode[self.current_mode]:enable()
+				print(App.current_mode)
+				App.mode[App.current_mode]:enable()
 				s.led[data.x][data.y] = 1
 				s:refresh()
 			end
-		end
+		end,
+		active = true
 	})
-
-	self.mode_select.name = 'Mode Select'
+  
+  self.current_mode = 1
+	self.mode[1]:enable()
 	
-	-- Alt pad
-	self.alt_pad = self.grid:subgrid({grid_start = {x=9,y=1},grid_end = {x=9,y=1}, event = function(s,data)
-		if data.toggled then
-			s.led[data.x][data.y] = 1
-		else
-			s.led[data.x][data.y] = 0
-		end
-		App.alt = data.toggled
-		s:refresh('alt event')
-	end } )
-
-	self.alt_pad.name = 'Alt pad'
-
-	-- Using the on_reset callback in order to set App level properties.
-	self.alt_pad.on_reset = function(s)
-		App.alt = false
-	end
-	
-
-	-- Alt pad
-	self.main_grid = self.grid:subgrid({grid_start = {x=1,y=1},grid_end = {x=8,y=8}} )
-	self.main_grid.name = 'main grid'
-	
-	
-
-	for i = 1, #self.mode do
-		if i ~= self.current_mode then
-			self.mode[i]:disable()
-		end					
-	end
-	self.mode_select:event({x=5,y=9, state = true})
+	self.grid:event({x=1,y=1, state = true})
 
 	
 end -- end App:init
