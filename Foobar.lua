@@ -7,10 +7,6 @@
 script_name = 'Foobar'
 path_name = script_name .. '/lib/'
 
-local Seq = require(path_name .. 'seq')
-local Keys = require(path_name .. 'keys')
-
-local musicutil = require(path_name .. 'musicutil-extended')
 local utilities = require(path_name .. 'utilities')
  App = require(path_name .. 'app')
 
