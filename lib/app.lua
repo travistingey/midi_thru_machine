@@ -193,7 +193,6 @@ function App:init()
 						App.mode[i]:disable()
 					end					
 				end
-				print(App.current_mode)
 				App.mode[App.current_mode]:enable()
 				s.led[data.x][data.y] = 1
 				s:refresh()

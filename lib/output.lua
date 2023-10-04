@@ -71,9 +71,17 @@ Output.types['midi'] = {
     props = {'midi_out'},
     midi_event = function(s,data, track)
         if data ~= nil then
-            data.ch = track.midi_out
+            
+            local send = {}
 
-            App.midi_out:send(data)
+            for i,v in pairs(data) do
+                send[i] = v
+            end
+            
+            send.ch = track.midi_out
+
+
+            App.midi_out:send(send)
         end
         return data
     end

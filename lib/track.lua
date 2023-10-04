@@ -43,7 +43,7 @@ function Track:register_params()
     -- Register the parameters
     local id = self.id
     local track = 'track_' .. self.id
-    params:add_group('Track ' .. self.id, 13 )
+    params:add_group('Track ' .. self.id, 14 )
 
     params:add_option(track .. '_input', 'Input Type', Input.options, 1)
     params:set_action(track .. '_input',function(d)
@@ -120,6 +120,14 @@ function Track:register_params()
         end
     end)
 
+
+    local arp_options = {'up','down','random'}
+    params:add_option(track .. '_arp','Arpeggio',arp_options, 1)
+    params:set_action(track .. '_arp',function(d)
+        App.track[id].input.arp = arp_options[d]
+    end)
+
+
     params:add_number(track .. '_scale', 'Scale', 0, 16, 0,function(param)
         local ch = param:get()
         if ch == 0 then 
@@ -135,6 +143,8 @@ function Track:register_params()
         App.track[id]:build_chain()
     end)
 
+
+    
     params:add_number(track .. '_trigger', 'Trigger', 0, 127, 36)
     params:set_action(track .. '_trigger', function(d)
         if App.track[id].output ~= nil then App.track[id].output:kill() end
@@ -146,6 +156,9 @@ function Track:register_params()
 
     end)
     
+    
+    
+
     params:add_binary(track .. '_exclude_trigger','Exclude Trigger','toggle', 0)
     params:set_action(track .. '_exclude_trigger',function(d)
         -- exclude trigger from other outputs
@@ -167,9 +180,7 @@ function Track:register_params()
             if App.track[id].output ~= nil then App.track[id].output:kill() end
             App.track[id].note_range_lower = d
 
-            if d > App.track[id].note_range_upper then
-                params:set(track .. '_note_range_upper', d)
-            end
+            params:set(track .. '_note_range_upper', util.clamp(params:get(track .. '_note_range') * 12 + d,0,127))
             
         end)
 
@@ -179,12 +190,21 @@ function Track:register_params()
             if App.track[id].output ~= nil then App.track[id].output:kill() end
             App.track[id].note_range_upper = d
 
+            params:set(track .. '_note_range', math.ceil((d - App.track[id].note_range_lower) / 12))
+
             if d < App.track[id].note_range_lower then
                 params:set(track .. '_note_range_lower', d)
             end
             
         end)
     
+    params:hide(track .. '_note_range_upper')
+
+        params:add_number(track .. '_note_range', 'Octaves', 1, 11, 2)
+        params:set_action(track .. '_note_range', function(d)
+            params:set(track .. '_note_range_upper', util.clamp(d * 12 + App.track[id].note_range_lower,0,127))
+        end)
+        
    
     params:add_number(track .. '_crow_in', 'Crow In', 1, 2, 1)
     params:set_action(track .. '_crow_in', function(d) App.track[id].crow_in = d end)
@@ -310,10 +330,15 @@ function Track:chain_components(objects, process_name)
 end
 
 function Track:build_chain()
-    local components = {self.input, self.scale, self.seq, self.mute, self.output}    
-    self.process_transport = self:chain_components(components, 'process_transport')
-    self.process_midi = self:chain_components(components, 'process_midi')
-    self.send = self:chain_components({self.mute, self.output}, 'process_midi')
+    local pre_scale =  {self.input, self.seq, self.scale, self.mute, self.output}     
+    local post_scale = {self.input, self.scale, self.seq, self.mute, self.output} 
+    
+    local send_input = {self.scale, self.seq, self.mute, self.output} 
+    local send =  {self.mute, self.output}
+    self.process_transport = self:chain_components(post_scale, 'process_transport')
+    self.process_midi = self:chain_components(post_scale, 'process_midi')
+    self.send = self:chain_components(send, 'process_midi')
+    self.send_input = self:chain_components(send_input, 'process_midi')
     self.send_out = self:chain_components(self.output, 'process_midi')
 end
 

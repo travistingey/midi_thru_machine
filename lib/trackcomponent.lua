@@ -19,7 +19,7 @@ function TrackComponent:set(o)
     
     o.id = o.id or 0
     o.track = o.track
-    
+    o.note_on = {}
     o.on_transport = o.on_transport or function(s,data) return data end
 	o.on_midi = o.on_midi or function(s,data) return data end
 	
@@ -43,8 +43,8 @@ end
 
 function TrackComponent:process_midi(data, track)
     if data ~= nil then
-        local send = data
-        
+        local send
+ 
         if self.midi_event ~= nil then
             send = self:midi_event(data, track)
         end
@@ -53,8 +53,32 @@ function TrackComponent:process_midi(data, track)
             self:on_midi(data, track)
         end
         
+        if send ~= nil then
+            if send.type == 'note_on' then    
+                self.note_on[send.note] = send
+            elseif send.type == 'note_off' and self.note_on[send.note] ~= nil then
+                self.note_on[send.note] = nil
+            end
+        end
+
         return send
     end
 end
+
+function TrackComponent:kill()
+    for i,v in pairs(self.note_on) do
+        local off = {
+            type = 'note_off',
+            note = v.note,
+            vel = v.vel,
+            ch = v.ch
+        }
+
+        App.midi_out:send(off)
+    end
+
+    self.note_on = {}
+end
+
 
 return TrackComponent

@@ -166,9 +166,9 @@ function SeqClip:set_grid (seq)
   				end
   			end
   
-  	  end)
-		else
-		  grid:clear()
+		end)
+	else
+		grid:reset()
     end
 		
 		grid:refresh('set grid')

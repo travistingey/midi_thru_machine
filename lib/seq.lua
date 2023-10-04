@@ -475,15 +475,6 @@ function Seq:midi_event(data)
 			self.note_on[data.note] = nil
 			self.track:send(off)
 		end
-			
-		-- update note events
-		if data.type == 'note_on' then
-			self.note_on[data.note] = data
-		elseif data.type == 'note_off' and self.note_on[data.note] ~= nil then
-			self.note_on[data.note] = nil  
-		end
-
-	
 	
 		return data
 	end
