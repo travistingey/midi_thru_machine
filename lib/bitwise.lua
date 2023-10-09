@@ -71,8 +71,7 @@ end
 
 function Bitwise:cycle(reverse)
   if reverse then
-    self:mutate(self.length)
-
+    
     self.track = (self.track << 1) | ( self.track >> self.length - 1) & 65535 
     
     local v = table.remove(self.values)
@@ -85,8 +84,6 @@ function Bitwise:cycle(reverse)
     table.insert(self.lock,1,l)
   else
     
-    self:mutate(1)
-
     self.track = (self.track >> 1) | ( self.track << self.length - 1) & 65535 
     
     local v = table.remove(self.values,1)

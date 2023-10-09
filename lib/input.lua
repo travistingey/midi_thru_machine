@@ -21,6 +21,13 @@ end
 function midi_trigger(s, data, process)
     if s.track.step == 0 and data.ch == s.track.midi_in and data.note == s.track.trigger then
         if data.type == 'note_on' then
+            s.track.step_count = s.track.step_count + 1
+
+            if s.track.step_count == s.track.reset_step then
+                s.track.step_count = 0
+                s.index = 0
+            end
+
             local intervals = s.track.scale.intervals
             local new_note = data.note
             local old_note = data.note
@@ -56,7 +63,14 @@ function midi_trigger(s, data, process)
 end
 
 function clock_trigger(s,data,process)
-    if s.track.step > 0 and App.tick % s.track.step == 1 then
+
+    
+    if s.track.step > 0 and s.track.reset_step > 0 and App.tick % (s.track.reset_step * s.track.step) == s.track.reset_tick then
+        s.track.reset_tick = App.tick % s.track.step
+        s.index = 0
+    end
+    
+    if s.track.step > 0 and App.tick % s.track.step == s.track.reset_tick then
         local event = process(data)
         if event then
             clock.run(function()
@@ -120,6 +134,7 @@ Input.types['arpeggio'] = {
     transport_event = function(s, data)     
         if data.type == 'start' then
             s.index = 0
+            s.track.reset_tick = 1
         elseif data.type == 'clock' then
             clock_trigger(s, data, function()    
                 return arpeggiate(s)
@@ -129,7 +144,6 @@ Input.types['arpeggio'] = {
         return data
     end,
     midi_event = function(s,data)
-
         local event =  midi_trigger(s, data, function()
             return arpeggiate(s)
         end)
@@ -154,7 +168,6 @@ function arpeggiate (s, data)
         s.index = util.wrap(s.index + 1, 1,range)        
         local octave = (math.ceil( s.index / #intervals) - 1) * 12
         note = root + intervals[(s.index-1) % #intervals + 1 ] + octave
-        print(s.index, note .. '+')
     elseif s.track.arp == 'down' then
         s.index = util.wrap(s.index + 1, 1, range)
         local select = (#intervals + 1) - ((s.index-1) % #intervals + 1)
@@ -166,12 +179,10 @@ function arpeggiate (s, data)
         if s.index <= range then       
             local octave = (math.ceil( s.index / #intervals) - 1) * 12
             note = root + intervals[(s.index-1) % #intervals + 1 ] + octave
-            print(s.index, note .. '+')
         else
             local select = (#intervals + 1) - (s.index % #intervals + 1)
             local octave = (math.ceil( (range - (s.index - range )) / #intervals) - 1) * 12
             note = root + intervals[select] + octave
-            print(s.index, note .. '-')
         end
     elseif s.track.arp == 'down up' then
         s.index = util.wrap(s.index + 1, 1,range * 2 - 2) 
@@ -180,11 +191,10 @@ function arpeggiate (s, data)
             local select = (#intervals + 1) - ((s.index-1) % #intervals + 1)
             local octave = (math.floor( (range -  (s.index)) / #intervals) ) * 12
             note = root + intervals[select] + octave
-            print(s.index, note .. '+')
+
         else
             local octave = (math.floor( s.index / #intervals) - 2) * 12
             note = root + intervals[(s.index-range) % #intervals + 1 ] + octave
-            print(s.index, note .. '-')
         end
         
     elseif s.track.arp == 'converge' then
@@ -218,7 +228,6 @@ function arpeggiate (s, data)
         note = root + intervals[(index - 1) % #intervals + 1] + octave
 
     end
-
     return {type = 'note_on', note = note, vel = 100 }
 end
 
@@ -300,8 +309,6 @@ Input.types['bitwise'] = {
     midi_event = function(s,data)
 
         local event =  midi_trigger(s, data, function()
-            s.note:cycle()
-            s.vel:cycle()
             
             return { type = 'note_on', note = s.note:get().value, vel = 100 }
             

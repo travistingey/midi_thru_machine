@@ -7,9 +7,6 @@ local Mute = require(path_name .. 'mute')
 local Grid = require(path_name .. 'grid')
 local Output = require(path_name .. 'output')
 
-
-
-
 -- Define a new class for Track
 local Track = {}
 
@@ -42,7 +39,8 @@ function Track:set(o)
     -- Set static properties here
     -- Note: most properties will be initialized by params:bang() or params:default() called in the init script
     o.active = o.active or false
-    o.note_range_upper = o.note_range_upper or 127
+    o.note_range_upper = o.note_range_upper or 1
+		
     o.note_range_lower = o.note_range_lower or 0
     o.triggered = o.triggered or false
 end
@@ -129,36 +127,10 @@ function Track:register_params()
     end)
 
 
-    local arp_options = {'up','down','up down', 'down up', 'converge', 'diverge'}
+    local arp_options = {'up','down','random'}
     params:add_option(track .. '_arp','Arpeggio',arp_options, 1)
     params:set_action(track .. '_arp',function(d)
-        App.track[id].arp = arp_options[d]
-    end)
-
-    local step_options = {'midi trig','1/48','1/32', '1/32t', '1/16', '1/16t', '1/16d','1/8', '1/8t','1/8d','1/4','1/4t','1/4d','1/2','1','2','4','8','16'}
-    local step_values =  {0,2,3,4,6,8,9,12,16,18,24,32,36,48,96,192,384,768, 1536}
-    params:add_option(track .. '_step','Step',step_options, 1)
-    params:set_action(track .. '_step',function(d)
-        App.track[id].step = step_values[d]
-        App.track[id].reset_tick = 1
-        App.track[id].step_count = 0
-    end)
-
-    params:add_number(track .. '_reset','Reset',0,64,0, function(param) 
-        local v = param:get()
-        if v == 0 then
-            return 'off'
-        elseif v == 1 then
-            return '1 step'
-        else
-            return v .. ' steps'
-        end
-    end)
-
-    params:set_action(track .. '_reset',function(d)
-        App.track[id].reset_step = d
-        App.track[id].reset_tick = 1
-        App.track[id].step_count = 0
+        App.track[id].input.arp = arp_options[d]
     end)
 
 
@@ -294,11 +266,19 @@ end
 function Track:register_component_set_actions(component)
     local track = 'track_' .. self.id
     local id = self.id
+    -- Hide dynamic params and wait for set action
+    for i, value in ipairs(component.params) do
+        params:hide(track .. '_' .. value)
+    end
    
     -- Set the action for the input parameter
     params:set_action(track .. '_' .. component.name, function(i)
         local option = component.options[i]
         local type = component.types[option]
+        
+        for i, value in ipairs(component.params) do
+            params:hide(track .. '_' .. value)
+        end
 
         if type ~= nil then
             local props = {}
