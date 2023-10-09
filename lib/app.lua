@@ -20,6 +20,7 @@ function App:init()
 	self.track = {}
 	self.mode = {}
 
+	self.draw = function() end
 
 	self.current_mode = 1
 	self.current_track = 10
@@ -123,7 +124,7 @@ function App:init()
   params:set('track_1_midi_out',1)
 
 	-- Track components are instantiated with parameter actions
-	params:default()
+	params:bang()
 
 	self.midi_grid.event = function(msg)
 		local mode = self.mode[self.current_mode]

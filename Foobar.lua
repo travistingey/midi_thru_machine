@@ -89,6 +89,10 @@ function redraw() -------------- redraw() is automatically called by norns
 	screen.font_face(font.face)
 	screen.font_size(font.size)
 	screen.level(15) ------------- max
+
+	App.draw()
+	
+	screen.update()
 end
 
 function r() ----------------------------- execute r() in the repl to quickly rerun this script
@@ -111,6 +115,7 @@ function r() ----------------------------- execute r() in the repl to quickly re
 	utilities.unrequire(path_name .. 'scale')
 	utilities.unrequire(path_name .. 'musicutil-extended')
 	utilities.unrequire(path_name .. 'utilities')
+	utilities.unrequire(path_name .. 'bitwise')
 	norns.script.load(norns.state.script) -- https://github.com/monome/norns/blob/main/lua/core/state.lua
 	-- norns.script.load('/home/we/dust/code/Foobar/Foobar.lua')
 end
