@@ -116,20 +116,23 @@ Input.types['midi'] = {
     end
 }
 
+function set_trigger(s,track)
+    params:set('track_' .. track.id .. '_voice', 2) -- mono
+    params:set('track_' .. track.id .. '_note_range_lower', 60) -- mono
+    track.triggered = true
+    s.index = 0
+end
+
 -- Arpeggiator
 
 Input.types['arpeggio'] = {
     props = {'midi_in','trigger','note_range_upper','note_range','exclude_trigger'},
     set_action = function(s, track)
-        params:set('track_' .. track.id .. '_voice', 2) -- mono
-        track.triggered = true
+        set_trigger(s,track)
         
         if track.scale_select == 0 then
             params:set('track_' .. track.id .. '_scale',1)
-        end
-        
-
-        s.index = 0
+        end       
     end,
     transport_event = function(s, data)     
         if data.type == 'start' then
@@ -236,11 +239,7 @@ end
 Input.types['random'] = {
     props = {'midi_in','trigger','note_range_upper','note_range','exclude_trigger'},
     set_action = function(s, track)
-        params:set('track_' .. track.id .. '_voice', 2) -- mono
-        
-        track.triggered = true
-
-        s.index = 0
+        set_trigger(s,track)
     end,
     transport_event = function(s, data)
         if data.type == 'start' then
@@ -275,8 +274,7 @@ Input.types['random'] = {
 Input.types['bitwise'] = {
     props = {'midi_in','trigger','note_range_upper','note_range','exclude_trigger'},
     set_action = function(s, track)
-        params:set('track_' .. track.id .. '_voice', 2) -- mono
-        track.triggered = true
+        set_trigger(s,track)
         
         s.note = Bitwise:new({
             format = function(value) 
@@ -296,10 +294,10 @@ Input.types['bitwise'] = {
         elseif data.type == 'clock' then
 
                 clock_trigger(s, data, function()
-                    s.note:cycle()
-                    s.vel:cycle()
+                    s.note:mutate()
+                    s.index = util.wrap(s.index + 1,1,16)
                     if s.note:get().state then
-                    return {type = 'note_on', note = s.note:get().value, vel = s.vel:get().value }
+                        return {type = 'note_on', note = s.note:get().value, vel = s.vel:get().value }
                     end
                 end)
                 
@@ -309,8 +307,9 @@ Input.types['bitwise'] = {
     midi_event = function(s,data)
 
         local event =  midi_trigger(s, data, function()
-            
-            return { type = 'note_on', note = s.note:get().value, vel = 100 }
+            s.note:mutate()
+            s.index = util.wrap(s.index + 1,1,16)
+            return { type = 'note_on', note = s.note:get(s.index).value, vel = 100 }
             
         end)
         

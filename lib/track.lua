@@ -25,33 +25,35 @@ function Track:new(o)
     self.__index = self
 
     self.id = o.id
-    self.scale_select = o.scale_select
+   
 
     self:set(o) -- Set static variables
-    self:register_params()
+    
     
     return o
 end
-
-
-
-
-
 
 function Track:set(o)
     -- Set static properties here
     -- Note: most properties will be initialized by params:bang() or params:default() called in the init script
     o.active = o.active or false
-    o.note_range_upper = o.note_range_upper or 127
     o.note_range_lower = o.note_range_lower or 0
+    o.note_range_upper = o.note_range_upper or 127
+    o.note_range = o.note_range or 2
     o.triggered = o.triggered or false
+    o.midi_in = o.midi_in or 1
+    o.midi_out = o.midi_out or 1
+    o.midi_thru = o.midi_thru or false
+    o.mono = o.mono or false
+    o.exclude_trigger = o.exclude_trigger or false
+    self.scale_select = o.scale_select or 0
 end
 
-function Track:register_params()
+function Track:register_params(id)
     -- Register the parameters
-    local id = self.id
-    local track = 'track_' .. self.id
-    params:add_group('Track ' .. self.id, 14 )
+    
+    local track = 'track_' .. id
+    params:add_group('Track ' .. id, 17 )
 
     params:add_option(track .. '_input', 'Input Type', Input.options, 1)
     params:set_action(track .. '_input',function(d)
@@ -162,7 +164,7 @@ function Track:register_params()
     end)
 
 
-    params:add_number(track .. '_scale', 'Scale', 0, 16, 0,function(param)
+    params:add_number(track .. '_scale', 'Scale', 0, 3, 0,function(param)
         local ch = param:get()
         if ch == 0 then 
            return 'off'
@@ -246,8 +248,8 @@ function Track:register_params()
     params:set_action(track .. '_crow_out', function(d) App.track[id].crow_out = d end)
     
 
-    self:register_component_set_actions(Input)
-    self:register_static_components()
+    self:register_component_set_actions(Input,id)
+    self:register_static_components(id)
 
 end
 
@@ -262,8 +264,7 @@ end
     ]]
 
 function Track:register_static_components(id)
-    local id = self.id
-    local track = 'track_' .. self.id
+    local track = 'track_' .. id
     
     params:add_binary(track ..'_components', 'Set Components ' .. id, 'momentary')
     params:hide(track ..'_components')
@@ -271,7 +272,7 @@ function Track:register_static_components(id)
     params:set_action(track .. '_components', function(d)
         local instance =  App.track[id]
         
-        instance.scale_select = instance.scale_select or id
+        instance.scale_select = instance.scale_select or 0
         instance.scale = App.scale[instance.scale_select]
 
         instance.output_select = instance.output_select or id
@@ -291,9 +292,9 @@ function Track:register_static_components(id)
     
 end
 
-function Track:register_component_set_actions(component)
-    local track = 'track_' .. self.id
-    local id = self.id
+function Track:register_component_set_actions(component, id)
+    local track = 'track_' .. id
+    local id = id
    
     -- Set the action for the input parameter
     params:set_action(track .. '_' .. component.name, function(i)

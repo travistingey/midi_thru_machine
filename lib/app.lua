@@ -67,8 +67,26 @@ function App:init()
 		self.midi_grid:send({240,0,32,41,2,13,0,127,247}) -- Set to Launchpad to Programmer Mode
 	end)
 	
-	params:bang()
+	params:add_separator('tracks','Tracks')
 	
+	-- Create shared scales
+	for i = 1, 16 do
+		Track:register_params(i)
+	end
+	
+	
+	params:add_separator('scales','Scales')
+	for i = 0, 3 do
+		Scale:register_params(i)
+	end
+	
+	-- Instantiate
+	self.midi_in = midi.connect(1)
+	self.midi_out = midi.connect(6)
+	self.midi_grid = midi.connect(3)
+	
+	self.midi_grid:send({240,0,32,41,2,13,0,127,247}) -- Set to Launchpad to Programmer Mode
+
 	-- Set up transport event handler for incoming MIDI from the Transport device
     self.midi_in.event = function(msg)
 		local data = midi.to_msg(msg)
@@ -102,11 +120,6 @@ function App:init()
 	crow.input[1].mode('none')
 	crow.input[2].mode('none')
 
-	-- Create shared scales
-	for i = 0, 16 do
-		self.scale[i] = Scale:new({id = i})
-	end
-
 	-- Create shared outputs
 	for i = 1, 16 do
 		self.output[i] = Output:new({
@@ -115,24 +128,28 @@ function App:init()
 		})
 	end
 
+	for i = 0, 3 do 
+		self.scale[i] = Scale:new({id = i})
+	end
+
 	-- Create the tracks
-	params:add_separator('tracks','Tracks')
 	for i = 1, 16 do
 		self.track[i] = Track:new({id = i})
 	end
 
-  params:set('track_1_midi_out',1)
+	
+
 
 	-- Track components are instantiated with parameter actions
-	params:bang()
+	params:default()
 
+	-- Create the modes
 	self.midi_grid.event = function(msg)
 		local mode = self.mode[self.current_mode]
 		self.grid:process(msg)
 		mode.grid:process(msg)
 	end
-
-	-- Create the modes
+	
 
 	-- TODO: Modes required after App is instantiated. May want to fix this...
 	local AllClips = require(path_name .. 'modes/allclips') 
@@ -151,7 +168,11 @@ function App:init()
 	})
 
 	self.mode[3] = Mode:new({
-		components = {ScaleGrid:new({id=1})}
+		components = {
+			ScaleGrid:new({id=1, offset = {x=0,y=6}}),
+			ScaleGrid:new({id=2, offset = {x=0,y=4}}),
+			ScaleGrid:new({id=3, offset = {x=0,y=2}})
+		}
 	})
 
 	self.mode[4] = Mode:new({
@@ -202,7 +223,7 @@ function App:init()
 		active = true
 	})
   
-  self.current_mode = 1
+ 	self.current_mode = 1
 	self.mode[1]:enable()
 	
 	self.grid:event({x=1,y=1, state = true})

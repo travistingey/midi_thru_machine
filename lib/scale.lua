@@ -12,14 +12,15 @@ Scale.name = 'scale'
 function Scale:set(o)
 	self.__base.set(self, o) -- call the base set method first   
 	
-  o.grid = o.grid
-  o.root = o.root or 0
-  o.bits = o.bits or 0
-  o.range = o.range or 128
-  
-  o:set_scale(o.bits)
-  -- Keyboard for 8x2 grid moving top left to bottom right
-  o.index_map = { 
+	o.grid = o.grid
+	o.root = o.root or 0
+	o.bits = o.bits or 0
+	o.follow = o.follow or 0
+	o.follow_method = o.follow_method or 1
+	o.scale_select = o.scale_select or 0
+	
+	-- Keyboard for 8x2 grid moving top left to bottom right
+	o.index_map = { 
 		[9] = {note = 0, name = 'C' },
 		[2] = {note = 1, name = 'C#'  },
 		[10] = {note = 2, name = 'D' },
@@ -35,7 +36,7 @@ function Scale:set(o)
 		[16] = {note = 0, name = 'C' }
 	}
   
-  o.note_map = {
+	o.note_map = {
 		[0] = { index = 9, name = 'C' },
 		[1] = { index = 2, name = 'C#' },
 		[2] = { index = 10, name = 'D' },
@@ -53,12 +54,77 @@ function Scale:set(o)
 	
 end
 
+
+function Scale:register_params(id)
+	local scale = 'scale_' .. id .. '_'
+	params:add_group('Scale ' .. id, 4 ) 
+
+	params:add_number(scale .. 'bits', 'Bits',0,4095,0)
+	params:set_action(scale .. 'bits',function(bits)
+		
+		App.scale[id]:set_scale(bits)
+		
+		for i = 1, 3 do 
+			App.scale[i]:follow_scale()
+		end
+
+		if App.current_mode and App.mode[App.current_mode] then
+			App.mode[App.current_mode]:enable()
+		end
+	end)
+	
+	params:add_number(scale .. 'root', 'Root',-24,24,0)
+	params:set_action(scale .. 'root', function(root)
+		App.scale[id].root = root
+
+		for i = 1, 3 do 
+			App.scale[i]:follow_scale()
+		end
+
+		if App.current_mode and App.mode[App.current_mode] then
+			App.mode[App.current_mode]:enable()
+		end
+	end)
+
+	params:add_number(scale .. 'follow', 'Follow',0,3,0)
+	params:set_action(scale .. 'follow', function(d)
+		App.scale[id].follow = d
+
+		if d > 0 then
+			for i = 1, 3 do 
+				App.scale[i]:follow_scale()
+			end
+		end
+		
+		if App.current_mode and App.mode[App.current_mode] then
+			App.mode[App.current_mode]:enable()
+		end
+	end)
+
+	params:add_option(scale .. 'follow_method', 'Follow Method',{'transpose','scale degree','pentatonic'},1)
+	params:set_action(scale .. 'follow_method', function(d)
+		App.scale[id].follow_method = d
+
+		for i = 1, 3 do 
+			App.scale[i]:follow_scale()
+		end
+
+		if App.current_mode and App.mode[App.current_mode] then
+			App.mode[App.current_mode]:enable()
+		end
+	end)
+
+end
+
+
 function Scale:set_scale(bits)
 	self.bits = bits
 	self.intervals = musicutil.bits_to_intervals(bits)
 	self.notes = {}
 
-  local i = 0
+	params:set('scale_'..self.id..'_bits', bits, true)
+
+	local i = 0
   
 	for oct=1,10 do
 		for i=1,#self.intervals do
@@ -72,7 +138,45 @@ end
 function Scale:shift_scale_to_note(n)
 	local scale = musicutil.shift_scale(self.bits, n - self.root)
 	self.root = n
+
 	self:set_scale(scale)
+	params:set('scale_'..self.id..'_root', n)
+end
+
+function Scale:follow_scale()
+	local scale = 'scale_' .. self.id .. '_'
+	if self.follow > 0 then
+		local other = App.scale[self.follow]
+		
+		if self.follow_method == 1 then
+			-- Transpose			
+			self.root = other.root
+			params:set(scale .. 'root', other.root, true)
+		elseif self.follow_method == 2 then
+			-- App.scale Degree
+			self:shift_scale_to_note(other.root)
+			params:set(scale .. 'root', other.root, true)
+		elseif self.follow_method == 3 then
+			-- Pentatonic
+			local major = musicutil.intervals_to_bits({0,4})
+			local minor = musicutil.intervals_to_bits({0,3})
+
+			if other.bits & major == major then
+				self:set_scale(661)
+				self.root = other.root
+				params:set(scale .. 'root', other.root, true)
+				
+			elseif other.bits & minor == minor then
+				self:set_scale(1193)
+				self.root = other.root
+				params:set(scale .. 'root', other.root, true)
+			else
+				self:set_scale(1)
+				self.root = other.root
+				params:set(scale .. 'root', other.root, true)
+			end
+		end
+	end
 end
 
 
@@ -83,7 +187,7 @@ function Scale:midi_event(data, track)
         if self.bits == 0 then
 			return data
 		else
-			data.note = musicutil.snap_note_to_array(data.note  + root, self.notes)
+			data.note = musicutil.snap_note_to_array(data.note, self.notes) + root
 			
 			return data
 		end
@@ -91,74 +195,6 @@ function Scale:midi_event(data, track)
 		
 		  return data
     end
-end
-
-
-function Scale:grid_event(data)
-    if data.type == 'pad' then
-    
-    	local index = self.grid:grid_to_index(data)
-    	
-		if(index and data.state and self.index_map[index])then
-    		local d = self.index_map[index]
-			
-    		if App.alt then
-    			self:shift_scale_to_note(d.note)
-    			App.alt_pad:reset()
-    		else
-				  local bit_flag = (1 << ((24 + d.note - self.root) % 12) ) -- bit representation for note
-    			self:set_scale(self.bits ~ bit_flag )
-    		end
-			
-			for i = 1, 16 do
-				if App.track[i].scale_select == self.id then
-					App.track[i].output:kill()
-				end
-			end
-
-			self:set_grid()
-    	
-		  end    
-    end
-end
-
-function Scale:set_grid()
-
-	if self.grid.active then
-		local scale =  musicutil.bits_to_intervals(self.bits)
-		local root = self.root
-		
-		for i, v in pairs(self.note_map) do
-			local l = self.grid:index_to_grid(v.index)
-			self.grid.led[l.x][l.y] = {5,5,5}
-		end
-
-		if #scale > 0 then
-			for i, v in pairs(scale) do
-				local n = (24 + v + root) % 12
-				local c = self.note_map[n]
-				local l = self.grid:index_to_grid(c.index)
-		
-				if (n == root % 12 ) then
-					self.grid.led[l.x][l.y] = Grid.rainbow_on[ (self.id - 1) % #Grid.rainbow_on + 1]
-					
-					if n == 0 then
-						l = self.grid:index_to_grid(16)
-						self.grid.led[l.x][l.y] = Grid.rainbow_on[ (self.id - 1) % #Grid.rainbow_on + 1]
-					end
-				else
-					self.grid.led[l.x][l.y] = Grid.rainbow_off[ (self.id - 1) % #Grid.rainbow_off + 1]
-					
-					if n == 0 then
-						l = self.grid:index_to_grid(16)
-						self.grid.led[l.x][l.y] = Grid.rainbow_off[ (self.id - 1) % #Grid.rainbow_off + 1]
-					end
-				end
-			end
-		end
-		
-		self.grid:refresh('set grid')
-	end
 end
 
 return Scale

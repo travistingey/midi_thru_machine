@@ -56,8 +56,12 @@ function ScaleGrid:grid_event (scale, data)
 				end
 			end
 
-			self:set_grid(scale)
-    	
+			for i = 1, 3 do
+				App.scale[i]:follow_scale()
+			end
+
+			App.mode[App.current_mode]:enable()
+			
 		  end    
     end  
 end 

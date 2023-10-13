@@ -8,7 +8,7 @@ function TrackComponent:new(o)
 
     -- common functionality here
     self:set(o)
-
+	
     return o
 end
 
