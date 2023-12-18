@@ -165,7 +165,7 @@ function arpeggiate (s, data)
     end
     
     local range = params:get('track_' .. s.track.id .. '_note_range') * #intervals
-    local root = s.track.note_range_lower + s.track.scale.root
+    local root = s.track.note_range_lower
    
     if s.track.arp == 'up' then                        
         s.index = util.wrap(s.index + 1, 1,range)        
@@ -275,8 +275,12 @@ Input.types['bitwise'] = {
     props = {'midi_in','trigger','note_range_upper','note_range','exclude_trigger'},
     set_action = function(s, track)
         set_trigger(s,track)
-        
+        track.chance = params:get('track_' .. track.id .. '_chance')
+        track.step_length = params:get('track_' .. track.id .. '_step_length')
+
+        print(track.step_length)
         s.note = Bitwise:new({
+            chance = track.chance,
             format = function(value) 
                 return util.wrap(math.floor( value * 127 ), track.note_range_lower, track.note_range_upper)
             end
@@ -294,10 +298,20 @@ Input.types['bitwise'] = {
         elseif data.type == 'clock' then
 
                 clock_trigger(s, data, function()
-                    s.note:mutate()
-                    s.index = util.wrap(s.index + 1,1,16)
-                    if s.note:get().state then
-                        return {type = 'note_on', note = s.note:get().value, vel = s.vel:get().value }
+
+                    s.note.chance = s.track.chance
+                    s.vel.chance = s.track.chance
+
+                    s.note.length = s.track.step_length
+                    s.vel.length = s.track.step_length
+
+                    s.index = util.wrap(s.index + 1,1,s.track.step_length)
+                    
+                    s.note:mutate(s.index)
+                    s.vel:mutate(s.index)
+                    
+                    if s.note:get(s.index).state then
+                        return {type = 'note_on', note = s.note:get(s.index).value, vel = s.vel:get(s.index).value }
                     end
                 end)
                 
@@ -307,9 +321,20 @@ Input.types['bitwise'] = {
     midi_event = function(s,data)
 
         local event =  midi_trigger(s, data, function()
-            s.note:mutate()
-            s.index = util.wrap(s.index + 1,1,16)
-            return { type = 'note_on', note = s.note:get(s.index).value, vel = 100 }
+            s.note.chance = s.track.chance
+            s.vel.chance = s.track.chance
+
+            s.note.length = s.track.step_length
+            s.vel.length = s.track.step_length
+
+            s.index = util.wrap(s.index + 1,1,s.track.step_length)
+            s.note:mutate(s.index)
+            s.vel:mutate(s.index)
+
+            local send = { type = 'note_on', note = s.note:get(s.index).value, vel = 100 }
+           
+            
+            return send
             
         end)
         

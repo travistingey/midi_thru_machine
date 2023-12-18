@@ -53,7 +53,7 @@ function Track:register_params(id)
     -- Register the parameters
     
     local track = 'track_' .. id
-    params:add_group('Track ' .. id, 17 )
+    params:add_group('Track ' .. id, 19 )
 
     params:add_option(track .. '_input', 'Input Type', Input.options, 1)
     params:set_action(track .. '_input',function(d)
@@ -163,6 +163,13 @@ function Track:register_params(id)
         App.track[id].step_count = 0
     end)
 
+    local chance_spec = controlspec.UNIPOLAR:copy()
+    chance_spec.default = 0.5
+
+    params:add_control(track .. '_chance', 'Chance', chance_spec)
+    params:set_action(track .. '_chance', function(d)
+        App.track[id].chance = d
+    end)
 
     params:add_number(track .. '_scale', 'Scale', 0, 3, 0,function(param)
         local ch = param:get()
@@ -179,8 +186,6 @@ function Track:register_params(id)
         App.track[id]:build_chain()
     end)
 
-
-    
     params:add_number(track .. '_trigger', 'Trigger', 0, 127, 36)
     params:set_action(track .. '_trigger', function(d)
         if App.track[id].output ~= nil then App.track[id].output:kill() end
@@ -191,10 +196,12 @@ function Track:register_params(id)
         end
 
     end)
-    
-    
-    
 
+    params:add_number(track .. '_step_length', 'Step Length', 1, 16, 16)
+    params:set_action(track .. '_step_length', function(d)
+        App.track[id].step_length = d
+    end)
+    
     params:add_binary(track .. '_exclude_trigger','Exclude Trigger','toggle', 0)
     params:set_action(track .. '_exclude_trigger',function(d)
         -- exclude trigger from other outputs

@@ -18,6 +18,8 @@ function Scale:set(o)
 	o.follow = o.follow or 0
 	o.follow_method = o.follow_method or 1
 	o.scale_select = o.scale_select or 0
+	o.reset_latch = false
+	o.latch_notes = {}
 	
 	-- Keyboard for 8x2 grid moving top left to bottom right
 	o.index_map = { 
@@ -101,7 +103,7 @@ function Scale:register_params(id)
 		end
 	end)
 
-	params:add_option(scale .. 'follow_method', 'Follow Method',{'transpose','scale degree','pentatonic'},1)
+	params:add_option(scale .. 'follow_method', 'Follow Method',{'transpose','scale degree','pentatonic','midi on', 'midi latch'},1)
 	params:set_action(scale .. 'follow_method', function(d)
 		App.scale[id].follow_method = d
 
@@ -143,7 +145,7 @@ function Scale:shift_scale_to_note(n)
 	params:set('scale_'..self.id..'_root', n)
 end
 
-function Scale:follow_scale()
+function Scale:follow_scale(notes)
 	local scale = 'scale_' .. self.id .. '_'
 	if self.follow > 0 then
 		local other = App.scale[self.follow]
@@ -176,6 +178,33 @@ function Scale:follow_scale()
 				params:set(scale .. 'root', other.root, true)
 			end
 		end
+	elseif self.follow_method > 3 and notes then
+		
+		-- MIDI controlled
+		local b = 0
+		local n = {}
+		local min = 0
+		
+		for note in pairs(notes)do
+			if min == 0 or note < min then
+				min = note
+			end
+			n[#n + 1] = notes[note].note
+		end
+
+		for i= 1, #n do
+			n[i] = (n[i] - min) % 12
+		end
+		
+		local s = musicutil.intervals_to_bits(n)
+		self.root = min % 12
+		params:set(scale .. 'root', self.root, true)
+
+		self:set_scale(s)
+		
+			
+		
+		
 	end
 end
 
@@ -184,12 +213,42 @@ function Scale:midi_event(data, track)
     local root = self.root
     
     if data.note then
-        if self.bits == 0 then
+		if self.follow_method == 4  and (data.type == 'note_on' or data.type == 'note_off') then
+			self:follow_scale(self.note_on)
+			return data
+		elseif self.follow_method == 5 and (data.type == 'note_on' or data.type == 'note_off') then
+			local count = 0
+			
+			for n in pairs(self.note_on) do 
+				count = count + 1
+			end
+
+			if data.type == 'note_off' and count == 0 then
+				self.reset_latch = true
+			elseif data.type == 'note_on' then
+
+				if self.reset_latch then
+					self.latch_notes = {}
+					self.reset_latch = false
+				end
+				self.latch_notes[data.note] = data
+				self:follow_scale(self.latch_notes)
+			end
+
+			for i=1,3 do
+				App.scale[i]:follow_scale()
+			end
+
 			return data
 		else
-			data.note = musicutil.snap_note_to_array(data.note, self.notes) + root
-			
-			return data
+
+			if self.bits == 0 then
+				return data
+			else
+				data.note = musicutil.snap_note_to_array(data.note, self.notes) + root
+				
+				return data
+			end
 		end
   	else
 		

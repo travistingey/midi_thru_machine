@@ -44,21 +44,19 @@ end
 function TrackComponent:process_midi(data, track)
     if data ~= nil then
         local send
- 
+        
+        if data.type == 'note_on' then    
+            self.note_on[data.note] = data
+        elseif data.type == 'note_off' and self.note_on[data.note] ~= nil then
+            self.note_on[data.note] = nil
+        end
+
         if self.midi_event ~= nil then
             send = self:midi_event(data, track)
         end
         
         if self.on_midi ~= nil then
             self:on_midi(data, track)
-        end
-        
-        if send ~= nil then
-            if send.type == 'note_on' then    
-                self.note_on[send.note] = send
-            elseif send.type == 'note_off' and self.note_on[send.note] ~= nil then
-                self.note_on[send.note] = nil
-            end
         end
 
         return send

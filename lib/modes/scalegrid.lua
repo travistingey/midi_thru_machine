@@ -34,6 +34,20 @@ function ScaleGrid:set_scale(id)
   self:enable()
 end
 
+function ScaleGrid:midi_event(scale,data)
+	for i = 1, 16 do
+		if App.track[i].scale_select == scale.id then
+			App.track[i].output:kill()
+		end
+	end
+	
+	for i = 1, 3 do
+		App.scale[i]:follow_scale()
+	end
+
+	App.mode[App.current_mode]:enable()
+end
+
 function ScaleGrid:grid_event (scale, data)
    if data.type == 'pad' then
       local grid = self.grid

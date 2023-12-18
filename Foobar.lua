@@ -100,6 +100,7 @@ function r() ----------------------------- execute r() in the repl to quickly re
 	for i=1,16 do
 		App.track[i].output:kill()
 	end
+	
 	utilities.unrequire(path_name .. 'app')
 	utilities.unrequire(path_name .. 'track')
 	utilities.unrequire(path_name .. 'trackcomponent')

@@ -80,6 +80,7 @@ function App:init()
 		Scale:register_params(i)
 	end
 	
+	
 	-- Instantiate
 	self.midi_in = midi.connect(1)
 	self.midi_out = midi.connect(6)

@@ -112,9 +112,8 @@ end
 
 function Bitwise:mutate(i)
     i = i or 1
-    if math.random() > self.chance and not self.lock[i] then
+    if math.random() < self.chance and not self.lock[i] then
         self:flip(i)
-        self:update()
     end
 end
 

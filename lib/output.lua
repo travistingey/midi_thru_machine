@@ -12,34 +12,34 @@ function Output:set(o)
     self.note_on = {}
 end
 
-function Output:process_midi(data, track)
-    if data ~= nil then
+-- function Output:process_midi(data, track)
+--     if data ~= nil then
         
-        if data.type == 'note_on' then    
-            self.note_on[data.note] = data
-        elseif data.type == 'note_off' and self.note_on[data.note] ~= nil then
-            self.note_on[data.note] = nil
-        end
+--         if data.type == 'note_on' then    
+--             self.note_on[data.note] = data
+--         elseif data.type == 'note_off' and self.note_on[data.note] ~= nil then
+--             self.note_on[data.note] = nil
+--         end
 
-        data = self:midi_event(data, track)
-        return data
-    end
-end
+--         data = self:midi_event(data, track)
+--         return data
+--     end
+-- end
 
-function Output:kill()
-    for i,v in pairs(self.note_on) do
-        local off = {
-            type = 'note_off',
-            note = v.note,
-            vel = v.vel,
-            ch = v.ch
-        }
+-- function Output:kill()
+--     for i,v in pairs(self.note_on) do
+--         local off = {
+--             type = 'note_off',
+--             note = v.note,
+--             vel = v.vel,
+--             ch = v.ch
+--         }
 
-        App.midi_out:send(off)
-    end
+--         App.midi_out:send(off)
+--     end
 
-    self.note_on = {}
-end
+--     self.note_on = {}
+-- end
 
 function Output:panic()
     clock.run(function()
