@@ -87,7 +87,7 @@ end
 
 
 
-Input.options = {'midi', 'arpeggio','random','bitwise'} -- {...'crow', 'bitwise', 'euclidean'}
+Input.options = {'midi','crow' ,'arpeggio','random','bitwise'} -- {...'crow', 'bitwise', 'euclidean'}
 Input.params = {'midi_in','trigger','crow_in','note_range_upper','note_range_lower','exclude_trigger'} -- Update this list to dynamically show/hide Track params based on Input type
 
 Input.types = {}
@@ -122,6 +122,45 @@ function set_trigger(s,track)
     track.triggered = true
     s.index = 0
 end
+
+-- Crow Input
+-- crow.send('input[1].query()') will query and save values to App.crow_in[1].volts
+Input.types['crow'] = {
+    props = {'midi_in','trigger','exclude_trigger'},
+    set_action = function(s, track)
+        set_trigger(s,track)
+    end,
+    transport_event = function(s, data)
+        if data.type == 'start' then
+            s.index = 0
+        elseif data.type == 'clock' then
+
+                clock_trigger(s, data, function()
+                    crow.send('input['.. s.track.crow_in ..'].query()')
+                    local note = math.floor(App.crow_in[ s.track.crow_in].volts * 12) + 60
+                    local vel = 100
+                    return {type = 'note_on', note = note, vel = vel }
+                end)
+                
+        end
+        return data
+    end,
+    midi_event = function(s,data)
+
+        local event =  midi_trigger(s, data, function()
+            crow.send('input['.. s.track.crow_in ..'].query()')
+            local note = math.floor(App.crow_in[ s.track.crow_in].volts * 12) + 60
+            local vel = 100
+            return {type = 'note_on', note = note, vel = vel }
+            
+        end)
+        
+        return event
+    end
+    
+}
+
+
 
 -- Arpeggiator
 

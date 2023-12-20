@@ -199,11 +199,14 @@ function Scale:follow_scale(notes)
 		local s = musicutil.intervals_to_bits(n)
 		self.root = min % 12
 		params:set(scale .. 'root', self.root, true)
-
+		
 		self:set_scale(s)
 		
-			
-		
+		for i = 1, 16 do
+			if App.track[i].scale_select == scale.id then
+				App.track[i].output:kill()
+			end
+		end
 		
 	end
 end

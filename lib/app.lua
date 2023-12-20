@@ -110,7 +110,8 @@ function App:init()
 
 	-- Crow Setup
 	self.crow_in = {{},{}}
-
+	self.crow_out = {}
+	
 	-- Set Crow device input queries and stream handlers
 	crow.send("input[1].query = function() stream_handler(1, input[1].volts) end")
 	crow.send("input[2].query = function() stream_handler(2, input[2].volts) end")
@@ -128,7 +129,15 @@ function App:init()
 			midi_event = Output.types['midi'].midi_event
 		})
 	end
-
+	
+	
+	for i = 1, 2 do
+		self.crow_out[i] = Output:new({
+			id = i,
+			midi_event = Output.types['crow'].midi_event
+		})
+	end
+  
 	for i = 0, 3 do 
 		self.scale[i] = Scale:new({id = i})
 	end
@@ -161,7 +170,10 @@ function App:init()
 
 
 	self.mode[1] = Mode:new({
-		components = {AllClips:new({track=1}),MuteGrid:new({track=1})}
+		components = {
+			AllClips:new({track=1}),
+		  MuteGrid:new({track=1})
+		}
 	})
 
 	self.mode[2] = Mode:new({

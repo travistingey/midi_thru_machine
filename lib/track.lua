@@ -41,10 +41,12 @@ function Track:set(o)
     o.note_range_upper = o.note_range_upper or 127
     o.note_range = o.note_range or 2
     o.triggered = o.triggered or false
+    o.output_type = o.output_type or 'midi'
     o.midi_in = o.midi_in or 1
     o.midi_out = o.midi_out or 1
     o.midi_thru = o.midi_thru or false
     o.mono = o.mono or false
+    o.crow_out = o.crow_out or 1
     o.exclude_trigger = o.exclude_trigger or false
     self.scale_select = o.scale_select or 0
 end
@@ -53,7 +55,7 @@ function Track:register_params(id)
     -- Register the parameters
     
     local track = 'track_' .. id
-    params:add_group('Track ' .. id, 19 )
+    params:add_group('Track ' .. id, 20 )
 
     params:add_option(track .. '_input', 'Input Type', Input.options, 1)
     params:set_action(track .. '_input',function(d)
@@ -63,11 +65,7 @@ function Track:register_params(id)
     end)
     
     params:add_option(track .. '_output', 'Output Type', Output.options, 1)
-    params:set_action(track .. '_output',function(d)
-        if App.mode[App.current_mode] then
-            App.mode[App.current_mode]:enable()
-        end
-    end)
+    
 
     params:add_number(track .. '_midi_in', 'MIDI In', 0, 16, id, function(param)
         local ch = param:get()
@@ -79,6 +77,7 @@ function Track:register_params(id)
     end)
     
     params:set_action(track .. '_midi_in', function(d)
+
         if App.track[id].output ~= nil then App.track[id].output:kill() end
             App.track[id].midi_in = d
 
@@ -98,20 +97,23 @@ function Track:register_params(id)
     end)
 
     params:set_action(track .. '_midi_out', function(d)
-        if d == 0 then
+        if d == 0 and  App.track[id].output_type == 'midi' then
             App.track[id].active = false
         else
             App.track[id].active = true
         end
 
         if App.track[id].output ~= nil then App.track[id].output:kill() end
-        App.track[id].midi_out = d
-        App.track[id].output = App.output[d]
-        App.track[id]:build_chain()
-       
-        if App.mode[App.current_mode] then
-            App.mode[App.current_mode]:enable()
-        end
+            
+            App.track[id].midi_out = d
+            if App.track[id].output_type == 'midi' then
+                App.track[id].output = App.output[d]
+                App.track[id]:build_chain()
+            end
+            
+            if App.mode[App.current_mode] then
+                App.mode[App.current_mode]:enable()
+            end
     end)
     
     params:add_binary(track .. '_midi_thru','MIDI THRU','toggle', 0)
@@ -171,6 +173,16 @@ function Track:register_params(id)
         App.track[id].chance = d
     end)
 
+    local slew_spec = controlspec.UNIPOLAR:copy()
+    slew_spec.default = 0.0
+
+    params:add_control(track .. '_slew', 'Slew', slew_spec)
+    params:set_action(track .. '_slew', function(d)
+        App.track[id].slew = d
+    end)
+
+
+    
     params:add_number(track .. '_scale', 'Scale', 0, 3, 0,function(param)
         local ch = param:get()
         if ch == 0 then 
@@ -251,11 +263,28 @@ function Track:register_params(id)
    
     params:add_number(track .. '_crow_in', 'Crow In', 1, 2, 1)
     params:set_action(track .. '_crow_in', function(d) App.track[id].crow_in = d end)
-    params:add_number(track .. '_crow_out', 'Crow Out', 1, 4, 1)
-    params:set_action(track .. '_crow_out', function(d) App.track[id].crow_out = d end)
+
+    local crow_options = {'1 + 2', '3 + 4'}
+    
+    params:add_option(track .. '_crow_out', 'Crow Out', crow_options, 1)
+    params:set_action(track .. '_crow_out', function(d)
+            if App.track[id].output ~= nil then App.track[id].output:kill() end
+            
+            App.track[id].crow_out = d
+
+            if App.track[id].output_type == 'crow' then
+                App.track[id].output = App.crow_out[d]
+                App.track[id]:build_chain()
+            end
+            
+            if App.mode[App.current_mode] then
+                App.mode[App.current_mode]:enable()
+            end
+    end)
     
 
     self:register_component_set_actions(Input,id)
+    self:register_component_set_actions(Output,id)
     self:register_static_components(id)
 
 end
