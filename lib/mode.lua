@@ -101,7 +101,7 @@ function Mode:set(o)
             self.alt = data.toggled
             s:refresh('alt event')
             
-            if o.on_row ~= nil then
+            if o.on_alt ~= nil then
               o:on_alt(data)
             end
             

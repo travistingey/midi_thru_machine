@@ -98,7 +98,11 @@ end
 function r() ----------------------------- execute r() in the repl to quickly rerun this script
 
 	for i=1,16 do
+		if App.track[i].output then
 		App.track[i].output:kill()
+		else
+			print('Track ' .. i .. ' has no output when trying to run r()')
+		end
 	end
 	
 	utilities.unrequire(path_name .. 'app')
@@ -115,6 +119,7 @@ function r() ----------------------------- execute r() in the repl to quickly re
 	utilities.unrequire(path_name .. 'modes/seqgrid')
 	utilities.unrequire(path_name .. 'modes/seqclip')
 	utilities.unrequire(path_name .. 'modes/scalegrid')
+	utilities.unrequire(path_name .. 'modes/notegrid')
 	utilities.unrequire(path_name .. 'seq')
 	utilities.unrequire(path_name .. 'mute')
 	utilities.unrequire(path_name .. 'scale')

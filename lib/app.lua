@@ -55,10 +55,14 @@ function App:init()
 		)
 	  end
 	
-	params:add_group('Devices',3)
+	params:add_group('Devices',4)
 	params:add_option("midi_in", "MIDI In",midi_device_names,1)
 	params:add_option("midi_out", "MIDI Out",midi_device_names,6)
 	params:add_option("midi_grid", "Grid",midi_device_names,3)
+	params:add_trigger('panic', "Panic")
+	params:set_action('panic', function()
+		App:panic()
+	end)
 
 	params:set_action("midi_in", function(x) App.midi_in = midi.connect(x) end)
 	params:set_action("midi_out", function(x) App.midi_out = midi.connect(x) end)
@@ -109,7 +113,7 @@ function App:init()
 
 
 	-- Crow Setup
-	self.crow_in = {{},{}}
+	self.crow_in = {{volts = 0},{volts = 0}}
 	self.crow_out = {}
 	
 	-- Set Crow device input queries and stream handlers
@@ -167,12 +171,14 @@ function App:init()
 	local SeqGrid = require(path_name .. 'modes/seqgrid') 
 	local ScaleGrid = require(path_name .. 'modes/scalegrid') 
 	local MuteGrid = require(path_name .. 'modes/mutegrid') 
-
+	local NoteGrid = require(path_name .. 'modes/notegrid') 
 
 	self.mode[1] = Mode:new({
 		components = {
-			AllClips:new({track=1}),
-		  MuteGrid:new({track=1})
+			ScaleGrid:new({id=1, offset = {x=0,y=6}}),
+			ScaleGrid:new({id=2, offset = {x=0,y=4}}),
+		  	MuteGrid:new({track=1}),
+			NoteGrid:new({track=1})
 		}
 	})
 
@@ -402,6 +408,25 @@ function App:handle_key(press_fn,long_fn,alt_fn,k,z)
 			context['press_fn_' .. k]()
 		end
 	end
+end
+
+function App:panic()
+	clock.run(function()
+		for c = 1,16 do
+			for i = 0, 128 do
+				
+				local off = {
+					note = i,
+					type = 'note_off',
+					ch = c,
+					vel = 0
+				}
+				
+				App.midi_out:send(off)
+				clock.sync(.01)
+			end
+		end
+	end)
 end
 
 return App

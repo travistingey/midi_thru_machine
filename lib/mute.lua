@@ -42,6 +42,9 @@ function Mute:midi_event(data)
             state = self.state[self.track.trigger]
         end
 
+        -- if self.track.channel_mute > 0 then
+        --     if App.track[self.track.channel_mute].mute.state[self.track.trigger]
+        -- end
         if (not state) then
             return data
         end

@@ -12,27 +12,6 @@ function Output:set(o)
     self.note_on = {}
 end
 
-function Output:panic()
-    clock.run(function()
-    for c = 0,16 do
-        for i = 0, 128 do
-            
-            local off = {
-                note = i,
-                type = 'note_off',
-                ch = c,
-                vel = 0
-            }
-            
-            App.midi_out:send(off)
-            clock.sync(.01)
-        end
-    end
-end)
-
-    self.note_on = {}
-end
-
 Output.options = {'midi','crow'}
 Output.params = {'midi_out','crow_out','slew'} -- Update this list to dynamically show/hide Track params based on Input type
 
@@ -72,12 +51,13 @@ Output.types['midi'] = {
 Output.types['crow'] = {
     props = {'crow_out'},
     set_action = function(s,track)
-        print('set crow')
+        
         track.active = true
 
         if track.output ~= nil then track.output:kill() end
             
         track.crow_out = d
+        track.active = true
 
         if track.output_type == 'crow' then
             track.output = App.crow_out[d]
@@ -93,8 +73,6 @@ Output.types['crow'] = {
             local volts = (data.note - track.note_range_lower) / 12
             local voct = 1
             local gate = 2
-
-
 
             if track.crow_out == 1 then
                 voct = 1

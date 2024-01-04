@@ -40,12 +40,15 @@ function Track:set(o)
     o.note_range_lower = o.note_range_lower or 0
     o.note_range_upper = o.note_range_upper or 127
     o.note_range = o.note_range or 2
+    o.triggered = o.trigger or 0
     o.triggered = o.triggered or false
     o.output_type = o.output_type or 'midi'
+    o.channel_mute = o.channel_mute or 0
     o.midi_in = o.midi_in or 1
     o.midi_out = o.midi_out or 1
     o.midi_thru = o.midi_thru or false
     o.mono = o.mono or false
+    o.crow_in = o.crow_in or 1
     o.crow_out = o.crow_out or 1
     o.exclude_trigger = o.exclude_trigger or false
     self.scale_select = o.scale_select or 0
@@ -55,7 +58,7 @@ function Track:register_params(id)
     -- Register the parameters
     
     local track = 'track_' .. id
-    params:add_group('Track ' .. id, 20 )
+    params:add_group('Track ' .. id, 21 )
 
     params:add_option(track .. '_input', 'Input Type', Input.options, 1)
     params:set_action(track .. '_input',function(d)
@@ -96,6 +99,9 @@ function Track:register_params(id)
         end
     end)
 
+   
+
+
     params:set_action(track .. '_midi_out', function(d)
         if d == 0 and  App.track[id].output_type == 'midi' then
             App.track[id].active = false
@@ -120,6 +126,19 @@ function Track:register_params(id)
     params:set_action(track .. '_midi_thru',function(d)
         -- exclude trigger from other outputs
         App.track[id].midi_thru = (d>0)
+    end)
+
+    params:add_number(track .. '_channel_mute', 'Channel Mute', 0, 16, 0, function(param)
+        local ch = param:get()
+        if ch == 0 then 
+           return 'off'
+        else
+           return ch
+        end
+    end)
+
+    params:set_action(track.. '_channel_mute', function(d)
+        App.track[id].channel_mute = d    
     end)
 
     params:add_option(track .. '_voice','Voice',{'polyphonic','mono'}, 1)
@@ -262,7 +281,12 @@ function Track:register_params(id)
         
    
     params:add_number(track .. '_crow_in', 'Crow In', 1, 2, 1)
-    params:set_action(track .. '_crow_in', function(d) App.track[id].crow_in = d end)
+    params:set_action(track .. '_crow_in', function(d)
+   
+        App.track[id].crow_in = d
+
+
+    end)
 
     local crow_options = {'1 + 2', '3 + 4'}
     
@@ -396,7 +420,7 @@ function Track:build_chain()
     local pre_scale =  {self.input, self.seq, self.scale, self.mute, self.output}     
     local post_scale = {self.input, self.scale, self.seq, self.mute, self.output} 
     
-    local send_input = {self.scale, self.seq, self.mute, self.output} 
+    local send_input = {self.seq, self.scale, self.mute, self.output} 
     local send =  {self.mute, self.output}
     self.process_transport = self:chain_components(post_scale, 'process_transport')
     self.process_midi = self:chain_components(post_scale, 'process_midi')

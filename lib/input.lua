@@ -18,7 +18,7 @@ end
 
 
 
-function midi_trigger(s, data, process)
+function Input.set_midi_trigger(s, data, process)
     if s.track.step == 0 and data.ch == s.track.midi_in and data.note == s.track.trigger then
         if data.type == 'note_on' then
             s.track.step_count = s.track.step_count + 1
@@ -62,7 +62,7 @@ function midi_trigger(s, data, process)
 
 end
 
-function clock_trigger(s,data,process)
+function Input.set_clock_trigger(s,data,process)
 
     
     if s.track.step > 0 and s.track.reset_step > 0 and App.tick % (s.track.reset_step * s.track.step) == s.track.reset_tick then
@@ -95,7 +95,7 @@ Input.types = {}
 -- MIDI Input
 
 Input.types['midi'] = {
-    props = {'midi_in','note_range_upper','note_range_lower'},
+    props = {'midi_in','channel_mute','note_range_upper','note_range_lower'},
     set_action = function(s,track)
         params:set('track_' .. track.id .. '_voice',1) -- polyphonic
 
@@ -116,7 +116,7 @@ Input.types['midi'] = {
     end
 }
 
-function set_trigger(s,track)
+Input.set_trigger = function (s, track)
     params:set('track_' .. track.id .. '_voice', 2) -- mono
     params:set('track_' .. track.id .. '_note_range_lower', 60) -- mono
     track.triggered = true
@@ -128,14 +128,29 @@ end
 Input.types['crow'] = {
     props = {'midi_in','trigger','exclude_trigger'},
     set_action = function(s, track)
-        set_trigger(s,track)
+        print('crow set bitches')
+        if track.output ~= nil then track.output:kill() end
+            
+            track.crow_out = d
+
+            if track.output_type == 'crow' then
+                track.output = App.crow_out[d]
+                track:build_chain()
+            end
+            
+            if App.mode[App.current_mode] then
+                App.mode[App.current_mode]:enable()
+            end
+
+        Input.set_trigger(s,track)
+       
     end,
     transport_event = function(s, data)
         if data.type == 'start' then
             s.index = 0
         elseif data.type == 'clock' then
 
-                clock_trigger(s, data, function()
+                Input.set_clock_trigger(s, data, function()
                     crow.send('input['.. s.track.crow_in ..'].query()')
                     local note = math.floor(App.crow_in[ s.track.crow_in].volts * 12) + 60
                     local vel = 100
@@ -147,7 +162,7 @@ Input.types['crow'] = {
     end,
     midi_event = function(s,data)
 
-        local event =  midi_trigger(s, data, function()
+        local event =  Input.set_midi_trigger(s, data, function()
             crow.send('input['.. s.track.crow_in ..'].query()')
             local note = math.floor(App.crow_in[ s.track.crow_in].volts * 12) + 60
             local vel = 100
@@ -167,7 +182,7 @@ Input.types['crow'] = {
 Input.types['arpeggio'] = {
     props = {'midi_in','trigger','note_range_upper','note_range','exclude_trigger'},
     set_action = function(s, track)
-        set_trigger(s,track)
+        Input.set_trigger(s,track)
         
         if track.scale_select == 0 then
             params:set('track_' .. track.id .. '_scale',1)
@@ -178,7 +193,7 @@ Input.types['arpeggio'] = {
             s.index = 0
             s.track.reset_tick = 1
         elseif data.type == 'clock' then
-            clock_trigger(s, data, function()    
+            Input.set_clock_trigger(s, data, function()    
                 return arpeggiate(s)
             end)
                 
@@ -186,7 +201,7 @@ Input.types['arpeggio'] = {
         return data
     end,
     midi_event = function(s,data)
-        local event =  midi_trigger(s, data, function()
+        local event =  Input.set_midi_trigger(s, data, function()
             return arpeggiate(s)
         end)
         
@@ -278,14 +293,14 @@ end
 Input.types['random'] = {
     props = {'midi_in','trigger','note_range_upper','note_range','exclude_trigger'},
     set_action = function(s, track)
-        set_trigger(s,track)
+       Input.set_trigger(s,track)
     end,
     transport_event = function(s, data)
         if data.type == 'start' then
             s.index = 0
         elseif data.type == 'clock' then
 
-                clock_trigger(s, data, function()
+                Input.set_clock_trigger(s, data, function()
                     local note = math.random( s.track.note_range_lower, s.track.note_range_upper )
                     local vel = math.random(0,127)
                     return {type = 'note_on', note = note, vel = vel }
@@ -296,7 +311,7 @@ Input.types['random'] = {
     end,
     midi_event = function(s,data)
 
-        local event =  midi_trigger(s, data, function()
+        local event =  Input.set_midi_trigger(s, data, function()
             local note = math.random( s.track.note_range_lower, s.track.note_range_upper )
             local vel = math.random(0,127)
             return {type = 'note_on', note = note, vel = vel }
@@ -313,7 +328,7 @@ Input.types['random'] = {
 Input.types['bitwise'] = {
     props = {'midi_in','trigger','note_range_upper','note_range','exclude_trigger'},
     set_action = function(s, track)
-        set_trigger(s,track)
+        Input.set_trigger(s,track)
         track.chance = params:get('track_' .. track.id .. '_chance')
         track.step_length = params:get('track_' .. track.id .. '_step_length')
 
@@ -336,7 +351,7 @@ Input.types['bitwise'] = {
             s.index = 0
         elseif data.type == 'clock' then
 
-                clock_trigger(s, data, function()
+                Input.set_clock_trigger(s, data, function()
 
                     s.note.chance = s.track.chance
                     s.vel.chance = s.track.chance
@@ -359,7 +374,7 @@ Input.types['bitwise'] = {
     end,
     midi_event = function(s,data)
 
-        local event =  midi_trigger(s, data, function()
+        local event =  Input.set_midi_trigger(s, data, function()
             s.note.chance = s.track.chance
             s.vel.chance = s.track.chance
 
