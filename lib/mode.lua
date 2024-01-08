@@ -1,8 +1,8 @@
 local path_name = 'Foobar/lib/'
 local utilities = require(path_name .. 'utilities')
-local Input = require(path_name .. 'input')
-local Seq = require(path_name .. 'seq')
-local Output = require(path_name .. 'output')
+local Input = require(path_name .. 'components/input')
+local Seq = require(path_name .. 'components/seq')
+local Output = require(path_name .. 'components/output')
 local Grid = require(path_name .. 'grid')
 
 -- Define a new class for Mode

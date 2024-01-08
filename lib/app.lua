@@ -1,8 +1,8 @@
 local path_name = 'Foobar/lib/'
 local Grid = require(path_name .. 'grid')
 local Track = require(path_name .. 'track')
-local Scale = require(path_name .. 'scale')
-local Output = require(path_name .. 'output')
+local Scale = require(path_name .. 'components/scale')
+local Output = require(path_name .. 'components/output')
 local Mode = require(path_name .. 'mode')
 
 
@@ -71,16 +71,12 @@ function App:init()
 		self.midi_grid:send({240,0,32,41,2,13,0,127,247}) -- Set to Launchpad to Programmer Mode
 	end)
 	
-	params:add_separator('tracks','Tracks')
+	-- params:add_separator('tracks','Tracks')
 	
-	-- Create shared scales
-	for i = 1, 16 do
-		Track:register_params(i)
-	end
-	
+
 	
 	params:add_separator('scales','Scales')
-	for i = 0, 3 do
+	for i = 0, 4 do
 		Scale:register_params(i)
 	end
 	
@@ -126,25 +122,25 @@ function App:init()
 	crow.input[1].mode('none')
 	crow.input[2].mode('none')
 
-	-- Create shared outputs
-	for i = 1, 16 do
-		self.output[i] = Output:new({
-			id = i,
-			midi_event = Output.types['midi'].midi_event
-		})
-	end
+	-- -- Create shared outputs
+	-- for i = 1, 16 do
+	-- 	self.output[i] = Output:new({
+	-- 		id = i,
+	-- 		midi_event = Output.types['midi'].midi_event
+	-- 	})
+	-- end
 	
 	
-	for i = 1, 2 do
-		self.crow_out[i] = Output:new({
-			id = i,
-			midi_event = Output.types['crow'].midi_event
-		})
-	end
+	-- for i = 1, 2 do
+	-- 	self.crow_out[i] = Output:new({
+	-- 		id = i,
+	-- 		midi_event = Output.types['crow'].midi_event
+	-- 	})
+	-- end
   
-	for i = 0, 3 do 
-		self.scale[i] = Scale:new({id = i})
-	end
+	-- for i = 0, 3 do 
+	-- 	self.scale[i] = Scale:new({id = i})
+	-- end
 
 	-- Create the tracks
 	for i = 1, 16 do
@@ -152,10 +148,9 @@ function App:init()
 	end
 
 	
-
+--[[
 
 	-- Track components are instantiated with parameter actions
-	params:default()
 
 	-- Create the modes
 	self.midi_grid.event = function(msg)
@@ -247,7 +242,7 @@ function App:init()
 	
 	self.grid:event({x=1,y=1, state = true})
 
-	
+	]]
 end -- end App:init
 
 -- Start playback

@@ -9,7 +9,6 @@ Output.name = 'output'
 
 function Output:set(o)
     self.__base.set(self, o) -- call the base set method first    
-    self.note_on = {}
 end
 
 Output.options = {'midi','crow'}
@@ -27,9 +26,9 @@ Output.types['midi'] = {
             track.active = true
         end
 
-        if App.mode[App.current_mode] then
-            App.mode[App.current_mode]:enable()
-        end
+        -- if App.mode[App.current_mode] then
+        --     App.mode[App.current_mode]:enable()
+        -- end
     end,
     midi_event = function(s,data, track)
         if data ~= nil then
@@ -41,8 +40,7 @@ Output.types['midi'] = {
             
             send.ch = track.midi_out
 
-
-            App.midi_out:send(send)
+            -- App.midi_out:send(send)
         end
         return data
     end
@@ -59,14 +57,14 @@ Output.types['crow'] = {
         track.crow_out = d
         track.active = true
 
-        if track.output_type == 'crow' then
-            track.output = App.crow_out[d]
-            track:build_chain()
-        end
+        -- if track.output_type == 'crow' then
+        --     track.output = App.crow_out[d]
+        --     track:build_chain()
+        -- end
         
-        if App.mode[App.current_mode] then
-            App.mode[App.current_mode]:enable()
-        end
+        -- if App.mode[App.current_mode] then
+        --     App.mode[App.current_mode]:enable()
+        -- end
     end,
     midi_event = function(s,data, track)
         if data ~= nil and data.note ~= nil then

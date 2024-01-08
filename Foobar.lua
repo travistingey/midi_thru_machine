@@ -8,19 +8,33 @@ script_name = 'Foobar'
 path_name = script_name .. '/lib/'
 
 local utilities = require(path_name .. 'utilities')
- App = require(path_name .. 'app')
+App = require(path_name .. 'app')
 
 ------------------------------------------------------------------------------
 function init()
+
+	
 	App:init()
+	-- Transport events triggered from MIDI In device
+	
+	-- Create Objects
+
+	-- Create the tracks
+	
+	-- Load Data
+	
+	-- Connect Devices
+	
+	-- Bind Events
+
 end -- end Init
 
 function enc(e, d) --------------- enc() is automatically called by norns
-	App:handle_enc(e,d)
+	-- App:handle_enc(e,d)
 end
 
 function key(k, z) ------------------ key() is automatically called by norns
-	App:handle_key(k,z)
+	-- App:handle_key(k,z)
 end
 
 function redraw_clock() ----- a clock that draws space
@@ -90,28 +104,33 @@ function redraw() -------------- redraw() is automatically called by norns
 	screen.font_size(font.size)
 	screen.level(15) ------------- max
 
-	App.draw()
+	--App.draw()
 	
 	screen.update()
 end
 
 function r() ----------------------------- execute r() in the repl to quickly rerun this script
 
-	for i=1,16 do
-		if App.track[i].output then
-		App.track[i].output:kill()
-		else
-			print('Track ' .. i .. ' has no output when trying to run r()')
-		end
-	end
+	-- for i=1,16 do
+	-- 	if App.track[i].output then
+	-- 	App.track[i].output:kill()
+	-- 	else
+	-- 		print('Track ' .. i .. ' has no output when trying to run r()')
+	-- 	end
+	-- end
 	
 	utilities.unrequire(path_name .. 'app')
 	utilities.unrequire(path_name .. 'track')
-	utilities.unrequire(path_name .. 'trackcomponent')
-	utilities.unrequire(path_name .. 'input')
-	utilities.unrequire(path_name .. 'output')
 	utilities.unrequire(path_name .. 'grid')
 	utilities.unrequire(path_name .. 'mode')
+
+	utilities.unrequire(path_name .. 'trackcomponent')
+	utilities.unrequire(path_name .. 'components/input')
+	utilities.unrequire(path_name .. 'components/seq')
+	utilities.unrequire(path_name .. 'components/mute')
+	utilities.unrequire(path_name .. 'components/scale')
+	utilities.unrequire(path_name .. 'components/output')
+
 	utilities.unrequire(path_name .. 'modecomponent')
 	utilities.unrequire(path_name .. 'modes/mutegrid')
 	utilities.unrequire(path_name .. 'modes/allclips')
@@ -120,9 +139,7 @@ function r() ----------------------------- execute r() in the repl to quickly re
 	utilities.unrequire(path_name .. 'modes/seqclip')
 	utilities.unrequire(path_name .. 'modes/scalegrid')
 	utilities.unrequire(path_name .. 'modes/notegrid')
-	utilities.unrequire(path_name .. 'seq')
-	utilities.unrequire(path_name .. 'mute')
-	utilities.unrequire(path_name .. 'scale')
+	
 	utilities.unrequire(path_name .. 'musicutil-extended')
 	utilities.unrequire(path_name .. 'utilities')
 	utilities.unrequire(path_name .. 'bitwise')

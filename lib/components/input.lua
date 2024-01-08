@@ -16,8 +16,6 @@ function Input:set(o)
     end
 end
 
-
-
 function Input.set_midi_trigger(s, data, process)
     if s.track.step == 0 and data.ch == s.track.midi_in and data.note == s.track.trigger then
         if data.type == 'note_on' then
@@ -88,17 +86,16 @@ end
 
 
 Input.options = {'midi','crow' ,'arpeggio','random','bitwise'} -- {...'crow', 'bitwise', 'euclidean'}
-Input.params = {'midi_in','trigger','crow_in','note_range_upper','note_range_lower','exclude_trigger'} -- Update this list to dynamically show/hide Track params based on Input type
+Input.params = {'midi_in','trigger','crow_in','note_range_upper','note_range_lower','exclude_trigger','arp','note_range','step','reset_step','chance','voice','step_length'} -- Update this list to dynamically show/hide Track params based on Input type
 
 Input.types = {}
 
 -- MIDI Input
-
+-- Note: Set actions are called from the load_component function.
 Input.types['midi'] = {
-    props = {'midi_in','channel_mute','note_range_upper','note_range_lower'},
+    props = {'midi_in', 'note_range_upper','note_range_lower'},
     set_action = function(s,track)
-        params:set('track_' .. track.id .. '_voice',1) -- polyphonic
-
+        -- params:set('track_' .. track.id .. '_voice',1) -- polyphonic
         track.triggered = false
     end,
     midi_event = function(s, data)
@@ -128,7 +125,6 @@ end
 Input.types['crow'] = {
     props = {'midi_in','trigger','exclude_trigger'},
     set_action = function(s, track)
-        print('crow set bitches')
         if track.output ~= nil then track.output:kill() end
             
             track.crow_out = d
