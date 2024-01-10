@@ -7,7 +7,7 @@ function ModeComponent:new(o)
     self.__index = self
 
     -- common functionality here
-    self:set(o)
+    self.set(o,o)
 
     return o
 end
@@ -22,7 +22,7 @@ function ModeComponent:set(o)
     o.register = {'on_save'}
     ]]
     
-    o.register = o.register or {}
+    self.register = o.register or {}
 end
 
 function ModeComponent:set_track(id)

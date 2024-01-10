@@ -20,40 +20,6 @@ function Scale:set(o)
 	o.scale_select = o.scale_select or 0
 	o.reset_latch = false
 	o.latch_notes = {}
-	
-	-- Keyboard for 8x2 grid moving top left to bottom right
-	o.index_map = { 
-		[9] = {note = 0, name = 'C' },
-		[2] = {note = 1, name = 'C#'  },
-		[10] = {note = 2, name = 'D' },
-		[3] = {note = 3, name = 'D#' },
-		[11] = {note = 4, name = 'E' },
-		[12] = {note = 5, name = 'F' },
-		[5] = {note = 6, name = 'F#' },
-		[13] = {note = 7, name = 'G' },
-		[6] = {note = 8, name = 'G#' },
-		[14] = {note = 9, name = 'A' },
-		[7] = {note = 10,  name = 'A#' },
-		[15] = {note = 11, name = 'B' },
-		[16] = {note = 0, name = 'C' }
-	}
-  
-	o.note_map = {
-		[0] = { index = 9, name = 'C' },
-		[1] = { index = 2, name = 'C#' },
-		[2] = { index = 10, name = 'D' },
-		[3] = { index = 3, name = 'D#' },
-		[4] = { index = 11, name = 'E' },
-		[5] = { index = 12, name = 'F' },
-		[6] = { index = 5, name = 'F#' },
-		[7] = { index = 13, name = 'G' },
-		[8] = { index = 6, name = 'G#' },
-		[9] = { index = 14, name = 'A' },
-		[10] = { index = 7, name = 'A#' },
-		[11] = { index = 15, name = 'B' },
-		[12] = { index = 16, name = 'C' }
-	}
-	
 end
 
 
@@ -211,18 +177,23 @@ function Scale:follow_scale(notes)
 	end
 end
 
+function Scale:transport_event(data,track)
+	if data.type == 'start' then
+		self.reset_latch = false
+	end
+end
 
 function Scale:midi_event(data, track)
     local root = self.root
     
     if data.note then
 		if self.follow_method == 4  and (data.type == 'note_on' or data.type == 'note_off') then
-			self:follow_scale(self.note_on)
+			self:follow_scale(track.note_on)
 			return data
 		elseif self.follow_method == 5 and (data.type == 'note_on' or data.type == 'note_off') then
 			local count = 0
 			
-			for n in pairs(self.note_on) do 
+			for n in pairs(track.note_on) do 
 				count = count + 1
 			end
 

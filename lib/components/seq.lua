@@ -227,20 +227,20 @@ end
 
 -- Save values to bank
 function Seq:save_bank(id, save_current)
+	local track = track
+
 	self.playing = true
-	for note,event in pairs(self.note_on) do
+	for note,event in pairs(track.note_on) do
 		local off = {
 			note = event.note,
 			type = 'note_off',
 			vel = event.vel,
-			ch = self.track.midi_out,
+			ch = track.midi_out,
 		}
 
-		self.track:send(off)
+		track:hande_note(off, 'send')
 		self:record_event(off)
 	end
-
-	self.note_on = {}
 
 	if not save_current then
 		self.value = self.buffer
@@ -318,11 +318,11 @@ end
 
 -------------------------
 -- Transport process chain
-function Seq:transport_event(data)
+function Seq:transport_event(data, track)
 	-- Tick based sequencer
 
 	if data.type == 'start' then
-		self.note_on = {}	
+
 		self.tick = 0
 		self.step = self.length
 		
@@ -331,7 +331,7 @@ function Seq:transport_event(data)
 		end
 	elseif data.type == 'stop' then
 
-		for i,c in pairs(self.note_on) do
+		for i,c in pairs(track.note_on) do
 			-- send off
 			local off = {
 				type = 'note_off',
@@ -339,14 +339,14 @@ function Seq:transport_event(data)
 				vel = c.vel,
 				ch = c.ch
 			}
-			self.track:send(off)
+			print('line ' .. 342)
+			track:handle_note(off,'send')
 
 			if self.recording then
 				self:record_event(off)
 			end
 		end
 		
-		self.note_on = {}
 		if self.recording then
 			self:save_bank(self.current_bank)
 			self:load_bank(self.current_bank)
@@ -354,7 +354,7 @@ function Seq:transport_event(data)
 
 		self.recording = false
 		self.armed = false
-		self:clip_set_grid()
+		
 	elseif data.type == 'clock' then
 		
 		self.tick = self.tick + 1
@@ -380,24 +380,23 @@ function Seq:transport_event(data)
   						if c.offset > 0 then
   				    		clock.sync(c.offset)
   						end
-  								
+  						print('line ' .. 387)		
   						-- manage note on/off
   						-- if bouncing a track, record sequence to buffer if note is not muted
-  						if c.type == 'note_on' and  self.note_on[c.note] == nil then
-  							self.note_on[c.note] = c
+  						if c.type == 'note_on' and  track.note_on[c.note] == nil then
+  							track:handle_note(c,'send')
   							
-  							if self.recording and self.bounce and not self.track.mute.state[c.note] then
+  							if self.recording and self.bounce and not track.mute.state[c.note] then
   								self:record_event(c)
   					    	end
   					  
-  							self.track:send(c)	
-  						elseif c.type == 'note_off' and self.note_on[c.note] ~= nil then
+  							track:send(c)	
+  						elseif c.type == 'note_off' and track.note_on[c.note] ~= nil then
   							if self.recording and self.bounce then
   								self:record_event(c)
   							end
-  						  
-  							self.note_on[c.note] = nil
-  							self.track:send(c)	
+							  print('line ' .. 399)
+  							track:handle_note(c,'send')	
   						end
   					end)
 					end
@@ -433,46 +432,37 @@ end
 
 
 -- Midi process chain
-function Seq:midi_event(data)
+function Seq:midi_event(data, track)
 	if self.recording then
         -- process note_off events when a note_on occurs OR any note_on/note_off event that isn't muted 
 		
-		if self.track.triggered then
-			if not self.track.mute.state[self.track.trigger] or (data.type == 'note_off' and self.note_on[data.note] ~= nil)  then
-				if self.bounce and self.track.midi_thru then
+		if track.triggered then
+			if not track.mute.state[track.trigger] or (data.type == 'note_off' and track.note_on[data.note] ~= nil)  then
+				if self.bounce and track.midi_thru then
 					self:record_event(data)
 				elseif not self.bounce then
 					self:record_event(data)
 				end
 			end
-		elseif(data.type == 'note_off' and self.note_on[data.note] ~= nil) or not (data.note and self.track.mute.state[data.note])  then
+		elseif(data.type == 'note_off' and track.note_on[data.note] ~= nil) or not (data.note and track.mute.state[data.note])  then
 			self:record_event(data)
 		end
     
 	end
  
  
-	if not self.playing or self.track.midi_thru then
-		if self.track.mono and data.type == 'note_on' then
-			for i,e in pairs(self.note_on) do
+	if not self.playing or track.midi_thru then
+		if track.mono and data.type == 'note_on' then
+			for i,e in pairs(track.note_on) do
 				local off = {
 					type = 'note_off',
 					note = e.note,
 					vel = e.vel,
 					ch = e.ch,
 				}
-				self.note_on = {}
-				self.track:send(off)
+				print('Line ' .. 464)
+				track:handle_note(off, 'send')
 			end
-		elseif self.note_on[data.note] ~= nil then
-			local off = {
-				type = 'note_off',
-				note = data.note,
-				vel = data.vel,
-				ch = data.ch,
-			}
-			self.note_on[data.note] = nil
-			self.track:send(off)
 		end
 	
 		return data

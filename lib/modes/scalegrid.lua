@@ -10,9 +10,9 @@ ScaleGrid.name = 'Mode Name'
 function ScaleGrid:set(o)
 	self.__base.set(self, o) -- call the base set method first   
 
-   	o.component = 'scale'
+   	self.component = 'scale'
 	
-    o.grid = Grid:new({
+    self.grid = Grid:new({
         name = 'Scale ' .. o.id,
         grid_start = {x=1,y=2},
         grid_end = {x=8,y=1},
@@ -21,7 +21,39 @@ function ScaleGrid:set(o)
         offset = o.offset or {x=0,y=0},
         midi = App.midi_grid
     })
+	
+	-- Keyboard for 8x2 grid moving top left to bottom right
+	self.index_map = { 
+		[9] = {note = 0, name = 'C' },
+		[2] = {note = 1, name = 'C#'  },
+		[10] = {note = 2, name = 'D' },
+		[3] = {note = 3, name = 'D#' },
+		[11] = {note = 4, name = 'E' },
+		[12] = {note = 5, name = 'F' },
+		[5] = {note = 6, name = 'F#' },
+		[13] = {note = 7, name = 'G' },
+		[6] = {note = 8, name = 'G#' },
+		[14] = {note = 9, name = 'A' },
+		[7] = {note = 10,  name = 'A#' },
+		[15] = {note = 11, name = 'B' },
+		[16] = {note = 0, name = 'C' }
+	}
   
+	self.note_map = {
+		[0] = { index = 9, name = 'C' },
+		[1] = { index = 2, name = 'C#' },
+		[2] = { index = 10, name = 'D' },
+		[3] = { index = 3, name = 'D#' },
+		[4] = { index = 11, name = 'E' },
+		[5] = { index = 12, name = 'F' },
+		[6] = { index = 5, name = 'F#' },
+		[7] = { index = 13, name = 'G' },
+		[8] = { index = 6, name = 'G#' },
+		[9] = { index = 14, name = 'A' },
+		[10] = { index = 7, name = 'A#' },
+		[11] = { index = 15, name = 'B' },
+		[12] = { index = 16, name = 'C' }
+	}
 end
 
 function ScaleGrid:get_component()

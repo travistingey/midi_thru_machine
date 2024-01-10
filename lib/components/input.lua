@@ -98,15 +98,19 @@ Input.types['midi'] = {
         -- params:set('track_' .. track.id .. '_voice',1) -- polyphonic
         track.triggered = false
     end,
-    midi_event = function(s, data)
-        if data.ch == s.track.midi_in then
-            for i = 1, #App.track do
-                local track = App.track[i]
-                if i ~= s.track.id and track.exclude_trigger and track.midi_in == s.track.midi_in and track.trigger == data.note then
+    midi_event = function(s, data, track)
+        if data.ch == track.midi_in then
+            
+            -- Exclude notes that are being handled by triggered tracks
+            for i = 1, #App.track do 
+                local other = App.track[i]
+                if track.id ~= other.id and other.triggered and other.trigger == data.note then
                     return
                 end
             end
-            
+
+            track:handle_note(data,'send_input')
+
             return data
             
         end

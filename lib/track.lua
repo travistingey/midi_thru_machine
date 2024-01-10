@@ -13,8 +13,6 @@ local Track = {}
 -- Constructor
 function Track:new(o)
 	o = o or {}
-	
-	self.note_on = {}
 
 	if o.id == nil then
 		error("Track:new() missing required 'id' parameter.")
@@ -42,7 +40,8 @@ end
 	Track properties must match parameter values 1 to 1 in order for update to manage values.
 ]]
 function Track:set(o)
-	
+	self.note_on = {}
+
 	self.active = o.active or false
 	self.mono = o.mono or false
 	self.exclude_trigger = o.exclude_trigger or false
@@ -391,6 +390,11 @@ end
 function Track:chain_components(components, process_name)
 	local track = self
 	return function(s, input)
+
+		if track.debug then
+			print(process_name .. ' on track ' .. track.id)
+		end
+		
 		if track.active then
 			local output = input
 			for i, trackcomponent in ipairs(components) do
@@ -400,6 +404,9 @@ function Track:chain_components(components, process_name)
 			end
 			return output
 		end
+
+		
+
 	end
 end
 
@@ -408,6 +415,7 @@ function Track:build_chain()
 	--[[]]
 	local pre_scale =  {self.input, self.seq, self.scale, self.mute, self.output}     
 	local post_scale = {self.input, self.scale, self.seq, self.mute, self.output} 
+	local test = {self.input,self.output}
 	local send_input = {self.seq, self.scale, self.mute, self.output} 
 	local send =  {self.mute, self.output}
 
@@ -446,13 +454,11 @@ end
 
 function Track:handle_note(data, chain) -- 'send', 'send_input', 'send_output' etc
 	if data ~= nil then
-		print('handling notes')
-
 		if data.type == 'note_on' then    
 			
 			-- Any incoming notes already on will have an off message sent
 			if self.note_on[data.note] ~= nil then
-				print('incoming note is occupied during on')
+				
 				local last =  self.note_on[data.note]
 				local off = {
 					type = 'note_off',
@@ -461,12 +467,11 @@ function Track:handle_note(data, chain) -- 'send', 'send_input', 'send_output' e
 					ch = last.ch,
 				}
 
-
 				self.note_on[last.id] = nil
 				self.note_on[last.note] = nil
 				
 				if chain ~= nil then
-					track[chain](track, off)
+					self[chain](self, off)
 				else
 					print('WARNING: No chain was specified for :hande_note on track ' .. self.id)
 				end
@@ -480,9 +485,7 @@ function Track:handle_note(data, chain) -- 'send', 'send_input', 'send_output' e
 
 		elseif data.type == 'note_off' then
 			local off = data
-
 			if self.note_on[data.note] ~= nil then
-				print('incoming note is occupied during off')
 				local last =  self.note_on[data.note]
 				local off = {
 					type = 'note_off',
@@ -491,23 +494,17 @@ function Track:handle_note(data, chain) -- 'send', 'send_input', 'send_output' e
 					ch = last.ch,
 				}
 
-
 				self.note_on[last.id] = nil
 				self.note_on[last.note] = nil
-			end
 
-			if chain ~= nil then
-				self[chain](self, off)
-			else
-				print('WARNING: No chain was specified for :hande_note on track ' .. self.id )
+				if chain ~= nil then
+					self[chain](self, off)
+				else
+					print('WARNING: No chain was specified for :hande_note on track ' .. self.id )
+				end
 			end
 		end
-		local count = 0
-		for n,v in pairs(self.note_on) do
-			print(n)
-			count = count + 1
-		end
-		print(count  .. ' notes are on' )
+		
 	end
 end
 

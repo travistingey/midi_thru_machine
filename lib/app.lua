@@ -57,15 +57,19 @@ function App:init()
 	
 	params:add_group('Devices',4)
 	params:add_option("midi_in", "MIDI In",midi_device_names,1)
-	params:add_option("midi_out", "MIDI Out",midi_device_names,6)
+	params:add_option("midi_out", "MIDI Out",midi_device_names,2)
 	params:add_option("midi_grid", "Grid",midi_device_names,3)
 	params:add_trigger('panic', "Panic")
 	params:set_action('panic', function()
 		App:panic()
 	end)
 
-	params:set_action("midi_in", function(x) App.midi_in = midi.connect(x) end)
-	params:set_action("midi_out", function(x) App.midi_out = midi.connect(x) end)
+	params:set_action("midi_in", function(x)
+		App:register_midi_in(x)
+	end)
+
+	params:set_action("midi_out", function(x)
+		App.midi_out = midi.connect(x) end)
 	params:set_action("midi_grid", function(x)
 		App.midi_grid = midi.connect(x)
 		self.midi_grid:send({240,0,32,41,2,13,0,127,247}) -- Set to Launchpad to Programmer Mode
@@ -75,38 +79,18 @@ function App:init()
 	
 
 	
-	params:add_separator('scales','Scales')
-	for i = 0, 4 do
-		Scale:register_params(i)
-	end
+	-- params:add_separator('scales','Scales')
+	-- for i = 0, 4 do
+	-- 	Scale:register_params(i)
+	-- end
 	
 	
 	-- Instantiate
-	self.midi_in = midi.connect(1)
-	self.midi_out = midi.connect(6)
-	self.midi_grid = midi.connect(3)
+	self.midi_in = midi.connect(params:get("midi_in"))
+	self.midi_out = midi.connect(params:get("midi_out"))
+	self.midi_grid = midi.connect(params:get("midi_grid"))
 	
-	self.midi_grid:send({240,0,32,41,2,13,0,127,247}) -- Set to Launchpad to Programmer Mode
-
-	-- Set up transport event handler for incoming MIDI from the Transport device
-    self.midi_in.event = function(msg)
-		local data = midi.to_msg(msg)
-
-		--external midi transport
-		if params:get('clock_source') > 1 and (data.type == "start" or data.type == "continue" or data.type == "stop") then
-			App:on_transport(data)
-		end
-
-		if data.type == 'clock'then
-			App:on_tick()
-		end
-		
-		if not (data.type == "start" or data.type == "continue" or data.type == "stop" or data.type == "clock") then
-			App:on_midi(data)			
-		end
-		
-	end
-
+	params:bang()
 
 	-- Crow Setup
 	self.crow_in = {{volts = 0},{volts = 0}}
@@ -422,6 +406,56 @@ function App:panic()
 			end
 		end
 	end)
+end
+
+function App:register_midi_in(n)
+	-- Note: We must change existing events to nil to break the event handling.
+	-- If the App.midi_in pointer is changed, the event will still be bound to the connected device in memory.
+	-- So much confusion ensues when old devices are still bound, wreaking havoc like ghosts.
+
+	self.midi_in.event = nil
+		
+	self.midi_in = midi.connect(n)
+
+	self.midi_in.event = function(msg)
+		local data = midi.to_msg(msg)
+		
+		if self.debug then
+			print('Incoming MIDI')
+			tab.print(data)
+		end
+
+		--external midi transport
+		if params:get('clock_source') > 1 and (data.type == "start" or data.type == "continue" or data.type == "stop") then
+			App:on_transport(data)
+		end
+
+		if data.type == 'clock'then
+			App:on_tick()
+		end
+		
+		if not (data.type == "start" or data.type == "continue" or data.type == "stop" or data.type == "clock") then
+			App:on_midi(data)
+		end
+		
+	end
+end
+
+function App:register_midi_out(n)
+	self.midi_out.event = nil
+	self.midi_out = midi.connect(n)
+end
+
+function App:register_midi_grid(n)
+	self.midi_grid.event = nil
+	self.midi_grid = midi.connect(n)
+
+	self.midi_grid.event = function(msg)
+		local mode = self.mode[self.current_mode]
+		self.grid:process(msg)
+		mode.grid:process(msg)
+	end
+
 end
 
 return App

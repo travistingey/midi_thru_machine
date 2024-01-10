@@ -40,7 +40,7 @@ Output.types['midi'] = {
             
             send.ch = track.midi_out
 
-            -- App.midi_out:send(send)
+            App.midi_out:send(send)
         end
         return data
     end
