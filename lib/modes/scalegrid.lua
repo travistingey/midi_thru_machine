@@ -118,7 +118,7 @@ function ScaleGrid:set_grid(scale)
   local intervals =  musicutil.bits_to_intervals(scale.bits)
 		local root = scale.root
 		
-		for i, v in pairs(scale.note_map) do
+		for i, v in pairs(self.note_map) do
 			local l = grid:index_to_grid(v.index)
 			grid.led[l.x][l.y] = {5,5,5}
 		end
@@ -126,7 +126,7 @@ function ScaleGrid:set_grid(scale)
 		if #intervals > 0 then
 			for i, v in pairs(intervals) do
 				local n = (24 + v + root) % 12
-				local c = scale.note_map[n]
+				local c = self.note_map[n]
 				local l = grid:index_to_grid(c.index)
 		
 				if (n == root % 12 ) then

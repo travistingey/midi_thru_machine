@@ -332,7 +332,6 @@ Input.types['bitwise'] = {
         track.chance = params:get('track_' .. track.id .. '_chance')
         track.step_length = params:get('track_' .. track.id .. '_step_length')
 
-        print(track.step_length)
         s.note = Bitwise:new({
             chance = track.chance,
             format = function(value) 

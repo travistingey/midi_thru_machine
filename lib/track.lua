@@ -143,7 +143,9 @@ function Track:set(o)
 			return v .. ' steps'
 		end
 	end)
-
+	
+	self.step_count = 0
+	
 	params:set_action(track .. 'reset_step',function(d)
 		self.reset_step = d
 		self.reset_tick = 1
@@ -376,8 +378,6 @@ function Track:load_component(component)
 			for i=1, #type.props do
 				params:show('track_' .. self.id .. '_' .. type.props[i])
 			end
-			
-			_menu.rebuild_params() -- Refresh params menu
 
 		end
 	else
@@ -457,8 +457,12 @@ function Track:handle_note(data, chain) -- 'send', 'send_input', 'send_output' e
 		if data.type == 'note_on' then    
 			
 			-- Any incoming notes already on will have an off message sent
-			if self.note_on[data.note] ~= nil then
+			if data.id ~= nil then
+				-- This note has already been processed
 				
+				print('note is on ' .. data.note .. ' and id exists ' .. data.id)
+			elseif self.note_on[data.note] ~= nil then
+				-- the same note_on event came but wasn't processed
 				local last =  self.note_on[data.note]
 				local off = {
 					type = 'note_off',
@@ -468,20 +472,15 @@ function Track:handle_note(data, chain) -- 'send', 'send_input', 'send_output' e
 				}
 
 				self.note_on[last.id] = nil
-				self.note_on[last.note] = nil
 				
 				if chain ~= nil then
+					print(last.id .. 'off sent during note on')
 					self[chain](self, off)
-				else
-					print('WARNING: No chain was specified for :hande_note on track ' .. self.id)
 				end
 			end
 
-			if data.id == nil then
-				data.id = data.note -- id is equal to the incoming note to track note off events for quantized notes
-			end
-
-			self.note_on[data.note] = data
+			data.id = data.note -- id is equal to the incoming note to track note off events for quantized notes
+			self.note_on[data.id] = data
 
 		elseif data.type == 'note_off' then
 			local off = data
@@ -495,16 +494,16 @@ function Track:handle_note(data, chain) -- 'send', 'send_input', 'send_output' e
 				}
 
 				self.note_on[last.id] = nil
-				self.note_on[last.note] = nil
 
-				if chain ~= nil then
-					self[chain](self, off)
-				else
-					print('WARNING: No chain was specified for :hande_note on track ' .. self.id )
-				end
+				data.note = last.note
 			end
 		end
-		
+		print('OUTPUT: ' .. data.type .. ' ' .. (data.note) )
+		print('track.note_on')
+		for n,v in pairs(self.note_on) do
+			print('[' ..n .. '] : note ' .. v.note)
+		end
+		print('---------------------------------------------')
 	end
 end
 

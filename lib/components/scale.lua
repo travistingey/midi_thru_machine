@@ -218,10 +218,24 @@ function Scale:midi_event(data, track)
 
 			if self.bits == 0 then
 				return data
-			else
+			elseif data.type == 'note_on' then
 				data.note = musicutil.snap_note_to_array(data.note, self.notes) + root
 				
+
+
 				return data
+			else
+				local send = true
+				for n,v in pairs(track.note_on) do
+					if v.note == data.note then
+						-- if we find a note off
+						print('note cancel')
+						send = false
+					end
+				end
+				if send then
+					return data
+				end
 			end
 		end
   	else
