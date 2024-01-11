@@ -133,6 +133,7 @@ function Track:set(o)
 
 	-- Reset Step
 	self.reset_step = o.reset_step or 0
+	self.reset_tick = o.reset_tick or 1
 	params:add_number(track .. 'reset_step','Reset step',0,64,0, function(param) 
 		local v = param:get()
 		if v == 0 then
@@ -184,7 +185,7 @@ function Track:set(o)
 		   return ch
 		end
 	end)
-
+ 
 	params:set_action(track .. 'scale_select', function(d)
 		self:kill()
 		local last = self.scale_select
@@ -369,7 +370,7 @@ function Track:load_component(component)
 
 		self[component.name] = component:new(props)
 
-		-- Dynamically show and hide component properties
+		--[[ Needs validating: Dynamically show and hide component properties
 		if component.params ~= nil then
 			for i=1, #component.params do
 				params:hide('track_' .. self.id .. '_' .. component.params[i])
@@ -379,7 +380,7 @@ function Track:load_component(component)
 				params:show('track_' .. self.id .. '_' .. type.props[i])
 			end
 
-		end
+		end ]]
 	else
 		self[component.name] = component:new(props)
 	end
@@ -498,12 +499,7 @@ function Track:handle_note(data, chain) -- 'send', 'send_input', 'send_output' e
 				data.note = last.note
 			end
 		end
-		print('OUTPUT: ' .. data.type .. ' ' .. (data.note) )
-		print('track.note_on')
-		for n,v in pairs(self.note_on) do
-			print('[' ..n .. '] : note ' .. v.note)
-		end
-		print('---------------------------------------------')
+
 	end
 end
 

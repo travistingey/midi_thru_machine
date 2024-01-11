@@ -1,4 +1,5 @@
 local path_name = 'Foobar/lib/'
+
 local utilities = require(path_name .. 'utilities')
 local Input = require(path_name .. 'components/input')
 local Seq = require(path_name .. 'components/seq')
@@ -38,12 +39,11 @@ function Mode:set(o)
 		active = false,
         
         process = function(s,msg)
-        
-        for i,g in ipairs(o.grid.subgrids) do
-					g.active = true
-					g:process(msg)
-				end
-            
+            for i,g in ipairs(o.grid.subgrids) do
+                g.active = true
+                g:process(msg)
+            end
+    
 
             for i,c in ipairs(o.components) do
                 c.grid:process(msg)
@@ -120,8 +120,6 @@ end
 function Mode:register_component(c)
     if self.components == nil then self.components = {} end
     self.components[ #self.components + 1 ] = c
-    
-    
 end
 
 function Mode:register_params(o)

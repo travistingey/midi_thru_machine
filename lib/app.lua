@@ -1,3 +1,6 @@
+-- Define a new class for Control
+local App = {}
+
 local path_name = 'Foobar/lib/'
 local Grid = require(path_name .. 'grid')
 local Track = require(path_name .. 'track')
@@ -5,12 +8,9 @@ local Scale = require(path_name .. 'components/scale')
 local Output = require(path_name .. 'components/output')
 local Mode = require(path_name .. 'mode')
 
-
-
 local musicutil = require(path_name .. 'musicutil-extended')
 
--- Define a new class for Control
-local App = {}
+
 
 function App:init()
 	-- Model
@@ -44,61 +44,43 @@ function App:init()
 	self.alt_down = false
 	self.key_down = 0
 
-	local midi_device = {} -- container for connected midi devices
-  	local midi_device_names = {}
+	self.midi_device = {} -- container for connected midi devices
+	local midi_device = self.midi_device
+  	self.midi_device_names = {}
 
 	for i = 1,#midi.vports do -- query all ports
 		midi_device[i] = midi.connect(i) -- connect each device
 		table.insert( -- register its name:
-		  midi_device_names, -- table to insert to
+		  self.midi_device_names, -- table to insert to
 		  ""..util.trim_string_to_width(midi_device[i].name,70) -- value to insert
 		)
 	  end
-	
-	params:add_group('Devices',4)
-	params:add_option("midi_in", "MIDI In",midi_device_names,1)
-	params:add_option("midi_out", "MIDI Out",midi_device_names,2)
-	params:add_option("midi_grid", "Grid",midi_device_names,3)
-	params:add_trigger('panic', "Panic")
-	params:set_action('panic', function()
-		App:panic()
-	end)
-
-	params:set_action("midi_in", function(x)
-		App:register_midi_in(x)
-	end)
-
-	params:set_action("midi_out", function(x)
-		App.midi_out = midi.connect(x) end)
-	params:set_action("midi_grid", function(x)
-		App.midi_grid = midi.connect(x)
-		self.midi_grid:send({240,0,32,41,2,13,0,127,247}) -- Set to Launchpad to Programmer Mode
-	end)
 	
 	
 	
 	
 	-- Instantiate
-	self.midi_in = midi.connect(params:get("midi_in"))
-	self.midi_out = midi.connect(params:get("midi_out"))
-	self.midi_grid = midi.connect(params:get("midi_grid"))
-	
-	params:bang()
+	self.midi_in = {}
+	self.midi_out = {}
+	self.midi_grid = {} -- NOTE: must use Launch Pad Device 2
 
 	-- Crow Setup
-	self.crow_in = {{volts = 0},{volts = 0}}
-	self.crow_out = {}
+	self.crow = {input = {},output = {}}
 	
 	-- Set Crow device input queries and stream handlers
 	crow.send("input[1].query = function() stream_handler(1, input[1].volts) end")
 	crow.send("input[2].query = function() stream_handler(2, input[2].volts) end")
 	
-	crow.input[1].stream = function (v) self.crow_in[1].volts = v end
-	crow.input[2].stream = function (v) self.crow_in[2].volts = v end
+	crow.input[1].stream = function (v) self.crow.input[1] = v end
+	crow.input[2].stream = function (v) self.crow.input[2] = v end
 	
 	crow.input[1].mode('none')
 	crow.input[2].mode('none')
-		
+
+	-- Register parameters and instatiate classes
+	-- App classes register params themselves during instatiation
+	App:register_params()
+
 	-- Create the tracks
 	params:add_separator('tracks','Tracks')
 	for i = 1, 16 do
@@ -111,99 +93,12 @@ function App:init()
 		self.scale[i] = Scale:new({id = i})
 		Scale:register_params(i)
 	end
-	
 
-
-	-- Create the modes
-	self.midi_grid.event = function(msg)
-		local mode = self.mode[self.current_mode]
-		self.grid:process(msg)
-		mode.grid:process(msg)
-	end
-	
-
-	-- TODO: Modes required after App is instantiated. May want to fix this...
-	local AllClips = require(path_name .. 'modes/allclips') 
-	local SeqClip = require(path_name .. 'modes/seqclip') 
-	local SeqGrid = require(path_name .. 'modes/seqgrid') 
-	local ScaleGrid = require(path_name .. 'modes/scalegrid') 
-	local MuteGrid = require(path_name .. 'modes/mutegrid') 
-	local NoteGrid = require(path_name .. 'modes/notegrid') 
-
-	self.mode[1] = Mode:new({
-		components = {
-			ScaleGrid:new({id=1, offset = {x=0,y=6}}),
-			ScaleGrid:new({id=2, offset = {x=0,y=4}}),
-		  	MuteGrid:new({track=1}),
-			NoteGrid:new({track=1})
-		}
-	})
-
-	self.mode[2] = Mode:new({
-		components = {SeqGrid:new({track=1})}
-	})
-
-	self.mode[3] = Mode:new({
-		components = {
-			ScaleGrid:new({id=1, offset = {x=0,y=6}}),
-			ScaleGrid:new({id=2, offset = {x=0,y=4}}),
-			ScaleGrid:new({id=3, offset = {x=0,y=2}})
-		}
-	})
-
-	self.mode[4] = Mode:new({
-		components = {
-		  SeqClip:new({ track = 1, offset = {x=0,y=7}, active = true  }),
-		  SeqClip:new({ track = 2, offset = {x=0,y=6} }),
-		  SeqClip:new({ track = 3, offset = {x=0,y=5} }),
-		  SeqClip:new({ track = 4, offset = {x=0,y=4} }),
-		  SeqClip:new({ track = 5, offset = {x=0,y=3} }),
-		  SeqClip:new({ track = 6, offset = {x=0,y=2} }),
-		  SeqClip:new({ track = 7, offset = {x=0,y=1} }),
-		  SeqClip:new({ track = 8, offset = {x=0,y=0} })
-		},
-		on_arrow = function(s,data)
-		  if data.type == 'down' then
-		    print('down town charlie brown')
-		  end
-		end
-	}) 
-	
-	-- Create the modes
-	self.grid = Grid:new({
-		grid_start = {x=1,y=1},
-		grid_end = {x=4,y=1},
-		display_start = {x=1,y=1},
-		display_end = {x=4,y=1},
-		offset = {x=4,y=8},
-		midi = self.midi_grid,
-		event = function(s,data)
-			if data.state then
-				s:reset()
-				local mode = App.mode[App.current_mode]
-				mode.arrow_pads:reset()
-				mode.alt_pad:reset()
-				mode.row_pads:reset()
-
-				App.current_mode = s:grid_to_index(data)
-				for i = 1, #App.mode do
-					if i ~= App.current_mode then
-						App.mode[i]:disable()
-					end					
-				end
-				App.mode[App.current_mode]:enable()
-				s.led[data.x][data.y] = 1
-				s:refresh()
-			end
-		end,
-		active = true
-	})
-  
- 	self.current_mode = 1
-	self.mode[1]:enable()
-	
-	self.grid:event({x=1,y=1, state = true})
-
+	--Start your enginges!
+	App:register_midi_in(1)
+	App:register_midi_out(2)
+	App:register_midi_grid(3)
+	App:register_modes()
 	
 end -- end App:init
 
@@ -386,6 +281,31 @@ function App:panic()
 	end)
 end
 
+function App:register_params()
+
+	params:add_group('Devices',4)
+	params:add_option("midi_in", "MIDI In",self.midi_device_names,1)
+	params:add_option("midi_out", "MIDI Out",self.midi_device_names,2)
+	params:add_option("midi_grid", "Grid",self.midi_device_names,3)
+	params:add_trigger('panic', "Panic")
+	params:set_action('panic', function()
+		App:panic()
+	end)
+
+	params:set_action("midi_in", function(x)
+		App:register_midi_in(x)
+	end)
+
+	params:set_action("midi_out", function(x)
+		App:register_midi_out(x)
+
+	end)
+	params:set_action("midi_grid", function(x)
+			App:register_midi_grid(x)
+	end)
+	
+end
+
 function App:register_midi_in(n)
 	-- Note: We must change existing events to nil to break the event handling.
 	-- If the App.midi_in pointer is changed, the event will still be bound to the connected device in memory.
@@ -425,15 +345,106 @@ function App:register_midi_out(n)
 end
 
 function App:register_midi_grid(n)
+	
 	self.midi_grid.event = nil
 	self.midi_grid = midi.connect(n)
+
+	print(self.midi_grid.name)
+	self.midi_grid:send({240,0,32,41,2,13,0,127,247}) -- Set to Launchpad to Programmer Mode
+
+	
+
+end
+
+function App:register_modes()
+
+	-- Create the modes
+	self.grid = Grid:new({
+		grid_start = {x=1,y=1},
+		grid_end = {x=4,y=1},
+		display_start = {x=1,y=1},
+		display_end = {x=4,y=1},
+		offset = {x=4,y=8},
+		midi = App.midi_grid,
+		event = function(s,data)
+			print('tots')
+			if data.state then
+				s:reset()
+				local mode = App.mode[App.current_mode]
+				mode.arrow_pads:reset()
+				mode.alt_pad:reset()
+				mode.row_pads:reset()
+
+				App.current_mode = s:grid_to_index(data)
+				for i = 1, #App.mode do
+					if i ~= App.current_mode then
+						App.mode[i]:disable()
+					end					
+				end
+				App.mode[App.current_mode]:enable()
+				s.led[data.x][data.y] = 1
+				s:refresh()
+			end
+		end,
+		active = true
+	})
 
 	self.midi_grid.event = function(msg)
 		local mode = self.mode[self.current_mode]
 		self.grid:process(msg)
 		mode.grid:process(msg)
 	end
+	
+	local AllClips = require(path_name .. 'modes/allclips') 
+	local SeqClip = require(path_name .. 'modes/seqclip') 
+	local SeqGrid = require(path_name .. 'modes/seqgrid') 
+	local ScaleGrid = require(path_name .. 'modes/scalegrid') 
+	local MuteGrid = require(path_name .. 'modes/mutegrid') 
+	local NoteGrid = require(path_name .. 'modes/notegrid')
 
+
+	self.mode[1] = Mode:new({
+		components = {
+			ScaleGrid:new({id=1, offset = {x=0,y=6}}),
+			ScaleGrid:new({id=2, offset = {x=0,y=4}}),
+			MuteGrid:new({track=1}),
+			NoteGrid:new({track=1})
+		}
+	})
+
+	self.mode[2] = Mode:new({
+		components = {SeqGrid:new({track=1})}
+	})
+
+	self.mode[3] = Mode:new({
+		components = {
+			ScaleGrid:new({id=1, offset = {x=0,y=6}}),
+			ScaleGrid:new({id=2, offset = {x=0,y=4}}),
+			ScaleGrid:new({id=3, offset = {x=0,y=2}})
+		}
+	})
+
+	self.mode[4] = Mode:new({
+		components = {
+		SeqClip:new({ track = 1, offset = {x=0,y=7}, active = true  }),
+		SeqClip:new({ track = 2, offset = {x=0,y=6} }),
+		SeqClip:new({ track = 3, offset = {x=0,y=5} }),
+		SeqClip:new({ track = 4, offset = {x=0,y=4} }),
+		SeqClip:new({ track = 5, offset = {x=0,y=3} }),
+		SeqClip:new({ track = 6, offset = {x=0,y=2} }),
+		SeqClip:new({ track = 7, offset = {x=0,y=1} }),
+		SeqClip:new({ track = 8, offset = {x=0,y=0} })
+		},
+		on_arrow = function(s,data)
+			if data.type == 'down' then
+				print('down town charlie brown')
+			end
+		end
+	})
+
+	self.mode[1]:disable() --clear out the old junk
+	self.mode[1]:enable()
+	
 end
 
 return App

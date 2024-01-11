@@ -164,7 +164,7 @@ Input.types['crow'] = {
 
         local event =  Input.set_midi_trigger(s, data, function()
             crow.send('input['.. s.track.crow_in ..'].query()')
-            local note = math.floor(App.crow_in[ s.track.crow_in].volts * 12) + 60
+            local note = math.floor(App.crow.input[ s.track.crow_in] * 12) + 60
             local vel = 100
             return {type = 'note_on', note = note, vel = vel }
             

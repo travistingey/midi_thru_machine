@@ -85,8 +85,8 @@ function ScaleGrid:grid_event (scale, data)
       local grid = self.grid
     	local index = grid:grid_to_index(data)
     	
-		if(index and data.state and scale.index_map[index])then
-    		local d = scale.index_map[index]
+		if(index and data.state and self.index_map[index])then
+    		local d = self.index_map[index]
 			
     		if self.mode.alt then
     			scale:shift_scale_to_note(d.note)
