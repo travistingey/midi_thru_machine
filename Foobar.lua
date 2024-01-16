@@ -113,7 +113,7 @@ function r() ----------------------------- execute r() in the repl to quickly re
 
 	-- for i=1,16 do
 	-- 	if App.track[i].output then
-	-- 	App.track[i].output:kill()
+	-- 	App.track[i]:kill()
 	-- 	else
 	-- 		print('Track ' .. i .. ' has no output when trying to run r()')
 	-- 	end

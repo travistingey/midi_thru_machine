@@ -72,12 +72,14 @@ function Input.set_clock_trigger(s,data,process)
         local event = process(data)
         if event then
             clock.run(function()
-                s.track:send_input(event)
+                s.track:handle_note(event,'send_input')
 
                 local off = { type = 'note_off', note = event.note, vel = event.vel }
 
                 clock.sync(math.ceil(s.track.step/2)/24)
+                s.track:handle_note(off,'send_input')
                 s.track:send_input(off)
+                
             end)
         end
     end
@@ -109,8 +111,8 @@ Input.types['midi'] = {
                 end
             end
 
-            track:handle_note(data,'send_input')
-
+            track:handle_note(data,'send_input','input')
+            
             return data
             
         end
@@ -129,7 +131,7 @@ end
 Input.types['crow'] = {
     props = {'midi_in','trigger','exclude_trigger'},
     set_action = function(s, track)
-        if track.output ~= nil then track.output:kill() end
+        track:kill()
             
             track.crow_out = d
 
@@ -152,7 +154,7 @@ Input.types['crow'] = {
 
                 Input.set_clock_trigger(s, data, function()
                     crow.send('input['.. s.track.crow_in ..'].query()')
-                    local note = math.floor(App.crow_in[ s.track.crow_in].volts * 12) + 60
+                    local note = math.floor(App.crow_in[ s.track.crow_in] * 12) + 60
                     local vel = 100
                     return {type = 'note_on', note = note, vel = vel }
                 end)
@@ -170,6 +172,7 @@ Input.types['crow'] = {
             
         end)
         
+        s.track:handle_note(event,'send_input')
         return event
     end
     
@@ -185,7 +188,7 @@ Input.types['arpeggio'] = {
         Input.set_trigger(s,track)
         
         if track.scale_select == 0 then
-            params:set('track_' .. track.id .. '_scale',1)
+            params:set('track_' .. track.id .. '_scale_select',1)
         end       
     end,
     transport_event = function(s, data)     

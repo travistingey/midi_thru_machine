@@ -69,7 +69,7 @@ end
 function ScaleGrid:midi_event(scale,data)
 	-- for i = 1, 16 do
 	-- 	if App.track[i].scale_select == scale.id then
-	-- 		App.track[i].output:kill()
+	-- 		App.track[i]:kill()
 	-- 	end
 	-- end
 	
@@ -95,12 +95,7 @@ function ScaleGrid:grid_event (scale, data)
 				  local bit_flag = (1 << ((24 + d.note - scale.root) % 12) ) -- bit representation for note
     			scale:set_scale(scale.bits ~ bit_flag )
     		end
-			
-			for i = 1, 16 do
-				if App.track[i].scale_select == scale.id then
-					App.track[i].output:kill()
-				end
-			end
+
 
 			for i = 1, 3 do
 				App.scale[i]:follow_scale()

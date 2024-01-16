@@ -12,14 +12,15 @@ Scale.name = 'scale'
 function Scale:set(o)
 	self.__base.set(self, o) -- call the base set method first   
 	
-	o.grid = o.grid
-	o.root = o.root or 0
-	o.bits = o.bits or 0
-	o.follow = o.follow or 0
-	o.follow_method = o.follow_method or 1
-	o.scale_select = o.scale_select or 0
-	o.reset_latch = false
-	o.latch_notes = {}
+	self.grid = o.grid
+	self.root = o.root or 0
+	self.bits = o.bits or 0
+	self.follow = o.follow or 0
+	self.follow_method = o.follow_method or 1
+	self.scale_select = o.scale_select or 0
+	self.reset_latch = false
+	self.latch_notes = {}
+	self.intervals = o.intervals or {}
 end
 
 
@@ -167,13 +168,7 @@ function Scale:follow_scale(notes)
 		params:set(scale .. 'root', self.root, true)
 		
 		self:set_scale(s)
-		
-		for i = 1, 16 do
-			if App.track[i].scale_select == scale.id then
-				App.track[i].output:kill()
-			end
-		end
-		
+
 	end
 end
 
@@ -200,7 +195,6 @@ function Scale:midi_event(data, track)
 			if data.type == 'note_off' and count == 0 then
 				self.reset_latch = true
 			elseif data.type == 'note_on' then
-
 				if self.reset_latch then
 					self.latch_notes = {}
 					self.reset_latch = false
@@ -219,23 +213,17 @@ function Scale:midi_event(data, track)
 			if self.bits == 0 then
 				return data
 			elseif data.type == 'note_on' then
+
 				data.note = musicutil.snap_note_to_array(data.note, self.notes) + root
+				track.note_on[data.note] = data
 				
-
-
 				return data
-			else
-				local send = true
-				for n,v in pairs(track.note_on) do
-					if v.note == data.note then
-						-- if we find a note off
-						print('note cancel')
-						send = false
-					end
+			elseif data.type == 'note_off' then
+
+				if track.note_on[data.note] then
+					data.note = track.note_on[data.note].note
 				end
-				if send then
-					return data
-				end
+				return data
 			end
 		end
   	else

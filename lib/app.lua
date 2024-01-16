@@ -65,7 +65,7 @@ function App:init()
 	self.midi_grid = {} -- NOTE: must use Launch Pad Device 2
 
 	-- Crow Setup
-	self.crow = {input = {},output = {}}
+	self.crow = {input = {0,0},output = {}}
 	
 	-- Set Crow device input queries and stream handlers
 	crow.send("input[1].query = function() stream_handler(1, input[1].volts) end")
@@ -92,6 +92,15 @@ function App:init()
 	for i = 0, 4 do
 		self.scale[i] = Scale:new({id = i})
 		Scale:register_params(i)
+	end
+
+	-- Create the Outputs
+	for i = 1, 16 do
+		self.output[i] = Output:new({id = i, type='midi', channel = i })
+	end
+
+	for i = 1, 2 do
+		self.crow.output[i] = Output:new({id = i, type='crow', channel = i })
 	end
 
 	--Start your enginges!
@@ -263,9 +272,13 @@ function App:handle_key(press_fn,long_fn,alt_fn,k,z)
 end
 
 function App:panic()
+	for i = 1,4 do
+		crow.output[i].volts = 0
+	end
+	
 	clock.run(function()
 		for c = 1,16 do
-			for i = 0, 128 do
+			for i = 0, 127 do
 				
 				local off = {
 					note = i,
@@ -279,6 +292,7 @@ function App:panic()
 			end
 		end
 	end)
+	
 end
 
 function App:register_params()
@@ -349,11 +363,9 @@ function App:register_midi_grid(n)
 	self.midi_grid.event = nil
 	self.midi_grid = midi.connect(n)
 
-	print(self.midi_grid.name)
 	self.midi_grid:send({240,0,32,41,2,13,0,127,247}) -- Set to Launchpad to Programmer Mode
 
-	
-
+	self:register_modes()
 end
 
 function App:register_modes()
@@ -367,7 +379,6 @@ function App:register_modes()
 		offset = {x=4,y=8},
 		midi = App.midi_grid,
 		event = function(s,data)
-			print('tots')
 			if data.state then
 				s:reset()
 				local mode = App.mode[App.current_mode]

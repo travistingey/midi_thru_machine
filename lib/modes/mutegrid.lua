@@ -141,19 +141,20 @@ function MuteGrid:grid_event (mute, data)
   
   if data.type == 'pad' and data.state then
         local note = grid:grid_to_index(data) - 1
-        
         mute.state[note] = data.toggled
         
         if mute.track.triggered then
             local state = mute.state[mute.track.trigger] 
             if state then
-                for n,e in pairs(mute.track.seq.note_on) do
+                
+                for n,e in pairs(mute.track.note_on) do
+                    print('note was on')
                     local off = {type='note_off', ch = e.ch, note = e.note, vel = e.vel}
                     mute.track:process_midi(off)
-                    mute.track.output:kill()
+                    mute.track:kill()
                 end
                
-                mute.track.seq.note_on = {}
+                mute.track.note_on = {}
                 if mute.track.exclude_trigger then
                     grid.led[data.x][data.y] = Grid.rainbow_off[mute.track.id]
                 end
@@ -169,9 +170,10 @@ function MuteGrid:grid_event (mute, data)
 
                 grid.led[data.x][data.y] = Grid.rainbow_off[mute.track.id]
                 
-                local on = mute.track.seq.note_on[note] -- added check to help preserve note on/off while recording
+                local on = mute.track.note_on[note] -- added check to help preserve note on/off while recording
                 
                 if on then
+                    
                     local off = {type='note_off', ch = on.ch, note = on.note, vel = on.vel}
                     mute.track:process_midi(off)
                 end

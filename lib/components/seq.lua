@@ -506,7 +506,6 @@ function Seq:arm_event()
 		elseif action == 'load' then
 			self:load_bank(self.next_bank)
 			
-			self:seq_set_grid() --TODO: Delete after move
 		elseif action == 'clear' then
 			self:clear()
 		end
@@ -514,7 +513,7 @@ function Seq:arm_event()
 	
 	self.current_bank = self.next_bank
 	self.next_bank = 0
-	self:clip_set_grid()
+
 	self.armed = false
 	
 	if self.on_arm ~= nil then

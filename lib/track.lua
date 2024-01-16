@@ -26,9 +26,22 @@ function Track:new(o)
 	
 	self.load_component(o, Input)
 	self.load_component(o, Seq)
-	self.load_component(o, Scale)
 	self.load_component(o, Mute)
-	self.load_component(o, Output)
+
+	if o.scale_select > 0 then
+		o.scale = App.scale[o.scale_select]
+	else
+		self.load_component(o,Scale)
+	end
+
+	if o.output_type == 'midi' and o.midi_out > 0 then
+		o.output = App.output[o.midi_out]
+	elseif o.output_type == 'crow' then
+		o.output = App.crow.output[o.crow_out]
+	else
+		self.load_component(o, Output)
+	end
+
 
 	self.build_chain(o)
 	
@@ -54,6 +67,7 @@ function Track:set(o)
 	self.input_type = o.input_type or Input.options[1]
 	params:add_option(track .. 'input_type', 'Input Type', Input.options, 1)
 	params:set_action(track .. 'input_type',function(d)
+		self:kill()
 		self.input_type = Input.options[d]
 		self:load_component(Input)
 		self:build_chain()
@@ -63,14 +77,24 @@ function Track:set(o)
 	self.output_type = o.output_type or Output.options[1]
 	params:add_option(track .. 'output_type', 'Output Type', Output.options, 1)
 	params:set_action(track .. 'output_type',function(d)
+		self:kill()
 		self.output_type = Output.options[d]
-		self:load_component(Output)
+		
+		if self.output_type == 'midi' and self.midi_out > 0 then
+			self.output = App.output[self.midi_out]
+		elseif self.output_type == 'crow' then
+			self.output = App.crow.output[self.crow_out]
+		else
+			self:load_component(Output)
+		end
+
 		self:build_chain()
+		self:set_active()
 	end)
 
 	-- MIDI In
-	self.midi_in = o.midi_in or self.id
-	params:add_number(track .. 'midi_in', 'MIDI In', 0, 16, self.id, function(param)
+	self.midi_in = o.midi_in or 0
+	params:add_number(track .. 'midi_in', 'MIDI In', 0, 16, 0, function(param)
 		local ch = param:get()
 		if ch == 0 then 
 		   return 'off'
@@ -82,13 +106,14 @@ function Track:set(o)
 	params:set_action(track .. 'midi_in', function(d)
 		self:kill()
 		self.midi_in = d
+		self:load_component(Input)
 	end
 	)
 
 	
 	-- MIDI Out
-	self.midi_out = o.midi_out or self.id
-	params:add_number(track .. 'midi_out', 'MIDI Out', 0, 16, self.id, function(param)
+	self.midi_out = o.midi_out or 0
+	params:add_number(track .. 'midi_out', 'MIDI Out', 0, 16, 0, function(param)
 		local ch = param:get()
 		if ch == 0 then 
 		   return 'off'
@@ -99,7 +124,19 @@ function Track:set(o)
 
 	params:set_action(track .. 'midi_out', function(d)
 		self:kill()
-		self.midi_in = d
+		self.midi_out = d
+		
+		if self.output_type == 'midi' then
+			
+			if self.midi_out > 0 then
+				self.output = App.output[d]
+			else
+				self:load_component(Output)
+			end
+
+			self:build_chain()
+		end
+		self:set_active()
 	end)
 
 	-- MIDI Thru
@@ -111,7 +148,7 @@ function Track:set(o)
 
 	-- Arpeggio
 	local arp_options = {'up','down','up down', 'down up', 'converge', 'diverge'}
-	self.arp = o.arp or arp_options[d]
+	self.arp = o.arp or arp_options[1]
 	params:add_option(track .. 'arp','Arpeggio',arp_options, 1)
 	params:set_action(track .. 'arp',function(d)
 		self.arp = arp_options[d]
@@ -198,7 +235,7 @@ function Track:set(o)
 	end)
 
 	-- Trigger
-	self.trigger = o.trigger or 35 + self.id
+	self.trigger = o.trigger or 36
 	params:add_number(track .. 'trigger', 'Trigger', 0, 127, 36)
 	params:set_action(track .. 'trigger', function(d)
 		self:kill()
@@ -258,7 +295,13 @@ function Track:set(o)
 
 	params:add_number(track .. 'crow_in', 'Crow In', 1, 2, 1)
 	params:set_action(track .. 'crow_in', function(d)
+		self:kill()
 		self.crow_in = d
+
+		if self.input_type == 'crow' then
+			self:load_component(Input)
+			self:build_chain()
+		end
 	end)
 
 	-- Crow Out
@@ -268,14 +311,14 @@ function Track:set(o)
 	
 	params:add_option(track .. 'crow_out', 'Crow Out', crow_options, 1)
 	params:set_action(track .. 'crow_out', function(d)
-		self:kill()
 		
+		self:kill()
 		self.crow_out = d
-
 		if self.output_type == 'crow' then
-			self.output = App.crow_out[d]
+			self.output = App.crow.output[d]
 			self:build_chain()
 		end
+		
 	end)
 	
 	-- Exclude Trigger
@@ -325,6 +368,14 @@ function Track:update(o, silent)
 	end
 end
 
+function Track:set_active()
+	if self.output_type == 'midi' and self.midi_out > 0  or self.output_type == 'crow' then
+		self.active = true
+	else
+		self.active = false
+	end
+end
+
 -- Save current track paramaeters as the current preset
 function Track:save(o)
 	local track = 'track_' .. self.id .. '_'
@@ -347,43 +398,16 @@ function Track:load_component(component)
 	local props = {}
 	props.track = self
 	props.id = self.id
+	props.type = option
 
 	if type ~= nil then
 		-- Component with Types that are set via Params
-		
 		for i, prop in ipairs(type.props) do
 			props[prop] = self[prop] -- Create an object with values passed down from Track
 		end
-
-		-- if TrackComponent type has certain events, register them
-		if type.transport_event ~= nil then
-			props.transport_event = type.transport_event
-		end
-
-		if type.midi_event ~= nil then
-			props.midi_event = type.midi_event
-		end
-
-		if type.set_action ~= nil then
-			type.set_action(component, self)
-		end
-
-		self[component.name] = component:new(props)
-
-		--[[ Needs validating: Dynamically show and hide component properties
-		if component.params ~= nil then
-			for i=1, #component.params do
-				params:hide('track_' .. self.id .. '_' .. component.params[i])
-			end
-		
-			for i=1, #type.props do
-				params:show('track_' .. self.id .. '_' .. type.props[i])
-			end
-
-		end ]]
-	else
-		self[component.name] = component:new(props)
 	end
+
+	self[component.name] = component:new(props)
 
 end
 
@@ -401,6 +425,7 @@ function Track:chain_components(components, process_name)
 			for i, trackcomponent in ipairs(components) do
 				if trackcomponent[process_name] then
 					output = trackcomponent[process_name](trackcomponent, output, track)
+					if output == nil then return end
 				end
 			end
 			return output
@@ -432,28 +457,20 @@ end
 
 -----------
 function Track:kill()
-	for i,v in pairs(self.note_on) do
-		local off = {
-			type = 'note_off',
-			note = v.note,
-			vel = v.vel,
-			ch = v.ch
-		}
-
-		self:send_output(off)
-	end
-
+	
+	self.output:kill()
+	
 	self.note_on = {}
 end
 
 --[[
-	This will handle note_on management, with the ability to specify which chain should be sent 
+	This will handle note_on management, with the ability to specify which chain should send OFF events for interrupts 
 	The chain parameter will allow from sending from different parts of the chain
 	Input would use, 'send_input', sequencer would 'send', and the any note_off to cancel an incoming 
 	note would use 'send_output'
 ]]
 
-function Track:handle_note(data, chain) -- 'send', 'send_input', 'send_output' etc
+function Track:handle_note(data, chain, debug) -- 'send', 'send_input', 'send_output' etc
 	if data ~= nil then
 		if data.type == 'note_on' then    
 			
@@ -461,7 +478,6 @@ function Track:handle_note(data, chain) -- 'send', 'send_input', 'send_output' e
 			if data.id ~= nil then
 				-- This note has already been processed
 				
-				print('note is on ' .. data.note .. ' and id exists ' .. data.id)
 			elseif self.note_on[data.note] ~= nil then
 				-- the same note_on event came but wasn't processed
 				local last =  self.note_on[data.note]
@@ -475,7 +491,10 @@ function Track:handle_note(data, chain) -- 'send', 'send_input', 'send_output' e
 				self.note_on[last.id] = nil
 				
 				if chain ~= nil then
-					print(last.id .. 'off sent during note on')
+					if fucks then
+						print(fucks)
+					end
+					print(last.id .. ' off sent during note on')
 					self[chain](self, off)
 				end
 			end
@@ -487,15 +506,8 @@ function Track:handle_note(data, chain) -- 'send', 'send_input', 'send_output' e
 			local off = data
 			if self.note_on[data.note] ~= nil then
 				local last =  self.note_on[data.note]
-				local off = {
-					type = 'note_off',
-					note = last.note,
-					vel = last.vel,
-					ch = last.ch,
-				}
-
+				self.note_on[data.note] = nil
 				self.note_on[last.id] = nil
-
 				data.note = last.note
 			end
 		end

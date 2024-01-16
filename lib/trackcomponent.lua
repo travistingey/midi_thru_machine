@@ -16,10 +16,27 @@ function TrackComponent:set(o)
 	-- Set up default methods if none are provided
 	self.transport_event = o.transport_event or function(s,data) return data end
 	self.midi_event = o.midi_event or function(s,data) return data end
-	self.id = o.id or 0
+	self.type = o.type
 	self.track = o.track
 	self.on_transport = o.on_transport or function(s,data) return data end
 	self.on_midi = o.on_midi or function(s,data) return data end
+
+	if self.types and self.type and self.types[self.type] then
+		local type = self.types[self.type]
+		-- if TrackComponent type has certain events, register them
+		if type.transport_event ~= nil then
+			self.transport_event = type.transport_event
+		end
+
+		if type.midi_event ~= nil then
+			self.midi_event = type.midi_event
+		end
+
+		if type.set_action ~= nil then
+			self.set_action = type.set_action
+			self:set_action(self.track)
+		end
+	end
 end
 
 function TrackComponent:process_transport(data, track)
