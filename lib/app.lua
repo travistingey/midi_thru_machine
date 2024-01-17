@@ -288,10 +288,11 @@ function App:panic()
 				}
 				
 				App.midi_out:send(off)
-				clock.sync(.01)
+				clock.sleep(.01)
 			end
 		end
 	end)
+	print('done')
 	
 end
 

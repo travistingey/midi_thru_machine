@@ -42,7 +42,7 @@ function Input.set_midi_trigger(s, data, process)
             else
                 s.last_note = event
             end
-            
+            s.track:handle_note(event,'send_input')
             return event
         elseif data.type == 'note_off' then
             local event = s.last_note
@@ -52,7 +52,7 @@ function Input.set_midi_trigger(s, data, process)
                     send[prop] = v
                 end
                 send.type = 'note_off'
-
+                s.track:handle_note(send,'send_input')
                 return send
             end
         end
@@ -73,6 +73,7 @@ function Input.set_clock_trigger(s,data,process)
         if event then
             clock.run(function()
                 s.track:handle_note(event,'send_input')
+                s.track:send_input(event)
 
                 local off = { type = 'note_off', note = event.note, vel = event.vel }
 
@@ -288,6 +289,7 @@ function arpeggiate (s, data)
         note = root + intervals[(index - 1) % #intervals + 1] + octave
 
     end
+    
     return {type = 'note_on', note = note, vel = 100 }
 end
 

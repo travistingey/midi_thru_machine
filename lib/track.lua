@@ -452,7 +452,7 @@ function Track:build_chain()
 
 	self.send = self:chain_components(send, 'process_midi')
 	self.send_input = self:chain_components(send_input, 'process_midi')
-	self.send_output = self:chain_components(self.output, 'process_midi')
+	self.send_output = self:chain_components({self.output}, 'process_midi')
 end
 
 -----------
@@ -507,7 +507,9 @@ function Track:handle_note(data, chain, debug) -- 'send', 'send_input', 'send_ou
 			if self.note_on[data.note] ~= nil then
 				local last =  self.note_on[data.note]
 				self.note_on[data.note] = nil
-				self.note_on[last.id] = nil
+				if last.id then
+					self.note_on[last.id] = nil
+				end
 				data.note = last.note
 			end
 		end

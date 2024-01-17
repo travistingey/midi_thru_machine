@@ -173,9 +173,8 @@ function MuteGrid:grid_event (mute, data)
                 local on = mute.track.note_on[note] -- added check to help preserve note on/off while recording
                 
                 if on then
-                    
                     local off = {type='note_off', ch = on.ch, note = on.note, vel = on.vel}
-                    mute.track:process_midi(off)
+                    mute.track:send_output(off)
                 end
             
             else
