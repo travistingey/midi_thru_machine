@@ -16,17 +16,17 @@ function Seq:set(o)
 	self.__base.set(self, o) -- call the base set method first   
 		
 	o.id = o.id or 1
-    
-    -- instances of grids are defined in track during track initialization
-    -- consider offloading grid implementations to sub-classes? 
+		
+	-- instances of grids are defined in track during track initialization
+	-- consider offloading grid implementations to sub-classes? 
 	o.clip_grid = o.clip_grid
 	o.seq_grid = o.seq_grid
 
-    
-    
-    o.value = o.value or {} -- holds active sequence of events
-    o.buffer = o.buffer or {} -- holds recorded sequence of events
-    o.bank = o.bank or {} -- stores value tables for reloading
+		
+		
+	o.value = o.value or {} -- holds active sequence of events
+	o.buffer = o.buffer or {} -- holds recorded sequence of events
+	o.bank = o.bank or {} -- stores value tables for reloading
 	
 	o.current_bank = o.current_bank or 1
 	o.next_bank = o.next_bank or 0
@@ -47,11 +47,11 @@ function Seq:set(o)
 	
 	o.armed	= false
 	o.arm = {}
-    
+		
 	self.playing = false
 
 	o.on_step = o.on_step or function(s,value)  end
-    
+		
 	o.note_on = {}
 
 	if(o.enabled == nil) then
@@ -60,7 +60,7 @@ function Seq:set(o)
 		o.enabled = false
 	end
 
-    -- o:load_bank(1)
+	-- o:load_bank(1)
 
 	return o
 end
@@ -131,7 +131,7 @@ function Seq:print_values(target_note)
 end
 
 --unquantized	|-o--x-|o--x--|---o--|-x--ox|-o-x-ox|o--x-o|-x--o-|x-----|------|--ox--|--o---|---x--|ox-ox-|-----o|-----x|
---				  s		s		  s		  s   s   d  s    d     s				   s      s           s  d        s
+--				  s		s		  s		  s   s   d  s	d	 s				   s	  s		   s  d		s
 --quantized 	|o--x--|o--x--|o---x-|ox----|o-x----|o--x--|o-x---|------|------|ox----|o-----|x-----|ox----|o-----|x-----|
  
 -- Reduces seq value to unique events per step
@@ -230,7 +230,7 @@ function Seq:save_bank(id, save_current)
 	local track = track
 
 	self.playing = true
-	for note,event in pairs(track.note_on) do
+	for note,event in pairs(self.track.note_on) do
 		local off = {
 			note = event.note,
 			type = 'note_off',
@@ -320,7 +320,7 @@ end
 -- Transport process chain
 function Seq:transport_event(data, track)
 	-- Tick based sequencer
-
+	print('wjat')
 	if data.type == 'start' then
 
 		self.tick = 0
@@ -339,8 +339,9 @@ function Seq:transport_event(data, track)
 				vel = c.vel,
 				ch = c.ch
 			}
-			print('line ' .. 342)
+
 			track:handle_note(off,'send')
+			track:send(off)
 
 			if self.recording then
 				self:record_event(off)
@@ -356,7 +357,7 @@ function Seq:transport_event(data, track)
 		self.armed = false
 		
 	elseif data.type == 'clock' then
-		
+		print(self.tick)
 		self.tick = self.tick + 1
 
 		local next_step = (self.tick - 1 ) % self.length + 1
@@ -373,39 +374,42 @@ function Seq:transport_event(data, track)
 				local last_value = nil
 				
 				for i,c in pairs(current) do
-				  
-				  if c.enabled then
-  					clock.run(function()
-  						
-  						if c.offset > 0 then
-  				    		clock.sync(c.offset)
-  						end
-  						print('line ' .. 387)		
-  						-- manage note on/off
-  						-- if bouncing a track, record sequence to buffer if note is not muted
-  						if c.type == 'note_on' and  track.note_on[c.note] == nil then
-  							track:handle_note(c,'send')
-  							
-  							if self.recording and self.bounce and not track.mute.state[c.note] then
-  								self:record_event(c)
-  					    	end
-  					  
-  							track:send(c)	
-  						elseif c.type == 'note_off' and track.note_on[c.note] ~= nil then
-  							if self.recording and self.bounce then
-  								self:record_event(c)
-  							end
-							  print('line ' .. 399)
-  							track:handle_note(c,'send')	
-  						end
-  					end)
+
+					if c.enabled then
+						clock.run(function()
+
+							if c.offset > 0 then
+								clock.sync(c.offset)
+							end
+
+							-- manage note on/off
+							-- if bouncing a track, record sequence to buffer if note is not muted
+							if c.type == 'note_on' and  track.note_on[c.note] == nil then
+
+								if self.recording and self.bounce and not track.mute.state[c.note] then
+									self:record_event(c)
+								end
+
+								track:handle_note(c,'send')
+								track:send(c)	
+
+							elseif c.type == 'note_off' and track.note_on[c.note] ~= nil then
+								if self.recording and self.bounce then
+									self:record_event(c)
+								end
+								
+								track:handle_note(c,'send')
+								track:send(c)	
+							end
+						end)
 					end
 				end
 				
 				self:on_step(current)
-				
+				print(self.tick,self.quantize_step)
 				-- Handle arm events
 				if self.tick % self.quantize_step == 0 then
+					print('step')
 					if self.armed then
 						self:arm_event()
 					elseif self.recording and not self.overdub  then
@@ -419,7 +423,7 @@ function Seq:transport_event(data, track)
 		end
 	end	
  
-  	if self.seq_grid ~= nil then
+	if self.seq_grid ~= nil then
 		self:seq_set_grid()
 	end
 
@@ -434,7 +438,7 @@ end
 -- Midi process chain
 function Seq:midi_event(data, track)
 	if self.recording then
-        -- process note_off events when a note_on occurs OR any note_on/note_off event that isn't muted 
+		-- process note_off events when a note_on occurs OR any note_on/note_off event that isn't muted 
 		
 		if track.triggered then
 			if not track.mute.state[track.trigger] or (data.type == 'note_off' and track.note_on[data.note] ~= nil)  then
@@ -447,24 +451,11 @@ function Seq:midi_event(data, track)
 		elseif(data.type == 'note_off' and track.note_on[data.note] ~= nil) or not (data.note and track.mute.state[data.note])  then
 			self:record_event(data)
 		end
-    
+		
 	end
  
  
 	if not self.playing or track.midi_thru then
-		if track.mono and data.type == 'note_on' then
-			for i,e in pairs(track.note_on) do
-				local off = {
-					type = 'note_off',
-					note = e.note,
-					vel = e.vel,
-					ch = e.ch,
-				}
-				print('Line ' .. 464)
-				track:handle_note(off, 'send')
-			end
-		end
-	
 		return data
 	end
 end

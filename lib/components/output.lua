@@ -21,7 +21,6 @@ Output.types = {}
 Output.types['midi'] = {
 	props = {},
 	midi_event = function(s,data, track)
-		tab.print(data)
 		if data ~= nil and s.channel > 0 then
 			local send = {}
 

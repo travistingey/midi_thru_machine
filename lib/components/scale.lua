@@ -176,6 +176,8 @@ function Scale:transport_event(data,track)
 	if data.type == 'start' then
 		self.reset_latch = false
 	end
+
+	return data
 end
 
 function Scale:midi_event(data, track)
