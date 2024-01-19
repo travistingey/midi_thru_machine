@@ -15,34 +15,24 @@ function init()
 
 	
 	App:init()
-	-- Transport events triggered from MIDI In device
-	
-	-- Create Objects
-
-	-- Create the tracks
-	
-	-- Load Data
-	
-	-- Connect Devices
-	
-	-- Bind Events
+	redraw_clock_id = clock.run(redraw_clock)
 
 end -- end Init
 
 function enc(e, d) --------------- enc() is automatically called by norns
-	-- App:handle_enc(e,d)
+	App:handle_enc(e,d)
 end
 
 function key(k, z) ------------------ key() is automatically called by norns
-	-- App:handle_key(k,z)
+	App:handle_key(k,z)
 end
 
 function redraw_clock() ----- a clock that draws space
 	while true do ------------- "while true do" means "do this forever"
 		clock.sleep(1 / 15) ------- pause for a fifteenth of a second (aka 15fps)
-		if screen_dirty then ---- only if something changed
+		if App.screen_dirty then ---- only if something changed
 			redraw() -------------- redraw space
-			screen_dirty = false -- and everything is clean again
+			App.screen_dirty = false -- and everything is clean again
 		end
 	end
 end
@@ -104,7 +94,7 @@ function redraw() -------------- redraw() is automatically called by norns
 	screen.font_size(font.size)
 	screen.level(15) ------------- max
 
-	App.draw()
+	App:draw()
 	
 	screen.update()
 end

@@ -31,7 +31,7 @@ function Mode:set(o)
 
     self.timeout = 5
     self.interupt = false
-    self.default = o.default or {draw = function() print('Draw function will go here as default') end}
+    self.context = o.context or {}
 
     -- Create the modes
 	self.grid = Grid:new({
@@ -138,19 +138,25 @@ function Mode:draw()
    
 end
 
-function Mode:toast(screen)
+function Mode:toast(toast_screen)
+    App.screen_dirty = true
+    
     local count = 0
-    self.context.toast = screen
-    clock.run(function()
+    self.context.toast = toast_screen
+
+    if self.toast_clock then
+        clock.cancel(self.toast_clock)
+    end
+
+    App.screen_dirty = true
+    self.toast_clock = clock.run(function()
         while count < self.timeout do
-            clock.sleep(1)
-            if self.interupt then
-                count = 0
-                self.interupt = false
-            end
-            count = count + 1
+            clock.sleep(1/15)
+            count = count + (1/15)
         end
         self.context.toast = nil
+        App.screen_dirty = true
+        clock.cancel(self.toast_clock)
     end)
 end 
 
@@ -165,7 +171,7 @@ end
 
 -- Methods
 function Mode:enable()
-
+    
     if self.on_load ~= nil then
         self:on_load()
     end
@@ -176,6 +182,9 @@ function Mode:enable()
         component.mode = App.mode[App.current_mode]
         component:enable()
     end
+
+    screen_dirty = true
+
 end
 
 function Mode:disable()

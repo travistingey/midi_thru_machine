@@ -13,6 +13,7 @@ local musicutil = require(path_name .. 'musicutil-extended')
 
 
 function App:init()
+	self.screen_dirty = true
 	-- Model
 	self.chord = {}
 	self.scale = {}
@@ -232,30 +233,40 @@ end
 
 -- Norns Encoders
 function App:handle_enc(e,d)
-	local context = self.context
+	local context = self.mode[self.current_mode].context
+	print('handle_enc',e,d)
 	-- encoder 1
 	if e == 1 then
-	  if (context.enc1_alt and self.alt_down) then context.enc1_alt(d)
-	  elseif (context.enc1) then context.enc1(d) end 
+		if (context.enc1_alt and self.alt_down) then
+			context.enc1_alt(d)
+		elseif (context.enc1) then
+			context.enc1(d)
+		end 
 	end
 	
 	-- encoder 2
 	if e == 2 then
-	  if (context.enc2_alt and self.alt_down) then context.enc2_alt(d)
-	  elseif (context.enc2) then context.enc2(d) end 
+		if (context.enc2_alt and self.alt_down) then
+			context.enc2_alt(d)
+		elseif (context.enc2) then
+			context.enc2(d)
+		end 
 	end
 	
 	-- encoder 3
 	if e == 3 then
-	  if (context.enc3_alt and self.alt_down) then context.enc3_alt(d)
-	  elseif (context.enc3) then context.enc3(d) end 
+		if (context.enc3_alt and self.alt_down) then
+			context.enc3_alt(d)
+		elseif (context.enc3) then
+			context.enc3(d)
+		end 
 	end
 end
 
 -- Norns Buttons
-function App:handle_key(press_fn,long_fn,alt_fn,k,z)
-	local context = self.context
-	
+function App:handle_key(k,z)
+	local context = self.mode[self.current_mode].context
+	print('handle_key',k,z)
 	if k == 1 then
 		self.alt_down = z == 1
 	elseif ( self.alt_down and z == 1 and context['alt_fn_' .. k] ) then
@@ -416,13 +427,25 @@ function App:register_modes()
 	local MuteGrid = require(path_name .. 'modes/mutegrid') 
 	local NoteGrid = require(path_name .. 'modes/notegrid')
 
-
 	self.mode[1] = Mode:new({
 		components = {
 			ScaleGrid:new({id=1, offset = {x=0,y=6}}),
 			ScaleGrid:new({id=2, offset = {x=0,y=4}}),
 			MuteGrid:new({track=1}),
 			NoteGrid:new({track=1})
+		},
+		context = {
+			default = function()
+				screen.move(64, 32) ---------- move the pointer to x = 64, y = 32
+				screen.text_center('Session') -- center our message at (64, 32)
+				screen.move(64, 24)
+				screen.pixel(0, 0) ----------- make a pixel at the north-western most terminus
+				screen.pixel(127, 0) --------- and at the north-eastern
+				screen.pixel(127, 63) -------- and at the south-eastern
+				screen.pixel(0, 63) ---------- and at the south-western
+				screen.fill() ---------------- fill the termini and message at once
+				screen.update() -------------- update space
+			end
 		}
 	})
 
