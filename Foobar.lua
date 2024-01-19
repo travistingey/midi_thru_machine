@@ -104,20 +104,14 @@ function redraw() -------------- redraw() is automatically called by norns
 	screen.font_size(font.size)
 	screen.level(15) ------------- max
 
-	--App.draw()
+	App.draw()
 	
 	screen.update()
 end
 
 function r() ----------------------------- execute r() in the repl to quickly rerun this script
 
-	-- for i=1,16 do
-	-- 	if App.track[i].output then
-	-- 	App.track[i]:kill()
-	-- 	else
-	-- 		print('Track ' .. i .. ' has no output when trying to run r()')
-	-- 	end
-	-- end
+	App:panic()
 	
 	utilities.unrequire(path_name .. 'app')
 	utilities.unrequire(path_name .. 'track')

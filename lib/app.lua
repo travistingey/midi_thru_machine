@@ -20,8 +20,6 @@ function App:init()
 	self.track = {}
 	self.mode = {}
 
-	self.draw = function() end
-
 	self.current_mode = 1
 	self.current_track = 10
 	
@@ -226,6 +224,10 @@ function App:set_context(newContext)
 	-- newContext is a table with functions for the new state.
 	-- It might not define every possible function, so we use the original "context" as a fallback.
 	self.context = setmetatable(newContext, { __index = self.context })
+end
+
+function App:draw()
+	self.mode[self.current_mode]:draw()
 end
 
 -- Norns Encoders

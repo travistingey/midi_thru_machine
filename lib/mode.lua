@@ -15,22 +15,26 @@ function Mode:new(o)
     o = o or {}
     setmetatable(o, self)
     self.__index = self
-    self:set(o)
-    self:register_params(o)
+    self.set(o,o)
+    self.register_params(o,o)
     return o
 end
 
 function Mode:set(o)
-    o.id = o.id or #App.mode + 1 or 1
-    o.components = o.components or {}
+    self.id = o.id or #App.mode + 1 or 1
+    self.components = o.components or {}
 
-    o.set_action = o.set_action
-    o.on_load = o.on_load
-    o.on_midi = o.on_midi
-    o.on_transport = o.on_transport
+    self.set_action = o.set_action
+    self.on_load = o.on_load
+    self.on_midi = o.on_midi
+    self.on_transport = o.on_transport
+
+    self.timeout = 5
+    self.interupt = false
+    self.default = o.default or {draw = function() print('Draw function will go here as default') end}
 
     -- Create the modes
-	o.grid = Grid:new({
+	self.grid = Grid:new({
 		grid_start = {x=1,y=1},
 		grid_end = {x=9,y=9},
 		display_start = {x=1,y=1},
@@ -39,19 +43,19 @@ function Mode:set(o)
 		active = false,
         
         process = function(s,msg)
-            for i,g in ipairs(o.grid.subgrids) do
+            for i,g in ipairs(self.grid.subgrids) do
                 g.active = true
                 g:process(msg)
             end
     
 
-            for i,c in ipairs(o.components) do
+            for i,c in ipairs(self.components) do
                 c.grid:process(msg)
             end
         end
 	})
 
-    o.arrow_pads = o.grid:subgrid({
+    self.arrow_pads = self.grid:subgrid({
         name = 'arrows pads',
         grid_start = {x=1,y=9},
         grid_end = {x=4,y=9},
@@ -62,13 +66,13 @@ function Mode:set(o)
                 component.grid:event(data)
             end
             
-            if o.on_arrow ~= nil then
-              o:on_arrow(data)
+            if self.on_arrow ~= nil then
+              self:on_arrow(data)
             end
             
         end})
 
-	o.row_pads = o.grid:subgrid({
+	self.row_pads = self.grid:subgrid({
         name = 'row pads',
         grid_start = {x=9,y=8},
         grid_end = {x=9,y=2},
@@ -79,8 +83,8 @@ function Mode:set(o)
                 component.grid:event(data)
             end
             
-            if o.on_row ~= nil then
-              o:on_row(data)
+            if self.on_row ~= nil then
+              self:on_row(data)
             end
         end
     })
@@ -88,7 +92,7 @@ function Mode:set(o)
 	
 
 	-- Alt pad
-	o.alt_pad = o.grid:subgrid({
+	o.alt_pad = self.grid:subgrid({
         name = 'alt pad',
         grid_start = {x=9,y=1},
         grid_end = {x=9,y=1}, 
@@ -101,8 +105,8 @@ function Mode:set(o)
             self.alt = data.toggled
             s:refresh('alt event')
             
-            if o.on_alt ~= nil then
-              o:on_alt(data)
+            if self.on_alt ~= nil then
+              self:on_alt(data)
             end
             
         end,
@@ -111,11 +115,44 @@ function Mode:set(o)
         end
     } )
 
-    for i,c in ipairs(o.components) do
-        self:register_component(c)
-    end
+    print('mode.lua line 115 is disabled. Was it even needed?')
+    -- for i,c in ipairs(o.components) do
+    --     self:register_component(c)
+    -- end
 
 end
+
+function Mode:refresh()
+    screen_dirty = true
+end
+
+function Mode:draw()
+    -- if interupt is true,
+    if self.context.default then
+      self.context.default()
+    end
+
+    if self.context.toast then
+        self.context.toast()
+    end
+   
+end
+
+function Mode:toast(screen)
+    local count = 0
+    self.context.toast = screen
+    clock.run(function()
+        while count < self.timeout do
+            clock.sleep(1)
+            if self.interupt then
+                count = 0
+                self.interupt = false
+            end
+            count = count + 1
+        end
+        self.context.toast = nil
+    end)
+end 
 
 function Mode:register_component(c)
     if self.components == nil then self.components = {} end
