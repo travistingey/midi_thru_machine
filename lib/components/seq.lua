@@ -320,7 +320,6 @@ end
 -- Transport process chain
 function Seq:transport_event(data, track)
 	-- Tick based sequencer
-	print('wjat')
 	if data.type == 'start' then
 
 		self.tick = 0
@@ -357,7 +356,6 @@ function Seq:transport_event(data, track)
 		self.armed = false
 		
 	elseif data.type == 'clock' then
-		print(self.tick)
 		self.tick = self.tick + 1
 
 		local next_step = (self.tick - 1 ) % self.length + 1
@@ -406,10 +404,8 @@ function Seq:transport_event(data, track)
 				end
 				
 				self:on_step(current)
-				print(self.tick,self.quantize_step)
 				-- Handle arm events
 				if self.tick % self.quantize_step == 0 then
-					print('step')
 					if self.armed then
 						self:arm_event()
 					elseif self.recording and not self.overdub  then

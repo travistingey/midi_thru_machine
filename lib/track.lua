@@ -491,7 +491,9 @@ function Track:handle_note(data, chain, debug) -- 'send', 'send_input', 'send_ou
 				self.note_on[last.id] = nil
 				
 				if chain ~= nil then
-					print(last.id .. ' off sent during note on')
+					if self.debug then
+						print(last.id .. ' off sent during note on')
+					end
 					self[chain](self, off)
 				end
 			end

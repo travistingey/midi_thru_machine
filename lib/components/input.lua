@@ -112,7 +112,7 @@ Input.types['midi'] = {
                 end
             end
 
-            track:handle_note(data,'send_input','input')
+            track:handle_note(data,'send_input')
             
             return data
             

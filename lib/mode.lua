@@ -47,7 +47,6 @@ function Mode:set(o)
                 g.active = true
                 g:process(msg)
             end
-    
 
             for i,c in ipairs(self.components) do
                 c.grid:process(msg)
@@ -89,8 +88,6 @@ function Mode:set(o)
         end
     })
 
-	
-
 	-- Alt pad
 	o.alt_pad = self.grid:subgrid({
         name = 'alt pad',
@@ -114,11 +111,6 @@ function Mode:set(o)
             self.alt = false
         end
     } )
-
-    print('mode.lua line 115 is disabled. Was it even needed?')
-    -- for i,c in ipairs(o.components) do
-    --     self:register_component(c)
-    -- end
 
 end
 
@@ -160,10 +152,6 @@ function Mode:toast(toast_screen)
     end)
 end 
 
-function Mode:register_component(c)
-    if self.components == nil then self.components = {} end
-    self.components[ #self.components + 1 ] = c
-end
 
 function Mode:register_params(o)
     --local mode = 'mode_' .. o.id .. '_'
