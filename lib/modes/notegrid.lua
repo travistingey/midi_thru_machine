@@ -10,27 +10,185 @@ NoteGrid.name = 'Mode Name'
 function NoteGrid:set(o)
   self.__base.set(self, o) -- call the base set method first   
 
-  o.component = 'input'
-  o.register = {'on_load'} -- list events outside of transport, midi and grid events
+  self.component = 'input'
+  self.register = {'on_load'} -- list events outside of transport, midi and grid events
 
   -- Record
-  local note_start = {x=1,y=10}
-  local note_end = {x=4,y=13}
-  local record_start = {x=1,y=18}
-  local record_end = {x=4,y=21}
+  
+  
+  
+  
+  local clear_start = {x=1,y=18}
+  local clear_end = {x=4,y=21}
+  
+  local preset_start = {x=1,y=1}
+  local preset_end = {x=4,y=4}
+
+  self.select = o.select or 1
 
 
-  o.grid = Grid:new({
+  self.grid = Grid:new({
     name = 'NoteGrid ' .. o.track,
     grid_start = {x=1,y=1},
     grid_end = {x=4,y=32},
-    display_start = o.display_start or record_start,
-    display_end = o.display_end or record_end,
+    display_start = o.display_start or preset_start,
+    display_end = o.display_end or preset_end,
     offset = o.offset or {x=4,y=0},
     midi = App.midi_grid
   })
 
+  self.action[self.select].set(self)
 end
+
+function NoteGrid:select_action (d)
+  self.select = d
+  self.action[d].set(self)
+end
+
+
+NoteGrid.action = {
+  [1] = {
+    name = 'Pad',
+    set = function(s)
+      local note_start = {x=1,y=10}
+      local note_end = {x=4,y=13}
+
+      s.grid.display_start = note_start
+      s.grid.display_end = note_end
+      s.grid:refresh()
+
+    end,
+    send = function(s,data)
+      local track = App.track[s.track] 
+      if data.state then
+        local on = {
+          type = 'note_on',
+          note = s.grid:grid_to_index(data) - 1,
+          vel = 100,
+          ch = track.midi_out
+        }
+        print(on)
+        track:send_input(on)
+      else
+        local off = {
+          type = 'note_off',
+          note = s.grid:grid_to_index(data) - 1,
+          vel = 100,
+          ch = track.midi_out
+        }
+        print(off)
+        track:send_input(off)
+      end
+    end
+  },
+  [2] = {
+    name = 'Record',
+    set = function(s)
+      
+      local note_start = {x=1,y=18}
+      local note_end = {x=4,y=21}
+
+      s.grid.display_start = note_start
+      s.grid.display_end = note_end
+      s.grid:refresh()
+
+    end,
+    send = function(s,data)
+      local track = App.track[s.track] 
+      if data.state then
+        local on = {
+          type = 'note_on',
+          note = s.grid:grid_to_index(data) - 1,
+          vel = 100,
+          ch = 10
+        }
+        track:send_input(on)
+      else
+        local off = {
+          type = 'note_off',
+          note = s.grid:grid_to_index(data) - 1,
+          vel = 100,
+          ch = 10
+        }
+        track:send_input(off)
+      end
+    end
+  },
+    [3] = {
+      name = 'Clear',
+      set = function(s)
+        
+        local note_start = {x=1,y=22}
+        local note_end = {x=4,y=25}
+
+        s.grid.display_start = note_start
+        s.grid.display_end = note_end
+        s.grid:refresh()
+  
+      end,
+      send = function(s,data)
+        local track = App.track[s.track] 
+        if data.state then
+          local on = {
+            type = 'note_on',
+            note = s.grid:grid_to_index(data) - 1,
+            vel = 100,
+            ch = 10
+          }
+          track:send_input(on)
+        else
+          local off = {
+            type = 'note_off',
+            note = s.grid:grid_to_index(data) - 1,
+            vel = 100,
+            ch = 10
+          }
+          track:send_input(off)
+        end
+      end
+    },
+
+
+    [4] = {
+      name = 'Drum Pattern',
+      set = function(s)
+        
+        local note_start = {x=1,y=1}
+        local note_end = {x=4,y=4}
+
+        s.grid.display_start = note_start
+        s.grid.display_end = note_end
+        s.grid:refresh()
+  
+      end,
+      send = function(s,data)
+        local track = App.track[s.track] 
+        if data.state then
+          App.midi_in:program_change(s.grid:grid_to_index(data) - 1, 10)
+        end
+      end
+    },
+    [5] = {
+      name = 'Slice Pattern',
+      set = function(s)
+        
+        local note_start = {x=1,y=1}
+        local note_end = {x=4,y=4}
+
+        s.grid.display_start = note_start
+        s.grid.display_end = note_end
+        s.grid:refresh()
+  
+      end,
+      send = function(s,data)
+        local track = App.track[s.track] 
+        if data.state then
+          App.midi_in:program_change(s.grid:grid_to_index(data) - 1, 13)
+        end
+      end
+    }
+}
+
 
 function NoteGrid:transport_event (component, data) end
 function NoteGrid:midi_event (component, data) end
@@ -39,30 +197,15 @@ function NoteGrid:grid_event (component, data)
   local grid = self.grid
   
 
-  if(data.type == 'pad' and data.state) then
-    local on = {
-      type = 'note_on',
-      note = grid:grid_to_index(data) - 1,
-      vel = 100,
-      ch = track.midi_out
-    }
-    tab.print(on)
-    track:send_input(on)
-  elseif (data.type == 'pad') then
-    local off = {
-      type = 'note_off',
-      note = grid:grid_to_index(data) - 1,
-      vel = 100,
-      ch = track.midi_out
-    }
-    tab.print(off)
-    track:send_input(off)
+  if(data.type == 'pad') then
+    
+    self.action[self.select].send(self,data)
+
   end
   
-  
-  local note = grid:grid_to_index(data) - 1
-
 end
+
+
 
 function NoteGrid:set_grid (component) 
     local grid = self.grid

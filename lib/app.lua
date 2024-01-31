@@ -22,7 +22,7 @@ function App:init()
 	self.mode = {}
 
 	self.current_mode = 1
-	self.current_track = 10
+	self.current_track = 1
 	
 	self.preset = 1
 	
@@ -54,9 +54,6 @@ function App:init()
 		  ""..util.trim_string_to_width(midi_device[i].name,70) -- value to insert
 		)
 	  end
-	
-	
-	
 	
 	-- Instantiate
 	self.midi_in = {}
@@ -228,13 +225,18 @@ function App:set_context(newContext)
 end
 
 function App:draw()
+	screen.ping()
+	screen.clear() --------------- clear space
+	screen.aa(1) ----------------- enable anti-aliasing
+
 	self.mode[self.current_mode]:draw()
+	screen.update()
+	
 end
 
 -- Norns Encoders
 function App:handle_enc(e,d)
 	local context = self.mode[self.current_mode].context
-	print('handle_enc',e,d)
 	-- encoder 1
 	if e == 1 then
 		if (context.enc1_alt and self.alt_down) then
@@ -326,8 +328,8 @@ function App:register_params()
 
 	params:set_action("midi_out", function(x)
 		App:register_midi_out(x)
-
 	end)
+	
 	params:set_action("midi_grid", function(x)
 			App:register_midi_grid(x)
 	end)
@@ -344,8 +346,11 @@ function App:register_midi_in(n)
 	self.midi_in = midi.connect(n)
 
 	self.midi_in.event = function(msg)
-		local data = midi.to_msg(msg)
 		
+		App.screen_dirty = true
+
+		local data = midi.to_msg(msg)
+
 		if self.debug then
 			print('Incoming MIDI')
 			tab.print(data)
@@ -393,6 +398,7 @@ function App:register_modes()
 		offset = {x=4,y=8},
 		midi = App.midi_grid,
 		event = function(s,data)
+			screen.ping()
 			if data.state then
 				s:reset()
 				local mode = App.mode[App.current_mode]
@@ -426,7 +432,62 @@ function App:register_modes()
 	local ScaleGrid = require(path_name .. 'modes/scalegrid') 
 	local MuteGrid = require(path_name .. 'modes/mutegrid') 
 	local NoteGrid = require(path_name .. 'modes/notegrid')
+	
+	local draw_things = function() end
+	
+	fonts = {
+		{name = '04B_03', face = 1, size = 8},
+		{name = 'ALEPH', face = 2, size = 8},
+		{name = 'tom-thumb', face = 25, size = 6},
+		{name = 'creep', face = 26, size = 16},
+		{name = 'ctrld', face = 27, size = 10},
+		{name = 'ctrld', face = 28, size = 10},
+		{name = 'ctrld', face = 29, size = 13},
+		{name = 'ctrld', face = 30, size = 13},
+		{name = 'ctrld', face = 31, size = 13},
+		{name = 'ctrld', face = 32, size = 13},
+		{name = 'ctrld', face = 33, size = 16},
+		{name = 'ctrld', face = 34, size = 16},
+		{name = 'ctrld', face = 35, size = 16},
+		{name = 'ctrld', face = 36, size = 16},
+		{name = 'scientifica', face = 37, size = 11},
+		{name = 'scientifica', face = 38, size = 11},
+		{name = 'scientifica', face = 39, size = 11},
+		{name = 'ter', face = 40, size = 12},
+		{name = 'ter', face = 41, size = 12},
+		{name = 'ter', face = 42, size = 14},
+		{name = 'ter', face = 43, size = 14},
+		{name = 'ter', face = 44, size = 14},
+		{name = 'ter', face = 45, size = 16},
+		{name = 'ter', face = 46, size = 16},
+		{name = 'ter', face = 47, size = 16},
+		{name = 'ter', face = 48, size = 18},
+		{name = 'ter', face = 49, size = 18},
+		{name = 'ter', face = 50, size = 20},
+		{name = 'ter', face = 51, size = 20},
+		{name = 'ter', face = 52, size = 22},
+		{name = 'ter', face = 53, size = 22},
+		{name = 'ter', face = 54, size = 24},
+		{name = 'ter', face = 55, size = 24},
+		{name = 'ter', face = 56, size = 28},
+		{name = 'ter', face = 57, size = 28},
+		{name = 'ter', face = 58, size = 32},
+		{name = 'ter', face = 59, size = 32},
+		{name = 'unscii', face = 60, size = 16},
+		{name = 'unscii', face = 61, size = 16},
+		{name = 'unscii', face = 62, size = 8},
+		{name = 'unscii', face = 63, size = 8},
+		{name = 'unscii', face = 64, size = 8},
+		{name = 'unscii', face = 65, size = 8},
+		{name = 'unscii', face = 66, size = 16},
+		{name = 'unscii', face = 67, size = 8}
+	}
 
+	font_select = 1
+	font = fonts[1]
+
+
+	
 	self.mode[1] = Mode:new({
 		components = {
 			ScaleGrid:new({id=1, offset = {x=0,y=6}}),
@@ -434,18 +495,58 @@ function App:register_modes()
 			MuteGrid:new({track=1}),
 			NoteGrid:new({track=1})
 		},
-		context = {
-			default = function()
-				screen.move(64, 32) ---------- move the pointer to x = 64, y = 32
-				screen.text_center('Session') -- center our message at (64, 32)
-				screen.move(64, 24)
-				screen.pixel(0, 0) ----------- make a pixel at the north-western most terminus
-				screen.pixel(127, 0) --------- and at the north-eastern
-				screen.pixel(127, 63) -------- and at the south-eastern
-				screen.pixel(0, 63) ---------- and at the south-western
-				screen.fill() ---------------- fill the termini and message at once
-				screen.update() -------------- update space
+		on_row = function(s,data)
+			
+			if data.state then
+				s.layer[1] = function()
+					screen.font_face(1)
+					screen.font_size(8)
+					screen.level(16)
+					screen.move(66,16)
+					screen.text(NoteGrid.action[data.row].name)
+					screen.fill() 
+				end
+				
+				s.components[4]:select_action(data.row)
+				for i = 2, 8 do
+					s.row_pads.led[9][i] = 0
+				end
+
+				s.row_pads.led[9][9 - data.row] = 1
+				s.row_pads:refresh()
+
+				App:draw()
 			end
+		end,
+		default = function()
+			screen.level(6)
+			screen.rect(0,0,64,32)
+			screen.fill()
+			screen.move(0, 28)
+			screen.font_face(58)
+			screen.font_size(32)
+			screen.level(0)
+			screen.text(math.floor(clock.get_tempo() + 0.5))
+			screen.fill()
+
+		screen.fill() ---------------- fill the termini and message at once
+		end,
+		context = {
+			enc3 = function(d)
+				local midi = App.track[1].midi_out + d
+				
+				params:set('track_1_midi_out', midi)
+				params:set('track_1_midi_in', midi)
+				App.mode[1].layer[2] = function()
+					screen.move(66,10)
+					screen.font_size(8)
+					screen.font_face(1)
+					screen.text('CHANNEL ' .. midi)
+					screen.level(10)
+					screen.fill()
+				end
+				
+			end 
 		}
 	})
 

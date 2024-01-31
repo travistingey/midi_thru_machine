@@ -32,7 +32,11 @@ function Mode:set(o)
     self.timeout = 5
     self.interupt = false
     self.context = o.context or {}
+    self.default = o.default or function() end
+    self.layer = o.layer or {}
 
+    self.layer[0] = self.default
+    
     -- Create the modes
 	self.grid = Grid:new({
 		grid_start = {x=1,y=1},
@@ -73,15 +77,15 @@ function Mode:set(o)
 
 	self.row_pads = self.grid:subgrid({
         name = 'row pads',
-        grid_start = {x=9,y=8},
-        grid_end = {x=9,y=2},
+        grid_start = {x=9,y=2},
+        grid_end = {x=9,y=8},
         event = function(s,data)
             local mode = App.mode[App.current_mode]
 
             for i,component in ipairs(mode.components) do
                 component.grid:event(data)
             end
-            
+
             if self.on_row ~= nil then
               self:on_row(data)
             end
@@ -89,7 +93,7 @@ function Mode:set(o)
     })
 
 	-- Alt pad
-	o.alt_pad = self.grid:subgrid({
+	self.alt_pad = self.grid:subgrid({
         name = 'alt pad',
         grid_start = {x=9,y=1},
         grid_end = {x=9,y=1}, 
@@ -115,26 +119,25 @@ function Mode:set(o)
 end
 
 function Mode:refresh()
+    self:draw()
     screen_dirty = true
 end
 
 function Mode:draw()
     -- if interupt is true,
-    if self.context.default then
-      self.context.default()
-    end
+    self.layer[0]()
 
-    if self.context.toast then
-        self.context.toast()
+    for i=1, #self.layer do
+        self.layer[i]()
     end
    
 end
 
-function Mode:toast(toast_screen)
+function Mode:toast(toast_screen, layer)
     App.screen_dirty = true
-    
+
     local count = 0
-    self.context.toast = toast_screen
+    self.layer[layer] = toast_screen
 
     if self.toast_clock then
         clock.cancel(self.toast_clock)
@@ -146,7 +149,7 @@ function Mode:toast(toast_screen)
             clock.sleep(1/15)
             count = count + (1/15)
         end
-        self.context.toast = nil
+        self.layer[layer] = nil
         App.screen_dirty = true
         clock.cancel(self.toast_clock)
     end)

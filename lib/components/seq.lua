@@ -235,7 +235,7 @@ function Seq:save_bank(id, save_current)
 			note = event.note,
 			type = 'note_off',
 			vel = event.vel,
-			ch = track.midi_out,
+			ch = self.track.midi_out,
 		}
 
 		track:hande_note(off, 'send')
