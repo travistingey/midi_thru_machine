@@ -61,7 +61,9 @@ function ModeComponent:enable()
         end
     end
 
+    
     if mode_component.transport_event ~= nil then
+        
         track_component.on_transport = function(track_component, data)
             mode_component:transport_event(track_component, data)
         end

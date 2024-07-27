@@ -89,7 +89,7 @@ end
 
 
 Input.options = {'midi','crow' ,'arpeggio','random','bitwise'} -- {...'crow', 'bitwise', 'euclidean'}
-Input.params = {'midi_in','trigger','crow_in','note_range_upper','note_range_lower','exclude_trigger','arp','note_range','step','reset_step','chance','voice','step_length'} -- Update this list to dynamically show/hide Track params based on Input type
+Input.params = {'midi_in','trigger','crow_in','note_range_upper','note_range_lower','arp','note_range','step','reset_step','chance','voice','step_length'} -- Update this list to dynamically show/hide Track params based on Input type
 
 Input.types = {}
 
@@ -130,7 +130,7 @@ end
 -- Crow Input
 -- crow.send('input[1].query()') will query and save values to App.crow_in[1].volts
 Input.types['crow'] = {
-    props = {'midi_in','trigger','exclude_trigger'},
+    props = {'midi_in','trigger'},
     set_action = function(s, track)
         track:kill()
             
@@ -184,7 +184,7 @@ Input.types['crow'] = {
 -- Arpeggiator
 
 Input.types['arpeggio'] = {
-    props = {'midi_in','trigger','note_range_upper','note_range','exclude_trigger'},
+    props = {'midi_in','trigger','note_range_upper','note_range'},
     set_action = function(s, track)
         Input.set_trigger(s,track)
         
@@ -296,7 +296,7 @@ end
 -- Random Notes
 
 Input.types['random'] = {
-    props = {'midi_in','trigger','note_range_upper','note_range','exclude_trigger'},
+    props = {'midi_in','trigger','note_range_upper','note_range'},
     set_action = function(s, track)
        Input.set_trigger(s,track)
     end,
@@ -331,7 +331,7 @@ Input.types['random'] = {
 -- Bitwise Sequencer
 
 Input.types['bitwise'] = {
-    props = {'midi_in','trigger','note_range_upper','note_range','exclude_trigger'},
+    props = {'midi_in','trigger','note_range_upper','note_range'},
     set_action = function(s, track)
         Input.set_trigger(s,track)
         track.chance = params:get('track_' .. track.id .. '_chance')

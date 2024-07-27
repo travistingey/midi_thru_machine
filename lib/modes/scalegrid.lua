@@ -5,7 +5,7 @@ local musicutil = require(path_name .. 'musicutil-extended')
 
 local ScaleGrid = ModeComponent:new()
 ScaleGrid.__base = ModeComponent
-ScaleGrid.name = 'Mode Name'
+ScaleGrid.name = 'Scale Grid'
 
 function ScaleGrid:set(o)
 	self.__base.set(self, o) -- call the base set method first   
@@ -67,7 +67,7 @@ function ScaleGrid:set_scale(id)
 end
 
 function ScaleGrid:midi_event(scale,data)
-	tab.print(data)
+	self:set_grid(scale)
 end
 
 function ScaleGrid:grid_event (scale, data)
@@ -98,7 +98,7 @@ function ScaleGrid:grid_event (scale, data)
 end 
 
 function ScaleGrid:set_grid(scale)
-	
+	if scale == nil then return end
   local grid = self.grid
   local intervals =  musicutil.bits_to_intervals(scale.bits)
 		local root = scale.root

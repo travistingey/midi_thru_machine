@@ -14,7 +14,7 @@ function Mute:set(o)
 	o.id = o.id
     o.grid = o.grid
     o.state = {}
-
+    o.active = false
     for i= 0, 127 do
         o.state[i] = false
     end
@@ -28,23 +28,9 @@ function Mute:midi_event(data)
         local state = self.state[note] 
         
         if self.track.triggered then
-            for i=1, #App.track do
-                local track = App.track[i]
-
-                if track.midi_in == self.track.midi_in and track ~= self.track then
-                    state = track.mute.state[self.track.trigger]
-                    break
-                end
-            end
+           state = self.active
         end
 
-        if self.track.triggered then
-            state = self.state[self.track.trigger]
-        end
-
-        -- if self.track.channel_mute > 0 then
-        --     if App.track[self.track.channel_mute].mute.state[self.track.trigger]
-        -- end
         if (not state) then
             return data
         end

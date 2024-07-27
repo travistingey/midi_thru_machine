@@ -208,6 +208,9 @@ function SeqGrid:set_grid(seq)
 
 	local grid = self.grid
 	local wrap = 8
+
+	if seq == nil then return end
+
 	local current_step = (math.ceil(seq.tick/seq.div) - 1) % math.ceil(seq.length/seq.div) + 1
 	local page_count = math.ceil( math.ceil(seq.length/seq.div) / wrap)
 

@@ -18,8 +18,6 @@ function TrackComponent:set(o)
 	self.midi_event = o.midi_event or function(s,data) return data end
 	self.type = o.type
 	self.track = o.track
-	self.on_transport = o.on_transport or function(s,data) return data end
-	self.on_midi = o.on_midi or function(s,data) return data end
 
 	if self.types and self.type and self.types[self.type] then
 		local type = self.types[self.type]
@@ -47,6 +45,7 @@ function TrackComponent:process_transport(data, track)
 			send = self:transport_event(data, track)
 		end
 
+		
 		if self.on_transport ~= nil then
 			self:on_transport(data, track)
 		end

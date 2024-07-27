@@ -10,6 +10,22 @@ path_name = script_name .. '/lib/'
 local utilities = require(path_name .. 'utilities')
 App = require(path_name .. 'app')
 
+
+function transform(x)
+	-- Polynomial function
+	local  y =  1.47169e-4 * x^3 - 0.03408 * x^2 + 2.72011 * x - 83.71316
+	
+	-- Define original and target ranges
+	local a, b = -96, 12  -- Original dB range
+	local c, d = -16, 125.5   -- Target range of 0 to 127, adjusted so the floored values are within 0 to 127 excactly
+	-- Scale and offset the polynomial output
+	y = math.floor(((y - a) / (b - a)) * (d - c) + c)
+  
+	return y
+  end
+
+
+
 ------------------------------------------------------------------------------
 function init()
 
@@ -29,7 +45,7 @@ end
 
 function redraw_clock() ----- a clock that draws space
 	while true do ------------- "while true do" means "do this forever"
-		clock.sleep(1 / 15) ------- pause for a fifteenth of a second (aka 15fps)
+		clock.sleep(1 / 24) ------- pause for a fifteenth of a second (aka 15fps)
 		if App.screen_dirty then ---- only if something changed
 			redraw() -------------- redraw space
 			App.screen_dirty = false -- and everything is clean again
@@ -44,7 +60,7 @@ end
 
 function r() ----------------------------- execute r() in the repl to quickly rerun this script
 
-	App:panic()
+	--App:panic()
 	
 	utilities.unrequire(path_name .. 'app')
 	utilities.unrequire(path_name .. 'track')
@@ -66,6 +82,7 @@ function r() ----------------------------- execute r() in the repl to quickly re
 	utilities.unrequire(path_name .. 'modes/seqclip')
 	utilities.unrequire(path_name .. 'modes/scalegrid')
 	utilities.unrequire(path_name .. 'modes/notegrid')
+	utilities.unrequire(path_name .. 'modes/presetgrid')
 	
 	utilities.unrequire(path_name .. 'musicutil-extended')
 	utilities.unrequire(path_name .. 'utilities')

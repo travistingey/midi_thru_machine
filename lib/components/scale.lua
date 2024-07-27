@@ -16,11 +16,13 @@ function Scale:set(o)
 	self.root = o.root or 0
 	self.bits = o.bits or 0
 	self.follow = o.follow or 0
-	self.follow_method = o.follow_method or 1
+	self.follow_method = o.follow_method or 0
 	self.scale_select = o.scale_select or 0
 	self.reset_latch = false
 	self.latch_notes = {}
 	self.intervals = o.intervals or {}
+
+	self.lock = false
 end
 
 
@@ -55,10 +57,14 @@ function Scale:register_params(id)
 		end
 	end)
 
-	params:add_number(scale .. 'follow', 'Follow',0,3,0)
+	params:add_number(scale .. 'follow', 'Follow',0,16,0)
 	params:set_action(scale .. 'follow', function(d)
-		App.scale[id].follow = d
 
+		App.scale[id].follow = d
+		
+		if App.scale[id].follow_method < 4 then
+			App.scale[id].follow = util.clamp(App.scale[id].follow,0,3)	
+		end
 		if d > 0 then
 			for i = 1, 3 do 
 				App.scale[i]:follow_scale()
@@ -73,6 +79,10 @@ function Scale:register_params(id)
 	params:add_option(scale .. 'follow_method', 'Follow Method',{'transpose','scale degree','pentatonic','midi on', 'midi latch'},1)
 	params:set_action(scale .. 'follow_method', function(d)
 		App.scale[id].follow_method = d
+
+		if d < 4 then
+			App.scale[id].follow = util.clamp(App.scale[id].follow,0,3)	
+		end
 
 		for i = 1, 3 do 
 			App.scale[i]:follow_scale()
@@ -144,31 +154,30 @@ function Scale:follow_scale(notes)
 				self.root = other.root
 				params:set(scale .. 'root', other.root, true)
 			end
-		end
-	elseif self.follow_method > 3 and notes then
-		
-		-- MIDI controlled
-		local b = 0
-		local n = {}
-		local min = 0
-		
-		for note in pairs(notes)do
-			if min == 0 or note < min then
-				min = note
+		elseif self.follow_method > 3 and notes then
+			-- MIDI controlled
+			local b = 0
+			local n = {}
+			local min = 0
+			
+			for note in pairs(notes)do
+				if min == 0 or note < min then
+					min = note
+				end
+				n[#n + 1] = notes[note].note
 			end
-			n[#n + 1] = notes[note].note
-		end
 
-		for i= 1, #n do
-			n[i] = (n[i] - min) % 12
-		end
-		
-		local s = musicutil.intervals_to_bits(n)
-		self.root = min % 12
-		params:set(scale .. 'root', self.root, true)
-		
-		self:set_scale(s)
+			for i= 1, #n do
+				n[i] = (n[i] - min) % 12
+			end
+			
+			local s = musicutil.intervals_to_bits(n)
+			self.root = min % 12
+			params:set(scale .. 'root', self.root, true)
+			
+			self:set_scale(s)
 
+		end
 	end
 end
 
@@ -184,10 +193,10 @@ function Scale:midi_event(data, track)
     local root = self.root
     
     if data.note then
-		if self.follow_method == 4  and (data.type == 'note_on' or data.type == 'note_off') then
+		if self.follow_method == 4  and (data.type == 'note_on' or data.type == 'note_off') and track.id == self.follow then
 			self:follow_scale(track.note_on)
 			return data
-		elseif self.follow_method == 5 and (data.type == 'note_on' or data.type == 'note_off') then
+		elseif self.follow_method == 5 and (data.type == 'note_on' or data.type == 'note_off') and track.id == self.follow then
 			local count = 0
 			
 			for n in pairs(track.note_on) do 
@@ -203,10 +212,7 @@ function Scale:midi_event(data, track)
 				end
 				self.latch_notes[data.note] = data
 				self:follow_scale(self.latch_notes)
-			end
-
-			for i=1,3 do
-				App.scale[i]:follow_scale()
+				
 			end
 
 			return data

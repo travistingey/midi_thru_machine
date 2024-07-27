@@ -10,8 +10,6 @@ local Mode = require(path_name .. 'mode')
 
 local musicutil = require(path_name .. 'musicutil-extended')
 
-
-
 function App:init()
 	self.screen_dirty = true
 	-- Model
@@ -22,8 +20,10 @@ function App:init()
 	self.mode = {}
 
 	self.current_mode = 1
-	self.current_track = 1
+	self.current_trigger = nil
 	
+	self.bsp_record = false -- need a flag to control when notes flow into BSP from the keys
+
 	self.preset = 1
 	
 	self.ppqn = 24
@@ -59,6 +59,10 @@ function App:init()
 	self.midi_in = {}
 	self.midi_out = {}
 	self.midi_grid = {} -- NOTE: must use Launch Pad Device 2
+	self.mixer_in = {}
+	self.mixer_out = {}
+	self.keys = {}
+
 
 	-- Crow Setup
 	self.crow = {input = {0,0},output = {}}
@@ -85,7 +89,7 @@ function App:init()
 
 	-- Create the Scales
 	params:add_separator('scales','Scales')
-	for i = 0, 4 do
+	for i = 0, 3 do
 		self.scale[i] = Scale:new({id = i})
 		Scale:register_params(i)
 	end
@@ -103,6 +107,9 @@ function App:init()
 	App:register_midi_in(1)
 	App:register_midi_out(2)
 	App:register_midi_grid(3)
+	App:register_mixer_in(4)
+	App:register_mixer_out(5)
+	App:register_keys(6)
 	App:register_modes()
 	
 end -- end App:init
@@ -122,10 +129,12 @@ function App:start(continue)
 		event = { type ='continue' }
 		self.midi_in:continue()
 		self.midi_out:continue()
+		self.mixer_out:continue()
 	else
 		event = { type ='start' }
 		self.midi_in:start()
 		self.midi_out:start()
+		self.mixer_out:start()
 	end
 	
 	-- handle ticks
@@ -157,6 +166,7 @@ function App:stop()
 
 		self.midi_in:stop()
 		self.midi_out:stop()
+		self.mixer_out:stop()
 
 		if params:get('clock_source') == 1 then
 			for i = 1, #self.track do
@@ -268,7 +278,6 @@ end
 -- Norns Buttons
 function App:handle_key(k,z)
 	local context = self.mode[self.current_mode].context
-	print('handle_key',k,z)
 	if k == 1 then
 		self.alt_down = z == 1
 	elseif ( self.alt_down and z == 1 and context['alt_fn_' .. k] ) then
@@ -277,10 +286,9 @@ function App:handle_key(k,z)
 		self.key_down = util.time()
 	elseif not self.alt_down then
 		local hold_time = util.time() - self.key_down
-
 		if hold_time > 0.3  and context['long_fn_' .. k] then
 			context['long_fn_' .. k]()
-		elseif press_fn then
+		elseif context['press_fn_' .. k] then
 			context['press_fn_' .. k]()
 		end
 	end
@@ -313,10 +321,13 @@ end
 
 function App:register_params()
 
-	params:add_group('Devices',4)
+	params:add_group('DEVICES',7)
 	params:add_option("midi_in", "MIDI In",self.midi_device_names,1)
 	params:add_option("midi_out", "MIDI Out",self.midi_device_names,2)
 	params:add_option("midi_grid", "Grid",self.midi_device_names,3)
+	params:add_option("mixer_in", "Mixer In",self.midi_device_names,4)
+	params:add_option("mixer_out", "Mixer Out",self.midi_device_names,5)
+	params:add_option("keys", "Keys",self.midi_device_names,6)
 	params:add_trigger('panic', "Panic")
 	params:set_action('panic', function()
 		App:panic()
@@ -333,7 +344,90 @@ function App:register_params()
 	params:set_action("midi_grid", function(x)
 			App:register_midi_grid(x)
 	end)
+
+	params:set_action("mixer_in", function(x)
+		App:register_mixer_in(x)
+	end)
 	
+	params:set_action("mixer_out", function(x)
+			App:register_mixer_out(x)
+	end)
+
+	params:set_action("keys", function(x)
+		App:register_keys(x)
+end)
+	
+end
+
+
+function App:register_keys(n)
+	self.keys.event = nil
+		
+	self.keys = midi.connect(n)
+	self.keys.event = function(msg)
+		local data = midi.to_msg(msg)
+		
+		if self.bsp_record then
+			
+			data.ch = 1
+			tab.print(data)
+			App.midi_in:send(data)
+		end
+
+	end
+end
+
+-- Bezier curve control points
+-- when plotted, x represents the input message and y is the curved response
+local A = {x = 0, y = 0} -- A.x is set to 0, use A.y to set the minimum output
+local B = {x = 0, y = 1.13} -- Shape the curve using points B and C
+local C = {x = 0.77, y = 0.64}
+local D = {x = 1, y = 1} -- D.x is set to 1, use D.y to set the maximum output
+
+
+-- Cubic Bezier Curve Mapping
+local function bezier_transform(input, P0, P1, P2, P3)
+  -- Normalize the input value of [0,127] to range [0, 1]
+  local t = input / 127
+  local output = {}
+  output.input = input
+
+  -- Bezier transform
+  local u = 1 - t
+  local tt = t * t
+  local uu = u * u
+  local uuu = uu * u
+  local ttt = tt * t
+
+  output.x = uuu * P0.x + 3 * uu * t * P1.x + 3 * u * tt * P2.x + ttt * P3.x
+  output.y = uuu * P0.y + 3 * uu * t * P1.y + 3 * u * tt * P2.y + ttt * P3.y
+
+  output.value = math.floor(output.y * 127) -- scaling and flooring output for use as CC message
+
+  return output
+end
+
+
+function App:register_mixer_in(n)
+	self.mixer_in.event = nil
+		
+	self.mixer_in = midi.connect(n)
+	self.mixer_in.event = function(msg)
+		local data = midi.to_msg(msg)
+		
+		if data.type == 'cc' and data.ch == 1 and data.cc >=77 and data.cc <=88 then
+			local value = bezier_transform(data.val,A,B,C,D)
+			
+			data.val = value.value
+		end
+
+		self.mixer_out:send(data)
+	end
+end
+
+
+function App:register_mixer_out(n)		
+	self.mixer_out = midi.connect(n)
 end
 
 function App:register_midi_in(n)
@@ -347,8 +441,6 @@ function App:register_midi_in(n)
 
 	self.midi_in.event = function(msg)
 		
-		App.screen_dirty = true
-
 		local data = midi.to_msg(msg)
 
 		if self.debug then
@@ -365,15 +457,24 @@ function App:register_midi_in(n)
 			App:on_tick()
 		end
 		
-		if not (data.type == "start" or data.type == "continue" or data.type == "stop" or data.type == "clock") then
+		if data.type == 'cc'then
+			if data.cc == 50 then
+				self.bsp_record = (data.val > 0)
+			end
+
+			App.midi_out:send(data)
+		end
+
+		if not (data.type == "cc" or data.type == "start" or data.type == "continue" or data.type == "stop" or data.type == "clock") then
 			App:on_midi(data)
 		end
 		
+		App.screen_dirty = true
+
 	end
 end
 
 function App:register_midi_out(n)
-	self.midi_out.event = nil
 	self.midi_out = midi.connect(n)
 end
 
@@ -387,6 +488,49 @@ function App:register_midi_grid(n)
 	self:register_modes()
 end
 
+App.default = {}
+
+App.default.screen = function()
+			
+	if App.playing then
+		local beat = 15 - math.floor( (App.tick % 24) / 24 * 16)
+		screen.level( beat )
+	else
+		screen.level(5)
+	end
+	screen.rect(0,0,56,32)
+	screen.fill()
+	screen.move(28, 26)
+	screen.font_face(58)
+	screen.font_size(32)
+	screen.level(0)
+	screen.text_center(math.floor(clock.get_tempo() + 0.5))
+	screen.fill()
+
+	screen.level(10)
+	screen.move(66,10)
+	screen.font_size(8)
+	screen.font_face(1)
+	if App.track[1].midi_in == 0 then
+		screen.text('NO INPUT')
+	else
+		screen.text('CHANNEL ' .. App.track[1].midi_in)
+	end
+
+	if App.current_trigger then
+		screen.move(0,40)
+		screen.text(App.current_trigger)
+		for i=1,16 do
+			if App.track[i].triggered and App.track[i].trigger == App.current_trigger then
+				screen.move(0,48)
+				screen.text('Track ' .. i)
+			end
+		end
+
+		screen.fill()
+	end
+end
+
 function App:register_modes()
 
 	-- Create the modes
@@ -398,7 +542,6 @@ function App:register_modes()
 		offset = {x=4,y=8},
 		midi = App.midi_grid,
 		event = function(s,data)
-			screen.ping()
 			if data.state then
 				s:reset()
 				local mode = App.mode[App.current_mode]
@@ -432,6 +575,7 @@ function App:register_modes()
 	local ScaleGrid = require(path_name .. 'modes/scalegrid') 
 	local MuteGrid = require(path_name .. 'modes/mutegrid') 
 	local NoteGrid = require(path_name .. 'modes/notegrid')
+	local PresetGrid = require(path_name .. 'modes/presetgrid')
 	
 	local draw_things = function() end
 	
@@ -490,24 +634,22 @@ function App:register_modes()
 	
 	self.mode[1] = Mode:new({
 		components = {
-			ScaleGrid:new({id=1, offset = {x=0,y=6}}),
-			ScaleGrid:new({id=2, offset = {x=0,y=4}}),
+			PresetGrid:new({track=1}),
 			MuteGrid:new({track=1}),
 			NoteGrid:new({track=1})
 		},
 		on_row = function(s,data)
-			
-			if data.state then
+			if data.state and data.row <= #s.components[3].action then
 				s.layer[1] = function()
 					screen.font_face(1)
 					screen.font_size(8)
 					screen.level(16)
-					screen.move(66,16)
+					screen.move(64,16)
 					screen.text(NoteGrid.action[data.row].name)
 					screen.fill() 
 				end
 				
-				s.components[4]:select_action(data.row)
+				s.components[3]:select_action(data.row)
 				for i = 2, 8 do
 					s.row_pads.led[9][i] = 0
 				end
@@ -515,37 +657,20 @@ function App:register_modes()
 				s.row_pads.led[9][9 - data.row] = 1
 				s.row_pads:refresh()
 
-				App:draw()
+				App.screen_dirty = true
 			end
 		end,
-		default = function()
-			screen.level(6)
-			screen.rect(0,0,64,32)
-			screen.fill()
-			screen.move(0, 28)
-			screen.font_face(58)
-			screen.font_size(32)
-			screen.level(0)
-			screen.text(math.floor(clock.get_tempo() + 0.5))
-			screen.fill()
-
-		screen.fill() ---------------- fill the termini and message at once
-		end,
+		default = {screen = App.default.screen},
 		context = {
-			enc3 = function(d)
+			enc1 = function(d)
 				local midi = App.track[1].midi_out + d
 				
 				params:set('track_1_midi_out', midi)
 				params:set('track_1_midi_in', midi)
-				App.mode[1].layer[2] = function()
-					screen.move(66,10)
-					screen.font_size(8)
-					screen.font_face(1)
-					screen.text('CHANNEL ' .. midi)
-					screen.level(10)
-					screen.fill()
-				end
 				
+				App.mode[App.current_mode]:enable()
+				App.screen_dirty = true
+
 			end 
 		}
 	})

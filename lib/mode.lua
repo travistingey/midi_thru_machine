@@ -32,11 +32,12 @@ function Mode:set(o)
     self.timeout = 5
     self.interupt = false
     self.context = o.context or {}
-    self.default = o.default or function() end
+    self.default = o.default or {}
     self.layer = o.layer or {}
 
-    self.layer[0] = self.default
-    
+    if self.default.screen then
+        self.layer[0] = self.default.screen or function() end
+    end
     -- Create the modes
 	self.grid = Grid:new({
 		grid_start = {x=1,y=1},
@@ -102,6 +103,9 @@ function Mode:set(o)
                 s.led[data.x][data.y] = 1
             else
                 s.led[data.x][data.y] = 0
+                if data.state then
+                    s:reset()
+                end
             end
             self.alt = data.toggled
             s:refresh('alt event')
@@ -113,6 +117,14 @@ function Mode:set(o)
         end,
         on_reset = function(s)
             self.alt = false
+
+            for i,c in pairs(self.components) do
+                c.selection = nil
+                if c.set_grid then
+                    c:set_grid()
+                end
+            end
+
         end
     } )
 
@@ -132,6 +144,97 @@ function Mode:draw()
     end
    
 end
+
+function Mode:handle(binding, func, callback )
+    self.context[binding] = function(a,b)
+        
+        func(a,b)
+        if self[ binding .. '_clock'] then
+            clock.cancel(self[ binding .. '_clock'])
+        end
+        local count = 0
+        self[ binding .. '_clock'] = clock.run(function()
+            while count < self.timeout do
+                clock.sleep(1/15)
+                count = count + (1/15)
+            end
+
+            if self.default and self.default[binding] then
+                self.context[binding] = self.default[binding]
+            else
+                self.context[binding] = nil
+            end
+
+            if callback ~= nil then
+                callback()
+            end
+            
+            clock.cancel(self[ binding .. '_clock'])
+        end)
+        
+    end
+end
+
+function Mode:context_timeout(callback)
+    if self.context_clock then
+        clock.cancel(self.context_clock)
+    end
+
+    local count = 0
+    
+    self.context_clock = clock.run(function()
+        while count < self.timeout do
+            clock.sleep(1/24)
+            count = count + (1/24)
+        end
+        
+        self.alt_pad:reset()
+        
+        if callback then
+            callback()
+        end
+
+        clock.cancel(self.context_clock)
+        self.context_clock = nil
+    end)
+end
+
+function Mode:handle_context(context, screen, layer)
+    layer = layer or 1
+
+    self.layer[layer] = screen
+    App.screen_dirty = true
+    
+    local callback = function()
+        print('context callback timeout')
+        for binding, func in pairs(context) do
+            if self.default and self.default[binding] then
+                self.context[binding] = self.default[binding]
+            else
+                self.context[binding] = nil
+            end
+        end
+
+        for i,c in pairs(self.components) do
+            if c.set_grid then
+                c:set_grid()
+            end
+        end
+
+        self.layer[layer] = nil
+        App.screen_dirty = true
+    end
+
+    self:context_timeout(callback)
+
+    for binding, func in pairs(context) do
+        self.context[binding] = function(a,b)
+            func(a,b)
+            self:context_timeout(callback)
+        end
+    end
+end
+
 
 function Mode:toast(toast_screen, layer)
     App.screen_dirty = true

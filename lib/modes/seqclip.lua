@@ -5,7 +5,7 @@ local Grid = require(path_name .. 'grid')
 local SeqClip = ModeComponent:new()
 
 SeqClip.__base = ModeComponent
-SeqClip.name = 'Mode Name'
+SeqClip.name = 'Seq Clip'
 
 function SeqClip:set(o)
 	self.__base.set(self, o) -- call the base set method first   
@@ -126,7 +126,7 @@ end
 
 function SeqClip:set_grid (seq)
     local grid = self.grid
-    if seq.track.active then
+    if seq and seq.track.active then
       
   	  
   	  grid:for_each(function(s,x,y,i)

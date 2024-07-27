@@ -57,12 +57,12 @@ function Track:set(o)
 
 	self.active = o.active or false
 	self.mono = o.mono or false
-	self.exclude_trigger = o.exclude_trigger or false
 	self.voice = o.voice or 0
+	self.chord_type = o.chord_type or 1
 
 	local track = 'track_' .. self.id ..'_'
 
-	params:add_group('Track '.. self.id, 20)
+	params:add_group('Track '.. self.id, 19)
 	-- Input Type
 	self.input_type = o.input_type or Input.options[1]
 	params:add_option(track .. 'input_type', 'Input Type', Input.options, 1)
@@ -82,7 +82,7 @@ function Track:set(o)
 		
 		if self.output_type == 'midi' and self.midi_out > 0 then
 			self.output = App.output[self.midi_out]
-		elseif self.output_type == 'crow' then
+		elseif self.output_type == 'crow' or self.output_type == 'chord' then
 			self.output = App.crow.output[self.crow_out]
 		else
 			self:load_component(Output)
@@ -321,18 +321,9 @@ function Track:set(o)
 		
 	end)
 	
-	-- Exclude Trigger
-	-- Note: I dont like the complexity this switching has added and I believe a different approach using Modes will eliminate the need for this
-	self.exclude_trigger = o.exclude_trigger or false
-	params:add_binary(track .. 'exclude_trigger','Exclude Trigger','toggle', 0)
-	params:set_action(track .. 'exclude_trigger',function(d)
-		-- exclude trigger from other outputs
-		self.exclude_trigger = (d>0)
-
-		if self.midi_in  == self.midi_in and self.exclude_trigger then
-			self.mute.grid = App.mute_grid
-		end
-		
+	params:add_option(track .. 'chord_type', 'Chord Type', {'EO', 'Plaits'}, 1)
+	params:set_action(track .. 'chord_type', function(d)
+		self.chord_type = d
 	end)
 
 	-- Voice
@@ -458,8 +449,9 @@ end
 -----------
 function Track:kill()
 	
-	self.output:kill()
-	
+	if self.output then
+		self.output:kill()
+	end
 	self.note_on = {}
 end
 
