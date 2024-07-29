@@ -205,24 +205,24 @@ function NoteGrid:grid_event (component, data)
         self.state[pad] = not (self.state[pad])  
       end
  
-        if data.state then
-        
-            local on = {
-              type = 'note_on',
-              note = self.grid:grid_to_index(data) - 1,
-              vel = 100,
-              ch = track.midi_out
-            }
-            track:send_input(on)
-        else
-          local off = {
-            type = 'note_off',
+      if data.state then
+      
+          local on = {
+            type = 'note_on',
             note = self.grid:grid_to_index(data) - 1,
             vel = 100,
             ch = track.midi_out
           }
-          track:send_input(off)
-        end
+          track:send_input(on)
+      else
+        local off = {
+          type = 'note_off',
+          note = self.grid:grid_to_index(data) - 1,
+          vel = 100,
+          ch = track.midi_out
+        }
+        track:send_input(off)
+      end
   
     elseif self.type[pad] == EMPTY then
       
