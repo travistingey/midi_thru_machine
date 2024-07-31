@@ -21,7 +21,7 @@ function Mode:new(o)
 end
 
 function Mode:set(o)
-    self.id = o.id or #App.mode + 1 or 1
+    self.id = o.id
     self.components = o.components or {}
 
     self.set_action = o.set_action
@@ -58,6 +58,12 @@ function Mode:set(o)
             end
         end
 	})
+
+    self.mode_pads = self.grid:subgrid({
+        name = 'mode pads',
+        grid_start = {x=5,y=9},
+        grid_end = {x=8,y=9},
+    })
 
     self.arrow_pads = self.grid:subgrid({
         name = 'arrows pads',
@@ -266,11 +272,17 @@ end
 -- Methods
 function Mode:enable()
     
+
+    self.grid:enable()
+    
+    if self.id then
+        self.mode_pads.led[4 + self.id][9] = 3
+        self.mode_pads:refresh()
+    end
+    
     if self.on_load ~= nil then
         self:on_load()
     end
-
-    self.grid:enable()
 
     for i, component in ipairs(self.components) do
         component.mode = App.mode[App.current_mode]

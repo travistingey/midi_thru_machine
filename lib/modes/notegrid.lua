@@ -9,7 +9,6 @@ local TRIGGER = 1
 local LAUNCH = 2
 local EMPTY = 3
 
-
 local TYPES = {'trigger','launch','empty'}
 
 NoteGrid.__base = ModeComponent
@@ -20,6 +19,7 @@ function NoteGrid:set(o)
 
   self.component = 'output'
   self.select = o.select or 1
+  self.channel = o.channel or 10
 
   self.grid = Grid:new({
     name = 'NoteGrid ' .. o.track,
@@ -39,20 +39,20 @@ function NoteGrid:set(o)
         type = 'note_on',
         note = self.selection + 48,
         vel = 100,
-        ch = track.midi_out
+        ch = self.channel
       }
 
-      track:send_output(on)
+      App.midi_in:send(on)
   
       clock.run(function()
         clock.sleep(.005)
         local off = on
         off.type = 'note_off'
-        track:send_output(off)
-        self.state[self.selection] = false
+        App.midi_in:send(off)
+        self.state[self.channel][self.selection] = false
       end)
   
-      self.type[self.selection] = EMPTY
+      self.type[self.channel][self.selection] = EMPTY
       
       App.screen_dirty = true
       self:set_grid()
@@ -64,10 +64,10 @@ function NoteGrid:set(o)
       App.screen_dirty = true
     end,
     enc3 = function(d)
-      self.type[self.selection] = util.clamp(self.type[self.selection] + d, 1, #TYPES - 1)
+      self.type[self.channel][self.selection] = util.clamp(self.type[self.channel][self.selection] + d, 1, #TYPES - 1)
       
-      if self.type[self.selection] == LAUNCH then
-        self.state[self.selection] = false
+      if self.type[self.channel][self.selection] == LAUNCH then
+        self.state[self.channel][self.selection] = false
       end
   
       self:set_grid()
@@ -97,10 +97,10 @@ function NoteGrid:set(o)
       screen.move(36, 42)
       screen.text('TYPE')
       screen.move(128, 42)
-      screen.text_right(TYPES[self.type[self.selection]])
+      screen.text_right(TYPES[self.type[self.channel][self.selection]])
       screen.fill()
       
-      if self.type[self.selection] ~= EMPTY then
+      if self.type[self.channel][self.selection] ~= EMPTY then
         screen.move(36, 64)
         screen.text('PRESS A TO CLEAR')
         screen.fill()
@@ -114,65 +114,72 @@ function NoteGrid:set(o)
   self.type = o.type or {}
   self.state = {}
 
-  for i = 36, 51 do
-    self.type[i] = 1
-    self.state[i] = false
+  for i = 1, 16 do
+      self.type[i] = {}
+      self.state[i] = {}
+
+    for n = 36, 51 do
+      self.type[i][n] = 1
+      self.state[i][n] = false
+    end
+
   end
 
 end
 
+function NoteGrid:set_channel(n)
+  self.channel = n
+  print('channel is now set to ', self.channel)
+  self:set_grid()
+end
+
 function NoteGrid:on_enable()
-  local base = App.track[1]
+  local base = App.track[self.track]
   
   base.output.on_transport = function(s, data)    
       self:transport_event(s, data)
   end
 
-  
-
 end
 
+function NoteGrid:reset_state()
+  for i,v in pairs(self.state[self.channel]) do
+    if v == true then
+      local on = {
+        type = 'note_on',
+        note = i,
+        vel = 100,
+        ch = self.channel
+      }
+      
+      App.midi_in:send(on)
+      
+      clock.run(function()
+        clock.sleep(.005)
+        local off = on
+        off.type = 'note_off'
+        App.midi_in:send(off)
+        
+      end)
+    end
+    self.state[self.channel][i] = false
+    self:set_grid()
+  end
+end
 
 function NoteGrid:transport_event (component,data)
-  local track = App.track[1]
+  local track = App.track[self.track]
   if data.type == 'stop' then
-
-
-    for i,v in pairs(self.state) do
-      if v == true then
-        local on = {
-          type = 'note_on',
-          note = i,
-          vel = 100,
-          ch = track.midi_out
-        }
-        
-        track:send_output(on)
-        
-        clock.run(function()
-          clock.sleep(.005)
-          local off = on
-          off.type = 'note_off'
-          track:send_output(off)
-          
-        end)
-      end
-      self.state[i] = false
-      self:set_grid()
-    end
-   
+    self:reset_state()   
   end
 end
 
 function NoteGrid:grid_event (component, data)
   local track = App.track[self.track]
   local grid = self.grid
-  
-  local pad = self.grid:grid_to_index(data) - 1
-    
-
+ 
   if(data.type == 'pad') then
-    
+    local pad = self.grid:grid_to_index(data) - 1
     self.selection = pad
     
     
@@ -180,29 +187,29 @@ function NoteGrid:grid_event (component, data)
 
         self.mode:handle_context(self.alt_context, self.alt_screen)
       
-    elseif self.type[pad] == TRIGGER then
-      self.state[pad] = data.state
+    elseif self.type[self.channel][pad] == TRIGGER then
+      self.state[self.channel][pad] = data.state
       if data.state then
         local on = {
           type = 'note_on',
           note = self.grid:grid_to_index(data) - 1,
           vel = 100,
-          ch = track.midi_out
+          ch = self.channel
         }
-        track:send_input(on)
+        App.midi_in:send(on)
       else
         local off = {
           type = 'note_off',
           note = self.grid:grid_to_index(data) - 1,
           vel = 100,
-          ch = track.midi_out
+          ch = self.channel
         }
-        track:send_input(off)
+        App.midi_in:send(off)
       end
-    elseif self.type[pad] == LAUNCH then
+    elseif self.type[self.channel][pad] == LAUNCH then
       -- uses trigger on/off but state managed by data.toggle
       if data.state then
-        self.state[pad] = not (self.state[pad])  
+        self.state[self.channel][pad] = not (self.state[self.channel][pad])  
       end
  
       if data.state then
@@ -211,54 +218,54 @@ function NoteGrid:grid_event (component, data)
             type = 'note_on',
             note = self.grid:grid_to_index(data) - 1,
             vel = 100,
-            ch = track.midi_out
+            ch = self.channel
           }
-          track:send_input(on)
+          App.midi_in:send(on)
       else
         local off = {
           type = 'note_off',
           note = self.grid:grid_to_index(data) - 1,
           vel = 100,
-          ch = track.midi_out
+          ch = self.channel
         }
-        track:send_input(off)
+        App.midi_in:send(off)
       end
   
-    elseif self.type[pad] == EMPTY then
+    elseif self.type[self.channel][pad] == EMPTY then
       
       if data.state then
         local on = {
           type = 'note_on',
           note = self.grid:grid_to_index(data) - 1 + 32,
           vel = 100,
-          ch = track.midi_out
+          ch = self.channel
         }
-        track:send_input(on)
+        App.midi_in:send(on)
 
-        if self.state[pad] == 'recording' then
+        if self.state[self.channel][pad] == 'recording' then
           
           clock.run(function()
             clock.sleep(.005)
             local off = on
             off.type = 'note_off'
-            track:send_output(off)
-            self.type[pad] = LAUNCH
-            self.state[pad] = true
+            App.midi_in:send(off)
+            self.type[self.channel][pad] = LAUNCH
+            self.state[self.channel][pad] = true
           end)
           
           
         else
-          self.state[pad] = 'recording'
+          self.state[self.channel][pad] = 'recording'
         end
 
-      elseif self.state[pad] ~= 'recording' then
+      elseif self.state[self.channel][pad] ~= 'recording' then
         local off = {
           type = 'note_off',
           note = self.grid:grid_to_index(data) - 1 + 32,
           vel = 100,
-          ch = track.midi_out
+          ch = self.channel
         }
-        track:send_input(off)
+        App.midi_in:send(off)
       end
 
     end
@@ -270,12 +277,12 @@ end
 function NoteGrid:set_grid (component) 
     local grid = self.grid
 
-      for i,state in pairs(self.state) do
+      for i,state in pairs(self.state[self.channel]) do
         local c = grid:index_to_grid(i+1)
         if i == self.selection and self.mode.alt then
           grid.led[c.x][c.y] = 3
-        elseif self.type[i] == EMPTY  then
-          if self.state[i] == 'recording' then
+        elseif self.type[self.channel][i] == EMPTY  then
+          if self.state[self.channel][i] == 'recording' then
             grid.led[c.x][c.y] = {1,true}
           else  
             grid.led[c.x][c.y] = 0
@@ -288,9 +295,5 @@ function NoteGrid:set_grid (component)
       end
       grid:refresh('NoteGrid:set_grid')
 end
-
-
-
-
 
 return NoteGrid

@@ -88,7 +88,7 @@ end
 
 
 
-Input.options = {'midi','crow' ,'arpeggio','random','bitwise'} -- {...'crow', 'bitwise', 'euclidean'}
+Input.options = {'midi','keys','crow' ,'arpeggio','random','bitwise'} -- {...'crow', 'bitwise', 'euclidean'}
 Input.params = {'midi_in','trigger','crow_in','note_range_upper','note_range_lower','arp','note_range','step','reset_step','chance','voice','step_length'} -- Update this list to dynamically show/hide Track params based on Input type
 
 Input.types = {}
@@ -102,7 +102,7 @@ Input.types['midi'] = {
         track.triggered = false
     end,
     midi_event = function(s, data, track)
-        if data.ch == track.midi_in then
+        if data.device == 'midi_in' and data.ch == track.midi_in then
             
             -- Exclude notes that are being handled by triggered tracks
             for i = 1, #App.track do 
@@ -116,6 +116,21 @@ Input.types['midi'] = {
             
             return data
             
+        end
+    end
+}
+
+Input.types['keys'] = {
+    props = {'midi_in'},
+    set_action = function(s,track)
+        -- params:set('track_' .. track.id .. '_voice',1) -- polyphonic
+        track.triggered = false
+    end,
+    midi_event = function(s, data, track)
+        if data.device == 'keys' and data.ch == track.midi_in then
+            tab.print(data)
+            track:handle_note(data,'send_input')
+            return data
         end
     end
 }

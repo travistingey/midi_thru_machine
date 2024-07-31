@@ -62,7 +62,7 @@ function Track:set(o)
 
 	local track = 'track_' .. self.id ..'_'
 
-	params:add_group('Track '.. self.id, 19)
+	params:add_group('Track '.. self.id, 20)
 	-- Input Type
 	self.input_type = o.input_type or Input.options[1]
 	params:add_option(track .. 'input_type', 'Input Type', Input.options, 1)

@@ -1,30 +1,11 @@
--- TO DOs:
--- Sequencers not saving patterns and loading time divisions
--- Utility functions of MidiGrid like get_bounds should reference self rather than inputs.
--- Re-architect use of MidiGrid to allow for sub-grids. functions like get bounds, index of etc can reference themselves
--- App.chords are hard coded to run on Channel 14 with scale selection set to CC 21 in unipolar mode.
+-- Just remeber you're doing as good as you can today. There's no stakes and it's fun. :)
+
 
 script_name = 'Foobar'
 path_name = script_name .. '/lib/'
 
 local utilities = require(path_name .. 'utilities')
 App = require(path_name .. 'app')
-
-
-function transform(x)
-	-- Polynomial function
-	local  y =  1.47169e-4 * x^3 - 0.03408 * x^2 + 2.72011 * x - 83.71316
-	
-	-- Define original and target ranges
-	local a, b = -96, 12  -- Original dB range
-	local c, d = -16, 125.5   -- Target range of 0 to 127, adjusted so the floored values are within 0 to 127 excactly
-	-- Scale and offset the polynomial output
-	y = math.floor(((y - a) / (b - a)) * (d - c) + c)
-  
-	return y
-  end
-
-
 
 ------------------------------------------------------------------------------
 function init()
@@ -64,6 +45,7 @@ function r() ----------------------------- execute r() in the repl to quickly re
 	
 	utilities.unrequire(path_name .. 'app')
 	utilities.unrequire(path_name .. 'track')
+	utilities.unrequire(path_name .. 'launchcontrol')
 	utilities.unrequire(path_name .. 'grid')
 	utilities.unrequire(path_name .. 'mode')
 
@@ -83,6 +65,7 @@ function r() ----------------------------- execute r() in the repl to quickly re
 	utilities.unrequire(path_name .. 'modes/scalegrid')
 	utilities.unrequire(path_name .. 'modes/notegrid')
 	utilities.unrequire(path_name .. 'modes/presetgrid')
+	utilities.unrequire(path_name .. 'modes/presetseq')
 	
 	utilities.unrequire(path_name .. 'musicutil-extended')
 	utilities.unrequire(path_name .. 'utilities')

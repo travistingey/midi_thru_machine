@@ -2,6 +2,9 @@
 local App = {}
 
 local path_name = 'Foobar/lib/'
+
+
+local LaunchControl = require(path_name .. 'launchcontrol')
 local Grid = require(path_name .. 'grid')
 local Track = require(path_name .. 'track')
 local Scale = require(path_name .. 'components/scale')
@@ -59,9 +62,9 @@ function App:init()
 	self.midi_in = {}
 	self.midi_out = {}
 	self.midi_grid = {} -- NOTE: must use Launch Pad Device 2
-	self.mixer_led = {}
-	self.mixer_in = {}
-	self.mixer_out = {}
+	self.launchcontrol = {}
+	self.mixer = {}
+	self.bluebox = {}
 	self.keys = {}
 
 
@@ -108,12 +111,13 @@ function App:init()
 	App:register_midi_in(1)
 	App:register_midi_out(2)
 	App:register_midi_grid(3)
-	App:register_mixer_led(9)
-	App:register_mixer_in(4)
-	App:register_mixer_out(5)
+	App:register_launchcontrol(9)
+	App:register_mixer(4)
+	App:register_bluebox(5)
 	App:register_keys(6)
 	App:register_modes()
 	
+	params:default()
 end -- end App:init
 
 -- Start playback
@@ -131,12 +135,12 @@ function App:start(continue)
 		event = { type ='continue' }
 		self.midi_in:continue()
 		self.midi_out:continue()
-		self.mixer_out:continue()
+		-- self.bluebox:continue()
 	else
 		event = { type ='start' }
 		self.midi_in:start()
 		self.midi_out:start()
-		self.mixer_out:start()
+		-- self.bluebox:start()
 	end
 	
 	-- handle ticks
@@ -168,7 +172,7 @@ function App:stop()
 
 		self.midi_in:stop()
 		self.midi_out:stop()
-		self.mixer_out:stop()
+		-- self.bluebox:stop()
 
 		if params:get('clock_source') == 1 then
 			for i = 1, #self.track do
@@ -181,7 +185,6 @@ end
 -- Send tick event through system
 function App:send_tick()
 	local data = midi.to_data({ type ='clock' })
-	
 	self.midi_out:clock()
 end
 
@@ -323,14 +326,16 @@ end
 
 function App:register_params()
 
-	params:add_group('DEVICES',7)
+	params:add_group('DEVICES',8)
 	params:add_option("midi_in", "MIDI In",self.midi_device_names,1)
 	params:add_option("midi_out", "MIDI Out",self.midi_device_names,2)
-	params:add_option("midi_grid", "Grid",self.midi_device_names,3)
-	params:add_option("mixer_in", "Mixer In",self.midi_device_names,4)
-	params:add_option("mixer_led", "Mixer LED",self.midi_device_names,9)
-	params:add_option("mixer_out", "Mixer Out",self.midi_device_names,5)
 	params:add_option("keys", "Keys",self.midi_device_names,6)
+	params:add_option("mixer", "Mixer",self.midi_device_names,4)
+	params:add_option("midi_grid", "Grid",self.midi_device_names,3)
+	params:add_separator()
+	params:add_option("launchcontrol", "LaunchControl",self.midi_device_names,9)
+	params:add_option("bluebox", "BlueBox",self.midi_device_names,5)
+	
 	params:add_trigger('panic', "Panic")
 	params:set_action('panic', function()
 		App:panic()
@@ -348,16 +353,16 @@ function App:register_params()
 			App:register_midi_grid(x)
 	end)
 
-	params:set_action("mixer_in", function(x)
-		App:register_mixer_in(x)
+	params:set_action("mixer", function(x)
+		App:register_mixer(x)
 	end)
 
-	params:set_action("mixer_led", function(x)
-		App:register_mixer_led(x)
+	params:set_action("launchcontrol", function(x)
+		App:register_launchcontrol(x)
 	end)
 	
-	params:set_action("mixer_out", function(x)
-			App:register_mixer_out(x)
+	params:set_action("bluebox", function(x)
+			App:register_bluebox(x)
 	end)
 
 	params:set_action("keys", function(x)
@@ -373,12 +378,10 @@ function App:register_keys(n)
 	self.keys = midi.connect(n)
 	self.keys.event = function(msg)
 		local data = midi.to_msg(msg)
+		data.device = 'keys'
 		
-		if self.bsp_record then
-			
-			data.ch = 1
-			tab.print(data)
-			App.midi_in:send(data)
+		if not (data.type == "cc" or data.type == "start" or data.type == "continue" or data.type == "stop" or data.type == "clock") then
+			App:on_midi(data)
 		end
 
 	end
@@ -414,262 +417,50 @@ local function bezier_transform(input, P0, P1, P2, P3)
   return output
 end
 
-local MUTE = 1
-local SOLO = 2
-local ARM = 3
-local SEND = 4
-local CUE = 5
-
-local RED_LOW = 13
-local RED_HIGH = 15
-local AMBER_LOW = 29
-local AMBER_HIGH = 63 
-local YELLOW = 62
-local GREEN_LOW = 28
-local GREEN_HIGH = 60
-
-local trackCount = 8
-
-
-
-Mixer = {
-	control = MUTE,
-	track = {},	
-}
-
--- Initialize track states
-for i = 1, trackCount do
-    Mixer.track[i] = { [CUE] = false, [MUTE] = false, [SOLO] = false, [ARM] = false, [SEND] = false }
-end
-
-function Mixer:set_led ()
-		
-	local t = self.track
-	local s = self.control
-	local HIGH = YELLOW
-	local LOW = YELLOW
-	
-	if s == MUTE then
-		HIGH = 0
-	end
-
-	if s == SOLO then
-		HIGH = GREEN_LOW
-	end
-
-	if s == ARM then
-		HIGH = RED_HIGH
-	end
-
-	local led = {}
-
-	for i=1,8 do
-
-		if t[i][SOLO] then 
-			led[i] = GREEN_HIGH
-		elseif t[i][MUTE] then
-			led[i] = 0
-		elseif t[i][CUE] then
-			led[i] = YELLOW
-		elseif t[i][ARM] then
-			led[i] = RED_HIGH
-		else
-			led[i] = GREEN_LOW
-		end
-		
-	end
-
-	local sysex_message = {
-		240, 0, 32, 41, 2, 17, 120, 0, 
-		0, led[1], 1, led[2], 2, led[3], 3, led[4], 4, led[5], 5, led[6], 6, led[7], 7, led[8],     -- Top row knobs bright green
-		8, led[1], 9, led[2], 10, led[3], 11, led[4], 12, led[5], 13, led[6], 14, led[7], 15, led[8], -- Middle row knobs bright green
-		16, led[1], 17, led[2], 18, led[3], 19, led[4], 20, led[5], 21, led[6], 22, led[7], 23, led[8], -- Bottom row knobs bright green
-		24, (t[1][SEND] and GREEN_HIGH or 0) , 25, (t[2][SEND] and GREEN_HIGH or 0), 26, (t[3][SEND] and GREEN_HIGH or 0), 27, (t[4][SEND] and GREEN_HIGH or 0), 28, (t[5][SEND] and GREEN_HIGH or 0), 29, (t[6][SEND] and GREEN_HIGH or 0), 30, (t[7][SEND] and GREEN_HIGH or 0), 31, (t[8][SEND] and GREEN_HIGH or 0), -- Top channel buttons low amber
-		32, led[1], 33, led[2], 34, led[3], 35, led[4], 36, led[5], 37, led[6], 38, led[7], 39, led[8], -- Bottom channel buttons full green
-		40, (self.control == CUE and 60 or 0), -- Device off
-		41, (self.control == MUTE and 60 or 0), -- Mute button full
-		42, (self.control == SOLO and 60 or 0), -- Solo button low
-		43, (self.control == ARM and 60 or 0), -- Record Arm button low
-		44,0, -- Up off
-		45,0, -- Up off
-		46,0, -- Up off
-		47,0, -- Up off
-		247
-	}
-
-	App.mixer_led:send(sysex_message)
-end
-
-
-
-
-function App:register_mixer_in(n)
-    self.mixer_in.event = nil
+function App:register_mixer(n)
+    self.mixer.event = nil
         
-    self.mixer_in = midi.connect(n)
+    self.mixer = midi.connect(n)
     
-    
-    Mixer:set_led()
-	
-	self.mixer_in.event = function(msg)
+	self.mixer.event = function(msg)
         local data = midi.to_msg(msg)
         
         -- Handle MIDI CC data
         if data.type == 'cc' then
-            if data.cc >= 13 and data.cc <= 20 then
-                -- Handle Top Row Knobs
-            elseif data.cc >= 29 and data.cc <= 36 then
-                -- Handle Middle Row Knobs
-            elseif data.cc >= 49 and data.cc <= 56 then
-                -- Handle Bottom Row Knobs
-            elseif data.cc >= 77 and data.cc <= 84 then
+            if data.cc >= LaunchControl.cc_map['faders'][1] and data.cc <= LaunchControl.cc_map['faders'][8] then
                 -- Handle Faders
+				-- Bezier transform translations a linear value to a logarithmic value for bluebox
 				local value = bezier_transform(data.val,A,B,C,D)
 				data.val = value.value
-            else
-                -- Handle other CC data if needed
             end
 
-			if data.type == 'cc' then
-				self.mixer_out:send(data)
-			end
+			self.bluebox:send(data)
         end
 
         -- Handle MIDI note_on data
         if data.type == 'note_on' then
-            if data.note >= 0 and data.note <= 7 then
-                -- Handle Top Row Channel Buttons
-				local index = data.note + 1
-
-				local state = not Mixer.track[index][SEND]
-				Mixer.track[index][SEND] = state
-
-				local send = {
-					type = 'cc',
-					val = state and 127 or 0,
-				}
-				tab.print(Mixer.track[index])
-				send.cc = data.note
-
-				App.mixer_out:send(send)
-                
-            elseif data.note >= 12 and data.note <= 19 then
-
-                -- Handle Bottom Row Channel Buttons
-                local index = data.note - 11
-				local state = not Mixer.track[index][Mixer.control]
-				Mixer.track[index][Mixer.control] = state
-
-				tab.print(Mixer.track[index])
-
-				local send = {
-					type = 'cc',
-					val = state and 127 or 0,
-				}
-
-				if Mixer.control == MUTE then
-					send.cc = index + 36
-				end
-
-				if Mixer.control == SOLO then
-					send.cc = index + 57
-				end
-
-				if Mixer.control == ARM then
-					send.cc = index + 85
-				end
-
-				if Mixer.control == CUE then
-					send.cc = index + 99
-				end
-
-				App.mixer_out:send(send)
-
-            elseif data.note >= 120 and data.note <= 127 then
-				print('control', data.note)
-                -- Handle Device, Mute, Solo, Record Arm, Up, Down, Left, Right Buttons
-                -- UP
-				if data.note == 120 then
-					
-				end
-
-				-- DOWN
-				if data.note == 121 then
-				
-				end
-				
-				-- LEFT
-				if data.note == 122 then
-				
-				end
-				
-				-- RIGHT
-				if data.note == 123 then
-				
-				end
-
-				-- DEVICE
-				if data.note == 124 then
-					Mixer.control = CUE
-				end
-
-				-- MUTE
-				if data.note == 125 then
-					Mixer.control = MUTE
-				end
-
-				-- SOLO
-				if data.note == 126 then
-					Mixer.control = SOLO
-				end
-
-				-- ARM
-				if data.note == 127 then
-					Mixer.control = ARM
-				end
-            else
-                -- Handle other note data if needed
-				print('other')
-                tab.print(data)
-            end
 			
-			Mixer:set_led()
+			local send = LaunchControl:handle_note(data)
+
+			if send then 
+				App.bluebox:send(send)
+			end
+			
+			LaunchControl:set_led()
         end
     end
 end
 
 
--- function App:register_mixer_in(n)
--- 	self.mixer_in.event = nil
-		
--- 	self.mixer_in = midi.connect(n)
--- 	self.mixer_in.event = function(msg)
--- 		local data = midi.to_msg(msg)
-		
--- 		--Make volume faders act logorithmically by transforming CC values
--- 		if data.type == 'cc' and data.ch == 1 and data.cc >=77 and data.cc <=84 then
--- 			local value = bezier_transform(data.val,A,B,C,D)
-			
--- 			data.val = value.value
--- 		end
-
--- 		if data.type == 'cc' then
--- 			self.mixer_out:send(data)
--- 		end
--- 	end
--- end
 
 
-
-function App:register_mixer_led(n)
-	self.mixer_led.event = nil
-		
-	self.mixer_led = midi.connect(n)
-	
+function App:register_launchcontrol(n)
+	LaunchControl:register(n)
+	LaunchControl:set_led()
 end
 
-function App:register_mixer_out(n)		
-	self.mixer_out = midi.connect(n)
+function App:register_bluebox(n)		
+	self.bluebox = midi.connect(n)
 end
 
 function App:register_midi_in(n)
@@ -684,6 +475,7 @@ function App:register_midi_in(n)
 	self.midi_in.event = function(msg)
 		
 		local data = midi.to_msg(msg)
+		data.device = 'midi_in'
 
 		if self.debug then
 			print('Incoming MIDI')
@@ -805,6 +597,8 @@ function App:register_modes()
 		active = true
 	})
 
+	
+
 	self.midi_grid.event = function(msg)
 		local mode = self.mode[self.current_mode]
 		self.grid:process(msg)
@@ -818,6 +612,7 @@ function App:register_modes()
 	local MuteGrid = require(path_name .. 'modes/mutegrid') 
 	local NoteGrid = require(path_name .. 'modes/notegrid')
 	local PresetGrid = require(path_name .. 'modes/presetgrid')
+	local PresetSeq = require(path_name .. 'modes/presetseq')
 	
 	local draw_things = function() end
 	
@@ -867,6 +662,7 @@ function App:register_modes()
 		{name = 'unscii', face = 65, size = 8},
 		{name = 'unscii', face = 66, size = 16},
 		{name = 'unscii', face = 67, size = 8}
+
 	}
 
 	font_select = 1
@@ -875,23 +671,41 @@ function App:register_modes()
 
 	
 	self.mode[1] = Mode:new({
+		id = 1,
 		components = {
-			PresetGrid:new({track=1}),
+			PresetSeq:new({track=1}),
 			MuteGrid:new({track=1}),
 			NoteGrid:new({track=1})
 		},
+		on_load = function(s,data)
+		 	s.row_pads.led[9][8] = 1
+			s.row_pads:refresh()
+			 App.screen_dirty = true
+		end,
 		on_row = function(s,data)
-			if data.state and data.row <= #s.components[3].action then
+			if data.state then
+				local text = ''
+				if data.row == 1 then
+					s.components[3]:set_channel(10)
+					text = 'DRUMS'
+				elseif data.row == 2 then
+					s.components[3]:set_channel(1)
+					text = 'SEQ 1'
+				elseif data.row == 3 then
+					s.components[3]:set_channel(2)
+					text = 'SEQ 2'
+				end
+				
+				
 				s.layer[1] = function()
 					screen.font_face(1)
 					screen.font_size(8)
 					screen.level(16)
 					screen.move(64,16)
-					screen.text(NoteGrid.action[data.row].name)
+					screen.text(text)
 					screen.fill() 
 				end
 				
-				s.components[3]:select_action(data.row)
 				for i = 2, 8 do
 					s.row_pads.led[9][i] = 0
 				end
@@ -902,26 +716,30 @@ function App:register_modes()
 				App.screen_dirty = true
 			end
 		end,
-		default = {screen = App.default.screen},
+		default = {
+			screen = App.default.screen
+		},
 		context = {
 			enc1 = function(d)
-				local midi = App.track[1].midi_out + d
-				
-				params:set('track_1_midi_out', midi)
-				params:set('track_1_midi_in', midi)
-				
-				App.mode[App.current_mode]:enable()
-				App.screen_dirty = true
+			local midi = App.track[1].midi_out + d
+			
+			params:set('track_1_midi_out', midi)
+			params:set('track_1_midi_in', midi)
+			
+			App.mode[App.current_mode]:enable()
+			App.screen_dirty = true
 
-			end 
+		end
 		}
 	})
 
 	self.mode[2] = Mode:new({
+		id = 2,
 		components = {SeqGrid:new({track=1})}
 	})
 
 	self.mode[3] = Mode:new({
+		id = 3,
 		components = {
 			ScaleGrid:new({id=1, offset = {x=0,y=6}}),
 			ScaleGrid:new({id=2, offset = {x=0,y=4}}),
@@ -930,6 +748,7 @@ function App:register_modes()
 	})
 
 	self.mode[4] = Mode:new({
+		id = 4,
 		components = {
 		SeqClip:new({ track = 1, offset = {x=0,y=7}, active = true  }),
 		SeqClip:new({ track = 2, offset = {x=0,y=6} }),
@@ -939,12 +758,7 @@ function App:register_modes()
 		SeqClip:new({ track = 6, offset = {x=0,y=2} }),
 		SeqClip:new({ track = 7, offset = {x=0,y=1} }),
 		SeqClip:new({ track = 8, offset = {x=0,y=0} })
-		},
-		on_arrow = function(s,data)
-			if data.type == 'down' then
-				print('down town charlie brown')
-			end
-		end
+		}
 	})
 
 	self.mode[1]:disable() --clear out the old junk

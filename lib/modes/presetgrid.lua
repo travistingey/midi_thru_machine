@@ -36,7 +36,7 @@ end
 function PresetGrid:grid_event (component, data)
   
   local grid = self.grid
-  if data.state then
+  if data.state and data.type == 'pad' then
     self.select = self.grid:grid_to_index(data)
     
     App.midi_in:program_change (self.select - 1, DRUM_CHANNEL)
@@ -44,6 +44,10 @@ function PresetGrid:grid_event (component, data)
     App.midi_in:program_change (self.select - 1, SEQ_2_CHANNEL)
   end
   self:set_grid()
+end
+
+function PresetGrid:transport_event(component, data)
+tab.print(data)
 end
 
 function PresetGrid:set_grid (component) 
