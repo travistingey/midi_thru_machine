@@ -14,6 +14,7 @@ PresetSeq.name = 'Note Grid'
 
 function PresetSeq:set(o)
   self.__base.set(self, o) -- call the base set method first   
+  self.active = true
   self.select = o.select or 1
   self.step = 1
   self.component = 'input'
@@ -30,7 +31,7 @@ function PresetSeq:set(o)
 
   self.grid:refresh()
 
-  self.seq = {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16}
+  self.seq = {}
 
 end
 
@@ -52,7 +53,6 @@ end
 
 function PresetSeq:run(value)
   if value then
-    print('run')
     App.midi_in:program_change (value - 1, DRUM_CHANNEL)
     App.midi_in:program_change (value - 1, SEQ_1_CHANNEL)
     App.midi_in:program_change (value - 1, SEQ_2_CHANNEL)
@@ -60,25 +60,25 @@ function PresetSeq:run(value)
 end
 
 function PresetSeq:transport_event(component, data)
+  if self.active then
+    if data.type == 'start' then
+      self:run(self.seq[1])
+      self.step = 1
+    elseif data.type == 'clock' then
+      local current = math.ceil((App.tick + 1) / 96)
 
-  if data.type == 'start' then
-    self:run(self.seq[1])
-    self.step = 1
-  elseif data.type == 'clock' then
-    local current = math.ceil((App.tick + 1) / 96)
+      if current ~= self.step then
+        self.step = current
 
-    if current ~= self.step then
-      self.step = current
-
-      local value = self.seq[current]
-      if self.seq[(current - 2) % #self.seq + 1 ] ~= value then
-        self:run(value)
+        local value = self.seq[current]
+        if #self.seq > 0 and self.seq[(current - 2) % #self.seq + 1 ] ~= value then
+          self:run(value)
+        end
       end
     end
-  end
 
-  self:set_grid()
-  
+    self:set_grid()
+  end
 end
 
 function PresetSeq:set_grid (component) 

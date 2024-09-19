@@ -60,7 +60,7 @@ function ScaleGrid:get_component()
     return App.scale[self.id]
 end
 
-function ScaleGrid:set_scale(id)
+function ScaleGrid:select_scale(id)
   self:disable()
   self.id = id
   self:enable()
@@ -82,7 +82,7 @@ function ScaleGrid:grid_event (scale, data)
     			scale:shift_scale_to_note(d.note)
     			self.mode.alt_pad:reset()
     		else
-				  local bit_flag = (1 << ((24 + d.note - scale.root) % 12) ) -- bit representation for note
+				local bit_flag = (1 << ((24 + d.note - scale.root) % 12) ) -- bit representation for note
     			scale:set_scale(scale.bits ~ bit_flag )
     		end
 

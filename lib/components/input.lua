@@ -88,7 +88,7 @@ end
 
 
 
-Input.options = {'midi','keys','crow' ,'arpeggio','random','bitwise'} -- {...'crow', 'bitwise', 'euclidean'}
+Input.options = {'midi','keys','crow','arpeggio','random','bitwise','chord'} -- {...'crow', 'bitwise', 'euclidean'}
 Input.params = {'midi_in','trigger','crow_in','note_range_upper','note_range_lower','arp','note_range','step','reset_step','chance','voice','step_length'} -- Update this list to dynamically show/hide Track params based on Input type
 
 Input.types = {}
@@ -128,7 +128,6 @@ Input.types['keys'] = {
     end,
     midi_event = function(s, data, track)
         if data.device == 'keys' and data.ch == track.midi_in then
-            tab.print(data)
             track:handle_note(data,'send_input')
             return data
         end
@@ -228,6 +227,45 @@ Input.types['arpeggio'] = {
     end
     
 }
+
+local function chord_id(s, data)
+
+    
+    local event = {
+        note = s.track.note_range_lower + s.track.scale.root,
+        type = data.type,
+        index = 1,
+        vel = 100,
+        ch = data.ch
+    }
+
+    return event
+end
+
+Input.types['chord'] = {
+    props = {'midi_in','trigger','note_range_upper','note_range'},
+    set_action = function(s, track)
+        Input.set_trigger(s,track)     
+    end,
+    transport_event = function(s, data)     
+        return data
+    end,
+    midi_event = function(s,data)
+        local event =  Input.set_midi_trigger(s, data, function()
+            local send = {}
+            for i,v in pairs(data) do
+                send[i] = v
+            end
+
+            return send
+        end)
+        
+        return event
+    end
+    
+}
+
+
 
 function arpeggiate (s, data)
     local intervals = s.track.scale.intervals

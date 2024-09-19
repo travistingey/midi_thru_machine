@@ -13,7 +13,7 @@ function Output:set(o)
 	self.note_on = {}
 end
 
-Output.options = {'midi','crow','chord'}
+Output.options = {'midi','crow'}
 Output.params = {'crow_out','slew'} -- Update this list to dynamically show/hide Track params based on Input type
 
 Output.types = {}
@@ -58,48 +58,18 @@ Output.types['crow'] = {
 			crow.output[voct].dyn.note = volts    
 			crow.send('output[' .. voct .. ']()')
 
+			if data.index then
+				local step = 5/11
+				crow.output[3].volts = (data.index-1) * step + step / 2
+				print((data.index-1) * step + step / 2)
+			end
+
 			if data.type == 'note_on' then
 				crow.output[gate].volts = 5
 			elseif data.type == 'note_off' then
 				crow.output[gate].volts = 0
 			end
-
-		end
-		track:handle_note(data)
-		s:handle_note(data)
- 		return data
-	end
-
-}
-
-Output.types['chord'] = {
-	props = {},
-	midi_event = function(s,data, track)
-		if data ~= nil and data.note ~= nil then
-			local volts = (data.note - track.note_range_lower) / 12
-			local voct = 1
-			local index = 2
-
-			if s.channel == 1 then
-				voct = 1
-				index = 2
-			elseif s.channel == 2 then
-				voct = 3
-				index = 4
-			end
-
-			crow.output[voct].action = '{to(dyn{note = '.. volts .. '},dyn{slew = ' .. track.slew .. '})}'
-			crow.output[voct].dyn.note = volts    
-			crow.send('output[' .. voct .. ']()')
-
-			if data.type == 'note_on' then
-				if track.chord_type == 1 then
-					crow.output[index].volts = 0.5 * data.index - 0.25 -- index 10
-				elseif track.chord_type == 2 then
-					crow.output[index].volts = 5 / 11 * data.index - (5/22) -- index 11
-				end
-			end
-
+			
 		end
 		track:handle_note(data)
 		s:handle_note(data)

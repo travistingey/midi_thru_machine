@@ -32,12 +32,21 @@ function Mode:set(o)
     self.timeout = 5
     self.interupt = false
     self.context = o.context or {}
-    self.default = o.default or {}
+    self.default = {}
+
+    for binding,func in pairs(App.default) do
+       if self.context[binding] then
+            self.default[binding] = self.context[binding]
+        else
+            self.default[binding] = func
+            self.context[binding] = func
+       end
+    end
+
     self.layer = o.layer or {}
 
-    if self.default.screen then
-        self.layer[0] = self.default.screen or function() end
-    end
+    self.layer[0] = App.default.screen
+
     -- Create the modes
 	self.grid = Grid:new({
 		grid_start = {x=1,y=1},
@@ -143,42 +152,16 @@ end
 
 function Mode:draw()
     -- if interupt is true,
-    self.layer[0]()
+    if self.layer[0] then
+        self.layer[0]()
+    else
+        error('We lost the layer?')
+    end
 
     for i=1, #self.layer do
         self.layer[i]()
     end
    
-end
-
-function Mode:handle(binding, func, callback )
-    self.context[binding] = function(a,b)
-        
-        func(a,b)
-        if self[ binding .. '_clock'] then
-            clock.cancel(self[ binding .. '_clock'])
-        end
-        local count = 0
-        self[ binding .. '_clock'] = clock.run(function()
-            while count < self.timeout do
-                clock.sleep(1/15)
-                count = count + (1/15)
-            end
-
-            if self.default and self.default[binding] then
-                self.context[binding] = self.default[binding]
-            else
-                self.context[binding] = nil
-            end
-
-            if callback ~= nil then
-                callback()
-            end
-            
-            clock.cancel(self[ binding .. '_clock'])
-        end)
-        
-    end
 end
 
 function Mode:context_timeout(callback)
@@ -206,18 +189,20 @@ function Mode:context_timeout(callback)
 end
 
 function Mode:handle_context(context, screen, layer)
-    layer = layer or 1
 
-    self.layer[layer] = screen
+    if layer then
+        self.layer[layer] = screen
+    end
     App.screen_dirty = true
     
     local callback = function()
         print('context callback timeout')
         for binding, func in pairs(context) do
-            if self.default and self.default[binding] then
+            -- Only bind default if defined and is a function
+            if self.default and self.default[binding] and type(self.default[binding]) == "function" then
                 self.context[binding] = self.default[binding]
             else
-                self.context[binding] = nil
+                self.context[binding] = function() print('fuck ' .. binding) end
             end
         end
 
@@ -227,16 +212,20 @@ function Mode:handle_context(context, screen, layer)
             end
         end
 
-        self.layer[layer] = nil
+        if layer then
+            self.layer[layer] = nil
+        end
         App.screen_dirty = true
     end
 
     self:context_timeout(callback)
 
     for binding, func in pairs(context) do
-        self.context[binding] = function(a,b)
-            func(a,b)
-            self:context_timeout(callback)
+        if func and type(func) == "function" then  -- Ensure function exists and is callable
+            self.context[binding] = function(a, b)
+                func(a, b)
+                self:context_timeout(callback)
+            end
         end
     end
 end

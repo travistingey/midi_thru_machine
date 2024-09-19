@@ -38,7 +38,7 @@ function Seq:set(o)
 	o.arm_time = 0
 	o.tick = o.tick or 0 
 	o.step = o.step or o.length
-		o.quantize_step = o.quantize_step or 96
+	o.quantize_step = o.quantize_step or 96
 	o.div = o.div or 6
 	
 	o.follow = false
@@ -88,6 +88,7 @@ function Seq:get_step(step, div)
 	return value
 end
 
+
 function Seq:calculate_swing(tick)
 	local swing = App.swing
 	local swing_div = App.swing_div
@@ -112,8 +113,6 @@ function Seq:calculate_swing(tick)
 		return {tick = tick, offset = offset}
 	end
 
-	
-	
 end
 
 function Seq:print_values(target_note)
@@ -311,7 +310,23 @@ function Seq:record()
 	end
 end
 
+function Seq:send_note(event)
+	local track = App.track[self.track.id]
+    local sent = false
+    for i=1, #App.track do  
+      local other = App.track[i]
+      if other.id ~= track.id and other.midi_in == track.midi_in and event.note == other.trigger then
+        track:handle_note(event,'send')
+		other:send_event(event)
+        sent = true
+      end
+    end
 
+	if not sent then
+    	track:handle_note(event,'send')
+		track:send(event)
+	end
+end
 ------------------------
 
 -- MAIN EVENTS
@@ -357,7 +372,7 @@ function Seq:transport_event(data, track)
 		
 	elseif data.type == 'clock' then
 		self.tick = self.tick + 1
-
+		
 		local next_step = (self.tick - 1 ) % self.length + 1
 		local last_step = self.step
 		self.step = next_step
@@ -375,29 +390,26 @@ function Seq:transport_event(data, track)
 
 					if c.enabled then
 						clock.run(function()
-
+							local offset = c.offset
+							
+							-- offset for unquantized rhythm
 							if c.offset > 0 then
 								clock.sync(c.offset)
 							end
-
+							
 							-- manage note on/off
 							-- if bouncing a track, record sequence to buffer if note is not muted
 							if c.type == 'note_on' and  track.note_on[c.note] == nil then
-
 								if self.recording and self.bounce and not track.mute.state[c.note] then
 									self:record_event(c)
 								end
-
-								track:handle_note(c,'send')
-								track:send(c)	
-
+								self:send_note(c)
+									
 							elseif c.type == 'note_off' and track.note_on[c.note] ~= nil then
 								if self.recording and self.bounce then
 									self:record_event(c)
 								end
-								
-								track:handle_note(c,'send')
-								track:send(c)	
+								self:send_note(c)	
 							end
 						end)
 					end

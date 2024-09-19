@@ -62,7 +62,9 @@ function Track:set(o)
 
 	local track = 'track_' .. self.id ..'_'
 
-	params:add_group('Track '.. self.id, 20)
+	params:add_group('Track '.. self.id, 21)
+
+	params:add_text(track .. 'name', 'Name', 'Track ' .. o.id)
 	-- Input Type
 	self.input_type = o.input_type or Input.options[1]
 	params:add_option(track .. 'input_type', 'Input Type', Input.options, 1)
@@ -71,6 +73,7 @@ function Track:set(o)
 		self.input_type = Input.options[d]
 		self:load_component(Input)
 		self:build_chain()
+		self:set_active()
 	end)
 
 	-- Output Type
@@ -107,6 +110,7 @@ function Track:set(o)
 		self:kill()
 		self.midi_in = d
 		self:load_component(Input)
+		self:set_active()
 	end
 	)
 
@@ -360,7 +364,7 @@ function Track:update(o, silent)
 end
 
 function Track:set_active()
-	if self.output_type == 'midi' and self.midi_out > 0  or self.output_type == 'crow' then
+	if self.output_type == 'midi' and self.midi_out > 0  or self.output_type == 'crow' or self.input_type == 'keys' and self.midi_in > 0 then
 		self.active = true
 	else
 		self.active = false
@@ -444,6 +448,7 @@ function Track:build_chain()
 	self.send = self:chain_components(send, 'process_midi')
 	self.send_input = self:chain_components(send_input, 'process_midi')
 	self.send_output = self:chain_components({self.output}, 'process_midi')
+	self.send_event = self:chain_components(pre_scale, 'process_midi')
 end
 
 -----------
@@ -480,8 +485,12 @@ function Track:handle_note(data, chain, debug) -- 'send', 'send_input', 'send_ou
 					ch = last.ch,
 				}
 
-				self.note_on[last.id] = nil
-				
+				if last and last.id then
+					self.note_on[last.id] = nil
+				else
+					self.note_on[last.note] = nil
+				end
+
 				if chain ~= nil then
 					if self.debug then
 						print(last.id .. ' off sent during note on')

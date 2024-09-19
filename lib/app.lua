@@ -13,6 +13,9 @@ local Mode = require(path_name .. 'mode')
 
 local musicutil = require(path_name .. 'musicutil-extended')
 
+
+local LATCH_CC = 64
+
 function App:init()
 	self.screen_dirty = true
 	-- Model
@@ -23,10 +26,8 @@ function App:init()
 	self.mode = {}
 
 	self.current_mode = 1
-	self.current_trigger = nil
+	self.current_track = 1
 	
-	self.bsp_record = false -- need a flag to control when notes flow into BSP from the keys
-
 	self.preset = 1
 	
 	self.ppqn = 24
@@ -40,15 +41,21 @@ function App:init()
 	
 	self.triggers = {} -- Track which notes are used for triggers
 
-
+	
 	self.context = {}
 	self.key = {}
 	self.alt_down = false
 	self.key_down = 0
 
+	self.cc_subscribers = {}
+
 	self.midi_device = {} -- container for connected midi devices
 	local midi_device = self.midi_device
   	self.midi_device_names = {}
+
+	-- State for modes
+	self.send_out = true
+	self.send_in = true
 
 	for i = 1,#midi.vports do -- query all ports
 		midi_device[i] = midi.connect(i) -- connect each device
@@ -149,6 +156,7 @@ function App:start(continue)
 			while(true) do
 				clock.sync(1/self.ppqn)
 				App:send_tick()
+				App.screen_dirty = true
 			end
 		end)
 		
@@ -166,26 +174,29 @@ function App:stop()
 	self.playing = false
 	
 	if params:get('clock_source')  > 1 then
-		if self.clock then
-			clock.cancel(self.clock)
-		end
+		
 
 		self.midi_in:stop()
 		self.midi_out:stop()
 		-- self.bluebox:stop()
 
-		if params:get('clock_source') == 1 then
-			for i = 1, #self.track do
-				self.track[i]:process_transport({ type ='stop' })
-			end
+		
+	end
+
+	if params:get('clock_source') == 1 then
+		if self.clock then
+			clock.cancel(self.clock)
+		end
+		for i = 1, #self.track do
+			self.track[i]:process_transport({ type ='stop' })
 		end
 	end
+
 end
 
 -- Send tick event through system
 function App:send_tick()
-	local data = midi.to_data({ type ='clock' })
-	self.midi_out:clock()
+	self:on_tick()
 end
 
 -- Transport events triggered from MIDI In device
@@ -209,7 +220,37 @@ function App:on_midi(data)
 	for i=1,#self.track do
 		self.track[i]:process_midi(data)
 	end
+end
 
+-- CC Events
+function App:on_cc(data)
+	
+    if self.cc_subscribers[data.cc] then
+        for _, func in ipairs(self.cc_subscribers[data.cc]) do
+            func(data)
+        end
+    end
+
+	self.midi_out:send(data)
+
+end
+
+function App:subscribe_cc(cc_number, func)
+    if not self.cc_subscribers[cc_number] then
+        self.cc_subscribers[cc_number] = {}
+    end
+    table.insert(self.cc_subscribers[cc_number], func)
+end
+
+function App:unsubscribe_cc(cc_number, func)
+    if self.cc_subscribers[cc_number] then
+        for i, subscriber in ipairs(self.cc_subscribers[cc_number]) do
+            if subscriber == func then
+                table.remove(self.cc_subscribers[cc_number], i)
+                break
+            end
+        end
+    end
 end
 
 -- Clock events
@@ -226,6 +267,11 @@ end
 function App:crow_query(i)
 	crow.send('input[' .. i .. '].query()')
 end
+
+
+
+
+
 
 -- Setter for static variables
 function App:set(prop, value) self[prop] = value end
@@ -283,6 +329,8 @@ end
 -- Norns Buttons
 function App:handle_key(k,z)
 	local context = self.mode[self.current_mode].context
+	
+	
 	if k == 1 then
 		self.alt_down = z == 1
 	elseif ( self.alt_down and z == 1 and context['alt_fn_' .. k] ) then
@@ -367,10 +415,23 @@ function App:register_params()
 
 	params:set_action("keys", function(x)
 		App:register_keys(x)
-end)
+	end)
 	
+	params:add_separator()
+
+	App:register_song()
 end
 
+function App:register_song()
+	local swing_spec = controlspec.UNIPOLAR:copy()
+	swing_spec.default = 0.5
+
+	self.swing =  0.5
+	params:add_control('swing', 'Swing', swing_spec)
+	params:set_action('swing', function(d)
+		self.swing = d
+	end)
+end
 
 function App:register_keys(n)
 	self.keys.event = nil
@@ -380,10 +441,17 @@ function App:register_keys(n)
 		local data = midi.to_msg(msg)
 		data.device = 'keys'
 		
+		if data.type == 'cc' then
+			self:on_cc(data)
+		end
+
 		if not (data.type == "cc" or data.type == "start" or data.type == "continue" or data.type == "stop" or data.type == "clock") then
 			App:on_midi(data)
 		end
 
+		if data.type == "note_on" then
+			App:draw()
+		end
 	end
 end
 
@@ -427,12 +495,12 @@ function App:register_mixer(n)
         
         -- Handle MIDI CC data
         if data.type == 'cc' then
-            if data.cc >= LaunchControl.cc_map['faders'][1] and data.cc <= LaunchControl.cc_map['faders'][8] then
-                -- Handle Faders
-				-- Bezier transform translations a linear value to a logarithmic value for bluebox
-				local value = bezier_transform(data.val,A,B,C,D)
-				data.val = value.value
-            end
+            -- if data.cc >= LaunchControl.cc_map['faders'][1] and data.cc <= LaunchControl.cc_map['faders'][8] then
+            --     -- Handle Faders
+			-- 	-- Bezier transform translations a linear value to a logarithmic value for bluebox
+			-- 	local value = bezier_transform(data.val,A,B,C,D)
+			-- 	data.val = value.value
+            -- end
 
 			self.bluebox:send(data)
         end
@@ -449,6 +517,14 @@ function App:register_mixer(n)
 			LaunchControl:set_led()
         end
     end
+
+	function LaunchControl:on_up (state)
+		App.send_in = state
+	end
+
+	function LaunchControl:on_down (state)
+		App.send_out = state
+	end
 end
 
 
@@ -492,11 +568,8 @@ function App:register_midi_in(n)
 		end
 		
 		if data.type == 'cc'then
-			if data.cc == 50 then
-				self.bsp_record = (data.val > 0)
-			end
-
-			App.midi_out:send(data)
+			self:on_cc(data)
+			
 		end
 
 		if not (data.type == "cc" or data.type == "start" or data.type == "continue" or data.type == "stop" or data.type == "clock") then
@@ -522,47 +595,180 @@ function App:register_midi_grid(n)
 	self:register_modes()
 end
 
-App.default = {}
+-- Screens and such
+App.default = {
+	enc1 = function(d) print('default enc 1 ' .. d) end,
+	enc2 = function(d) print('default enc 2 ' .. d) end,
+	enc3 = function(d) print('default enc 3 ' .. d) end,
+	alt_enc1 = function(d) print('default alt enc 1 ' .. d) end,
+	alt_enc2 = function(d) print('default alt enc 2 ' .. d) end,
+	alt_enc3 = function(d) print('default alt enc 3 ' .. d) end,
+	long_fn_2 = function() print('Long 2') end,
+	long_fn_3 = function() print('Long 3') end,
+	alt_fn_2 = function() print('Alt 2') end,
+	alt_fn_3 = function() print('Alt 3') end,
+	press_fn_2 = function()
+	
+		if App.playing then
+			App:stop()
+		else
+			App:start()
+		end
+	
+	end,
+	press_fn_3 = function() print('press 3') end
+
+}
+
+
+
+App.font = 1
+local function set_font(n)
+	local fonts = {
+		{name = '04B_03', face = 1, size = 8},
+		{name = 'ALEPH', face = 2, size = 8},
+		{name = 'tom-thumb', face = 25, size = 6},
+		{name = 'creep', face = 26, size = 16},
+		{name = 'ctrld', face = 27, size = 10},
+		{name = 'ctrld', face = 28, size = 10},
+		{name = 'ctrld', face = 29, size = 13},
+		{name = 'ctrld', face = 30, size = 13},
+		{name = 'ctrld', face = 31, size = 13},
+		{name = 'ctrld', face = 32, size = 13},
+		{name = 'ctrld', face = 33, size = 16},
+		{name = 'ctrld', face = 34, size = 16},
+		{name = 'ctrld', face = 35, size = 16},
+		{name = 'ctrld', face = 36, size = 16},
+		{name = 'scientifica', face = 37, size = 11},
+		{name = 'scientifica', face = 38, size = 11},
+		{name = 'scientifica', face = 39, size = 11},
+		{name = 'ter', face = 40, size = 12},
+		{name = 'ter', face = 41, size = 12},
+		{name = 'ter', face = 42, size = 14},
+		{name = 'ter', face = 43, size = 14},
+		{name = 'ter', face = 44, size = 14},
+		{name = 'ter', face = 45, size = 16},
+		{name = 'ter', face = 46, size = 16},
+		{name = 'ter', face = 47, size = 16},
+		{name = 'ter', face = 48, size = 18},
+		{name = 'ter', face = 49, size = 18},
+		{name = 'ter', face = 50, size = 20},
+		{name = 'ter', face = 51, size = 20},
+		{name = 'ter', face = 52, size = 22},
+		{name = 'ter', face = 53, size = 22},
+		{name = 'ter', face = 54, size = 24},
+		{name = 'ter', face = 55, size = 24},
+		{name = 'ter', face = 56, size = 28},
+		{name = 'ter', face = 57, size = 28},
+		{name = 'ter', face = 58, size = 32},
+		{name = 'ter', face = 59, size = 32},
+		{name = 'unscii', face = 60, size = 16},
+		{name = 'unscii', face = 61, size = 16},
+		{name = 'unscii', face = 62, size = 8},
+		{name = 'unscii', face = 63, size = 8},
+		{name = 'unscii', face = 64, size = 8},
+		{name = 'unscii', face = 65, size = 8},
+		{name = 'unscii', face = 66, size = 16},
+		{name = 'unscii', face = 67, size = 8}
+	}
+
+	screen.font_face(fonts[n].face)
+	screen.font_size(fonts[n].size)
+end
+
 
 App.default.screen = function()
-			
-	if App.playing then
+	 
+
+
+	-- Tempo
+	
+	if App.playing then -- Pulse screen level
 		local beat = 15 - math.floor( (App.tick % 24) / 24 * 16)
 		screen.level( beat )
 	else
 		screen.level(5)
 	end
+	
 	screen.rect(0,0,56,32)
 	screen.fill()
+	
 	screen.move(28, 26)
-	screen.font_face(58)
-	screen.font_size(32)
+	set_font(37)
 	screen.level(0)
 	screen.text_center(math.floor(clock.get_tempo() + 0.5))
 	screen.fill()
+	--------
 
-	screen.level(10)
-	screen.move(66,10)
-	screen.font_size(8)
-	screen.font_face(1)
-	if App.track[1].midi_in == 0 then
-		screen.text('NO INPUT')
+	-- Track Name
+	local track_name = params:get('track_' .. App.current_track .. '_name')
+
+	
+	if App.track[App.current_track].active then
+		screen.level(10)
 	else
-		screen.text('CHANNEL ' .. App.track[1].midi_in)
+		screen.level(2)
 	end
 
-	if App.current_trigger then
-		screen.move(0,40)
-		screen.text(App.current_trigger)
-		for i=1,16 do
-			if App.track[i].triggered and App.track[i].trigger == App.current_trigger then
-				screen.move(0,48)
-				screen.text('Track ' .. i)
-			end
+	screen.move(95,11)
+	set_font(45)
+	screen.text_center(track_name)
+	screen.fill()
+
+	
+
+	local chord = musicutil.interval_lookup[App.scale[1].bits]
+	
+	local name = ''
+	local root = App.scale[1].root
+
+	if chord then
+		root = root + chord.root
+		if chord.name ~= 'M' then
+			name = chord.name
 		end
-
-		screen.fill()
+	else
+		name = '?'
 	end
+
+
+	screen.level(15)
+	set_font(37)
+	screen.move(0,58)
+	screen.text(musicutil.note_num_to_name(root))
+	local name_offset = screen.text_extents(musicutil.note_num_to_name(root)) + 1
+	-- set_font(6)
+	set_font(9)
+	
+
+	if chord and chord.root ~= 0 then
+		screen.move(name_offset,60)
+		screen.text('/' .. musicutil.note_num_to_name(App.scale[1].root) )
+	end
+	
+	screen.move(name_offset,46)
+	screen.text(name)
+	screen.fill()
+
+	screen.move(127,41)
+
+	local interval_names = {'R','b2','2','b3','3','4','b5','5','b6','6','b7','7'}
+
+	set_font(1)
+	for i=1, #interval_names do
+			
+			if App.scale[1].bits & 1 << (i - 1) > 0 then
+				screen.level(15)
+			else
+				-- NO INTERVAL
+				screen.level(1)
+			end
+			screen.move(i * 10,63)
+			screen.text_center(interval_names[i])
+			screen.fill()
+
+		end
+	
 end
 
 function App:register_modes()
@@ -614,62 +820,6 @@ function App:register_modes()
 	local PresetGrid = require(path_name .. 'modes/presetgrid')
 	local PresetSeq = require(path_name .. 'modes/presetseq')
 	
-	local draw_things = function() end
-	
-	fonts = {
-		{name = '04B_03', face = 1, size = 8},
-		{name = 'ALEPH', face = 2, size = 8},
-		{name = 'tom-thumb', face = 25, size = 6},
-		{name = 'creep', face = 26, size = 16},
-		{name = 'ctrld', face = 27, size = 10},
-		{name = 'ctrld', face = 28, size = 10},
-		{name = 'ctrld', face = 29, size = 13},
-		{name = 'ctrld', face = 30, size = 13},
-		{name = 'ctrld', face = 31, size = 13},
-		{name = 'ctrld', face = 32, size = 13},
-		{name = 'ctrld', face = 33, size = 16},
-		{name = 'ctrld', face = 34, size = 16},
-		{name = 'ctrld', face = 35, size = 16},
-		{name = 'ctrld', face = 36, size = 16},
-		{name = 'scientifica', face = 37, size = 11},
-		{name = 'scientifica', face = 38, size = 11},
-		{name = 'scientifica', face = 39, size = 11},
-		{name = 'ter', face = 40, size = 12},
-		{name = 'ter', face = 41, size = 12},
-		{name = 'ter', face = 42, size = 14},
-		{name = 'ter', face = 43, size = 14},
-		{name = 'ter', face = 44, size = 14},
-		{name = 'ter', face = 45, size = 16},
-		{name = 'ter', face = 46, size = 16},
-		{name = 'ter', face = 47, size = 16},
-		{name = 'ter', face = 48, size = 18},
-		{name = 'ter', face = 49, size = 18},
-		{name = 'ter', face = 50, size = 20},
-		{name = 'ter', face = 51, size = 20},
-		{name = 'ter', face = 52, size = 22},
-		{name = 'ter', face = 53, size = 22},
-		{name = 'ter', face = 54, size = 24},
-		{name = 'ter', face = 55, size = 24},
-		{name = 'ter', face = 56, size = 28},
-		{name = 'ter', face = 57, size = 28},
-		{name = 'ter', face = 58, size = 32},
-		{name = 'ter', face = 59, size = 32},
-		{name = 'unscii', face = 60, size = 16},
-		{name = 'unscii', face = 61, size = 16},
-		{name = 'unscii', face = 62, size = 8},
-		{name = 'unscii', face = 63, size = 8},
-		{name = 'unscii', face = 64, size = 8},
-		{name = 'unscii', face = 65, size = 8},
-		{name = 'unscii', face = 66, size = 16},
-		{name = 'unscii', face = 67, size = 8}
-
-	}
-
-	font_select = 1
-	font = fonts[1]
-
-
-	
 	self.mode[1] = Mode:new({
 		id = 1,
 		components = {
@@ -683,28 +833,12 @@ function App:register_modes()
 			 App.screen_dirty = true
 		end,
 		on_row = function(s,data)
+			local notegrid = s.components[3]
+
+			
 			if data.state then
-				local text = ''
-				if data.row == 1 then
-					s.components[3]:set_channel(10)
-					text = 'DRUMS'
-				elseif data.row == 2 then
-					s.components[3]:set_channel(1)
-					text = 'SEQ 1'
-				elseif data.row == 3 then
-					s.components[3]:set_channel(2)
-					text = 'SEQ 2'
-				end
-				
-				
-				s.layer[1] = function()
-					screen.font_face(1)
-					screen.font_size(8)
-					screen.level(16)
-					screen.move(64,16)
-					screen.text(text)
-					screen.fill() 
-				end
+				App.current_track = data.row
+				notegrid:set_track(App.current_track)
 				
 				for i = 2, 8 do
 					s.row_pads.led[9][i] = 0
@@ -714,23 +848,10 @@ function App:register_modes()
 				s.row_pads:refresh()
 
 				App.screen_dirty = true
+				
 			end
 		end,
-		default = {
-			screen = App.default.screen
-		},
-		context = {
-			enc1 = function(d)
-			local midi = App.track[1].midi_out + d
-			
-			params:set('track_1_midi_out', midi)
-			params:set('track_1_midi_in', midi)
-			
-			App.mode[App.current_mode]:enable()
-			App.screen_dirty = true
-
-		end
-		}
+		
 	})
 
 	self.mode[2] = Mode:new({
@@ -743,8 +864,44 @@ function App:register_modes()
 		components = {
 			ScaleGrid:new({id=1, offset = {x=0,y=6}}),
 			ScaleGrid:new({id=2, offset = {x=0,y=4}}),
-			ScaleGrid:new({id=3, offset = {x=0,y=2}})
+			ScaleGrid:new({id=3, offset = {x=0,y=2}}),
+			PresetGrid:new({
+				id = 1,
+				track=1,
+				grid_start = {x=1,y=2},
+				grid_end = {x=8,y=1},
+				display_start = {x=1,y=1},
+				display_end = {x=8,y=2},
+				offset = {x=0,y=0},
+				on_alt = function(s)
+					local root = App.scale[1].root
+					local bits = App.scale[1].bits
+
+					s.bank[s.select] = {
+						function()
+							params:set('scale_1_root', root)
+							params:set('scale_1_bits', bits)
+						end
+					}
+
+					s.mode.alt_pad:reset()
+
+				end
+			})
+		},
+		on_load = function() App.screen_dirty = true end,
+		context = {
+			enc1 = function(d)
+				params:set('scale_1_root',App.scale[1].root + d)
+				App.screen_dirty = true
+			end,
+			alt_enc1 = function(d)
+				App.scale[1]:shift_scale_to_note(App.scale[1].root + d)
+				App.screen_dirty = true
+			end,
+
 		}
+
 	})
 
 	self.mode[4] = Mode:new({

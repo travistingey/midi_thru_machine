@@ -1,10 +1,17 @@
 -- This script is used to add state-based logic and LED feedback for the LaunchControl XL
 
+-- These buttons are associated with the top and bottom channels and a group of states.
 local MUTE = 1
 local SOLO = 2
 local ARM = 3
-local SEND = 4
+local SEND = 4 -- CC toggle used for sending tracks for resampling on BitBox
 local CUE = 5
+
+-- Using arrows as a toggle state
+local UP = 6
+local DOWN = 7
+local LEFT = 8
+local RIGHT = 9
 
 local RED_LOW = 13
 local RED_HIGH = 15
@@ -62,6 +69,7 @@ CC_MAP[ARM] = {86,87,88,89,90,91,92,93}
 local LaunchControl = {
     device = {}, -- Device represents the second MIDI device used for SysEx Messages
     state = MUTE,
+    toggle = {[UP] = false, [DOWN] = true},
     track = {},
     cc_map = CC_MAP,
     note_map = NOTE_MAP 
@@ -69,14 +77,13 @@ local LaunchControl = {
 
 -- Initialize track states
 for i = 1, TRACKCOUNT do
-    LaunchControl.track[i] = { [CUE] = false, [MUTE] = false, [SOLO] = false, [ARM] = false, [SEND] = false }
+    LaunchControl.track[i] = { [CUE] = false, [MUTE] = false, [SOLO] = false, [ARM] = false, [SEND] = false, [UP] = false, [DOWN] = true }
 end
 
 
 function LaunchControl:handle_note(data)
     if self.note_map[data.note] then
         local control = self.note_map[data.note]
-        tab.print(control)
         if control.type == 'top_channel' then
             local state = not self.track[control.index][SEND]
 		    self.track[control.index][SEND] = state
@@ -111,8 +118,32 @@ function LaunchControl:handle_note(data)
             self.state = SOLO
         elseif control.type == 'arm' then
             self.state = ARM
+        elseif control.type == 'up' then
+            self.toggle[UP] = not self.toggle[UP]
+
+            if self.on_up ~= nil then
+                self:on_up(self.toggle[UP])
+            end
+        elseif control.type == 'down' then
+            self.toggle[DOWN] = not self.toggle[DOWN]
+
+            if self.on_down ~= nil then
+                self:on_down(self.toggle[DOWN])
+            end
         end
-        
+
+    elseif control.type == 'left' then
+        self.toggle[LEFT] = not self.toggle[LEFT]
+
+        if self.on_left ~= nil then
+            self:on_left(self.toggle[LEFT])
+        end
+    elseif control.type == 'right' then
+        self.toggle[RIGHT] = not self.toggle[RIGHT]
+
+        if self.on_right ~= nil then
+            self:on_right(self.toggle[RIGHT])
+        end        
     end
     
 end
@@ -158,14 +189,14 @@ function LaunchControl:set_led()
         16, led[1], 17, led[2], 18, led[3], 19, led[4], 20, led[5], 21, led[6], 22, led[7], 23, led[8], -- Bottom row knobs bright green
         24, (t[1][SEND] and GREEN_HIGH or 0), 25, (t[2][SEND] and GREEN_HIGH or 0), 26, (t[3][SEND] and GREEN_HIGH or 0), 27, (t[4][SEND] and GREEN_HIGH or 0), 28, (t[5][SEND] and GREEN_HIGH or 0), 29, (t[6][SEND] and GREEN_HIGH or 0), 30, (t[7][SEND] and GREEN_HIGH or 0), 31, (t[8][SEND] and GREEN_HIGH or 0), -- Top channel buttons low amber
         32, led[1], 33, led[2], 34, led[3], 35, led[4], 36, led[5], 37, led[6], 38, led[7], 39, led[8], -- Bottom channel buttons full green
-        40, (self.state == CUE and 60 or 0), -- Device off
-        41, (self.state == MUTE and 60 or 0), -- Mute button full
-        42, (self.state == SOLO and 60 or 0), -- Solo button low
-        43, (self.state == ARM and 60 or 0), -- Record Arm button low
-        44, 0, -- Up off
-        45, 0, -- Up off
-        46, 0, -- Up off
-        47, 0, -- Up off
+        40, (self.state == CUE and GREEN_HIGH or 0), -- Device off
+        41, (self.state == MUTE and GREEN_HIGH or 0), -- Mute button full
+        42, (self.state == SOLO and GREEN_HIGH or 0), -- Solo button low
+        43, (self.state == ARM and GREEN_HIGH or 0), -- Record Arm button low
+        44, (self.toggle[UP] and RED_HIGH or 0), -- Up
+        45, (self.toggle[DOWN] and RED_HIGH or 0), -- Down
+        46, 0, -- LEFT off
+        47, 0, -- RIGHT off
         247
     }
 

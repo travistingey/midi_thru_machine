@@ -130,11 +130,11 @@ function SeqClip:set_grid (seq)
       
   	  
   	  grid:for_each(function(s,x,y,i)
-  			if(seq.bank[i])then
-  				s.led[x][y] = 1
-  			else
-  				s.led[x][y] = {5,5,5}
-  			end
+  			-- if(seq.bank[i])then
+  			-- 	s.led[x][y] = 1
+  			-- else
+  			-- 	s.led[x][y] = {5,5,5}
+  			-- end
   
   			if i == seq.current_bank then
   				if seq.recording then

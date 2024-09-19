@@ -118,12 +118,7 @@ end
 function MuteGrid:grid_event (mute, data)
   local grid = self.grid
   
-    if self.mode.alt and data.type == 'pad' and data.state then
-        local note = grid:grid_to_index(data) - 1
-        App.current_trigger = note 
-        App.screen_dirty = true
-        self.mode.alt_pad:reset()
-    elseif data.type == 'pad' and data.state then
+    if data.type == 'pad' and data.state then
 
         local note = grid:grid_to_index(data) - 1
         
