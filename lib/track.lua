@@ -62,7 +62,7 @@ function Track:set(o)
 
 	local track = 'track_' .. self.id ..'_'
 
-	params:add_group('Track '.. self.id, 21)
+	params:add_group('Track '.. self.id, 22)
 
 	params:add_text(track .. 'name', 'Name', 'Track ' .. o.id)
 	-- Input Type
@@ -106,7 +106,8 @@ function Track:set(o)
 		end
 	end)
 	
-	params:set_action(track .. 'midi_in', function(d)
+	params:set_action(track .. 'midi_in', function(d) 
+		App.settings[track .. 'midi_in'] = d
 		self:kill()
 		self.midi_in = d
 		self:load_component(Input)
@@ -126,7 +127,8 @@ function Track:set(o)
 		end
 	end)
 
-	params:set_action(track .. 'midi_out', function(d)
+	params:set_action(track .. 'midi_out', function(d) 
+		App.settings[track .. 'midi_out'] = d
 		self:kill()
 		self.midi_out = d
 		
@@ -200,7 +202,8 @@ function Track:set(o)
 
 	self.chance = o.chance or 0.5
 	params:add_control(track .. 'chance', 'Chance', chance_spec)
-	params:set_action(track .. 'chance', function(d)
+	params:set_action(track .. 'chance', function(d) 
+		App.settings[track .. 'chance'] = d
 		self.chance = d
 	end)
 
@@ -211,7 +214,8 @@ function Track:set(o)
 	self.slew = o.slew or 0
 
 	params:add_control(track .. 'slew', 'Slew', slew_spec)
-	params:set_action(track .. 'slew', function(d)
+	params:set_action(track .. 'slew', function(d) 
+		App.settings[track .. 'slew'] = d
 		self.slew = d
 	end)
 	
@@ -227,7 +231,8 @@ function Track:set(o)
 		end
 	end)
  
-	params:set_action(track .. 'scale_select', function(d)
+	params:set_action(track .. 'scale_select', function(d) 
+		App.settings[track .. 'scale_select'] = d
 		self:kill()
 		local last = self.scale_select
 		self.scale = App.scale[d]
@@ -241,7 +246,8 @@ function Track:set(o)
 	-- Trigger
 	self.trigger = o.trigger or 36
 	params:add_number(track .. 'trigger', 'Trigger', 0, 127, 36)
-	params:set_action(track .. 'trigger', function(d)
+	params:set_action(track .. 'trigger', function(d) 
+		App.settings[track .. 'trigger'] = d
 		self:kill()
 		self.trigger = d
 	end)
@@ -249,7 +255,8 @@ function Track:set(o)
 	-- Step Length
 	self.step_length = o.step_legnth or 16
 	params:add_number(track .. 'step_length', 'Step Length', 1, 16, 16)
-	params:set_action(track .. 'step_length', function(d)
+	params:set_action(track .. 'step_length', function(d) 
+		App.settings[track .. 'step_length'] = d
 		self.step_length = d
 	end)
 
@@ -260,7 +267,8 @@ function Track:set(o)
 	self.note_range_lower = o.note_range_lower or 0
 	
 	params:add_number(track .. 'note_range_lower', 'From Note', 0, 127, 0)
-	params:set_action(track .. 'note_range_lower', function(d)
+	params:set_action(track .. 'note_range_lower', function(d) 
+		App.settings[track .. 'note_range_lower'] = d
 		self:kill()
 		self.note_range_lower = d
 
@@ -272,7 +280,8 @@ function Track:set(o)
 	self.note_range_upper = o.note_range_upper or 127
 
 	params:add_number(track .. 'note_range_upper', 'To Note', 0, 127, 127)
-	params:set_action(track .. 'note_range_upper', function(d)
+	params:set_action(track .. 'note_range_upper', function(d) 
+		App.settings[track .. 'note_range_upper'] = d
 		self:kill()
 		self.note_range_upper = d
 
@@ -288,7 +297,8 @@ function Track:set(o)
 
 	-- Octaves (convenience parameter thats easier to set than two ranges)
 	params:add_number(track .. 'note_range', 'Octaves', 1, 11, 2)
-	params:set_action(track .. 'note_range', function(d)
+	params:set_action(track .. 'note_range', function(d) 
+		App.settings[track .. 'note_range'] = d
 		params:set(track .. 'note_range_upper', util.clamp(d * 12 + self.note_range_lower,0,127))
 	end)
 	
@@ -298,7 +308,8 @@ function Track:set(o)
 	self.crow_in = o.crow_in or 1
 
 	params:add_number(track .. 'crow_in', 'Crow In', 1, 2, 1)
-	params:set_action(track .. 'crow_in', function(d)
+	params:set_action(track .. 'crow_in', function(d) 
+		App.settings[track .. 'crow_in'] = d
 		self:kill()
 		self.crow_in = d
 
@@ -314,7 +325,8 @@ function Track:set(o)
 	local crow_options = {'1 + 2', '3 + 4'}
 	
 	params:add_option(track .. 'crow_out', 'Crow Out', crow_options, 1)
-	params:set_action(track .. 'crow_out', function(d)
+	params:set_action(track .. 'crow_out', function(d) 
+		App.settings[track .. 'crow_out'] = d
 		
 		self:kill()
 		self.crow_out = d
@@ -326,8 +338,17 @@ function Track:set(o)
 	end)
 	
 	params:add_option(track .. 'chord_type', 'Chord Type', {'EO', 'Plaits'}, 1)
-	params:set_action(track .. 'chord_type', function(d)
+	params:set_action(track .. 'chord_type', function(d) 
+		App.settings[track .. 'chord_type'] = d
 		self.chord_type = d
+	end)
+
+	-- Shoot program change events
+	params:add_number(track .. 'program_select', 'Program Select', 0,15,0)
+	params:set_action(track .. 'program_select', function(d) 
+		App.settings[track .. 'program_select'] = d
+		
+		App.midi_in:program_change (d, App.track[self.id].midi_in)
 	end)
 
 	-- Voice

@@ -82,7 +82,6 @@ function PresetGrid:grid_event (component, data)
 end
 
 function PresetGrid:transport_event(component, data)
-tab.print(data)
 end
 
 function PresetGrid:set_grid (component) 

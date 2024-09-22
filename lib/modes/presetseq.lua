@@ -36,6 +36,9 @@ function PresetSeq:set(o)
 end
 
 function PresetSeq:grid_event (component, data)
+  -- TODO: Alt pad will select step
+  -- Up/Down navigate grid
+  -- Left/Right select preset
   
   local grid = self.grid
   if data.state and data.type == 'pad' then

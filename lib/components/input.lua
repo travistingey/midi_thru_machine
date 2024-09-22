@@ -228,19 +228,6 @@ Input.types['arpeggio'] = {
     
 }
 
-local function chord_id(s, data)
-
-    
-    local event = {
-        note = s.track.note_range_lower + s.track.scale.root,
-        type = data.type,
-        index = 1,
-        vel = 100,
-        ch = data.ch
-    }
-
-    return event
-end
 
 Input.types['chord'] = {
     props = {'midi_in','trigger','note_range_upper','note_range'},

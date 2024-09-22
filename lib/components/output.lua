@@ -60,8 +60,7 @@ Output.types['crow'] = {
 
 			if data.index then
 				local step = 5/11
-				crow.output[3].volts = (data.index-1) * step + step / 2
-				print((data.index-1) * step + step / 2)
+				crow.output[3].volts = (data.index-1) * step + step / 2				
 			end
 
 			if data.type == 'note_on' then

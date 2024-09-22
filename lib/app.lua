@@ -24,6 +24,7 @@ function App:init()
 	self.output = {}
 	self.track = {}
 	self.mode = {}
+	self.settings = {}
 
 	self.current_mode = 1
 	self.current_track = 1
@@ -192,6 +193,13 @@ function App:stop()
 		end
 	end
 
+end
+
+
+function App.apply(settings)
+	for k,v in pairs(settings) do
+		params:set(k,v)
+	end
 end
 
 -- Send tick event through system
@@ -450,7 +458,7 @@ function App:register_keys(n)
 		end
 
 		if data.type == "note_on" then
-			App:draw()
+			App.screen_dirty = true
 		end
 	end
 end
@@ -717,13 +725,13 @@ App.default.screen = function()
 
 	
 
-	local chord = musicutil.interval_lookup[App.scale[1].bits]
-	
+	--local chord = musicutil.interval_lookup[App.scale[1].bits]
+	local chord = App.scale[1].chord
 	local name = ''
-	local root = App.scale[1].root
+	local root = 0
 
 	if chord then
-		root = root + chord.root
+		root = chord.root
 		if chord.name ~= 'M' then
 			name = chord.name
 		end
@@ -741,10 +749,10 @@ App.default.screen = function()
 	set_font(9)
 	
 
-	if chord and chord.root ~= 0 then
-		screen.move(name_offset,60)
-		screen.text('/' .. musicutil.note_num_to_name(App.scale[1].root) )
-	end
+	-- if chord and chord.root ~= 0 then
+	-- 	screen.move(name_offset,60)
+	-- 	screen.text('/' .. musicutil.note_num_to_name(App.scale[1].root) )
+	-- end
 	
 	screen.move(name_offset,46)
 	screen.text(name)

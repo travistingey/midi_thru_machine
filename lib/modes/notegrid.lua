@@ -76,6 +76,9 @@ function NoteGrid:set(o)
 
   self.alt_screen = function()
     if self.selection then
+      screen.level(0)
+      screen.rect(0,35,128,29)
+      screen.fill() -- level 15
 
       screen.level(15)
       screen.rect(0,35,32,32)
@@ -178,7 +181,7 @@ function NoteGrid:grid_event (component, data)
     
     
     if self.mode.alt and data.state then
-        self.mode:handle_context(self.alt_context, self.alt_screen)
+        self.mode:handle_context(self.alt_context, self.alt_screen, 1)
     elseif self.type[self.track][pad] == TRIGGER then
       self.state[self.track][pad] = data.state
       if data.state then
