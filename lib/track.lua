@@ -62,7 +62,7 @@ function Track:set(o)
 
 	local track = 'track_' .. self.id ..'_'
 
-	params:add_group('Track '.. self.id, 22)
+	params:add_group('Track '.. self.id, 21)
 
 	params:add_text(track .. 'name', 'Name', 'Track ' .. o.id)
 	-- Input Type
@@ -336,19 +336,15 @@ function Track:set(o)
 		end
 		
 	end)
-	
-	params:add_option(track .. 'chord_type', 'Chord Type', {'EO', 'Plaits'}, 1)
-	params:set_action(track .. 'chord_type', function(d) 
-		App.settings[track .. 'chord_type'] = d
-		self.chord_type = d
-	end)
 
 	-- Shoot program change events
-	params:add_number(track .. 'program_select', 'Program Select', 0,15,0)
-	params:set_action(track .. 'program_select', function(d) 
-		App.settings[track .. 'program_select'] = d
-		
-		App.midi_in:program_change (d, App.track[self.id].midi_in)
+	params:add_number(track .. 'program_change', 'Program Change', 0,16,0)
+	params:set_action(track .. 'program_change', function(d) 
+		App.settings[track .. 'program_change'] = d
+		if d > 0 then
+			print(App.track[self.id].midi_in)
+		    App.midi_in:program_change (d-1, App.track[self.id].midi_in)
+		end
 	end)
 
 	-- Voice

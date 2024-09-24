@@ -4,14 +4,17 @@ local Grid = require(path_name .. 'grid')
 local musicutil = require(path_name .. 'musicutil-extended')
 
 -- 
+local ALL = musicutil.CHORDS
+local PLAITS = {musicutil.interval_lookup[1],musicutil.interval_lookup[129],musicutil.interval_lookup[161],musicutil.interval_lookup[137],musicutil.interval_lookup[1161],musicutil.interval_lookup[1165],musicutil.interval_lookup[1197],musicutil.interval_lookup[661],musicutil.interval_lookup[1173],musicutil.interval_lookup[2193],musicutil.interval_lookup[145]}	
 
 local Scale = TrackComponent:new()
 Scale.__base = TrackComponent
 Scale.name = 'scale'
 
+
 function Scale:set(o)
 	self.__base.set(self, o) -- call the base set method first   
-	
+
 	self.grid = o.grid
 	self.root = o.root or 0
 	self.bits = o.bits or 0
@@ -28,8 +31,9 @@ function Scale:set(o)
 	self.reset_latch = false
 	self.latch_notes = {}
 	self.intervals = o.intervals or {}
-
+	self.chord_set = o.chord_set or ALL
 	self.lock = false
+	
 end
 
 
@@ -102,6 +106,18 @@ function Scale:register_params(id)
 		end
 	end)
 
+	params:add_option(scale .. 'chord_set', 'Chord Set', {'All', 'Plaits', 'EO'}, 1)
+	params:set_action(scale .. 'chord_set', function(d) 
+		App.settings[scale .. 'chord_set'] = d
+		if d == 1 then
+			self.chord_set = musicutil.CHORDS
+		elseif d == 2 then
+			self.chord_set = PLAITS
+		elseif d == 3 then
+			self.chord_set = {1} -- Insert EO logic
+		end
+	end)
+
 
 	params:add_number(scale .. 'lock_cc', 'Lock CC',0,127,64)
 	params:set_action(scale .. 'lock_cc', function(cc)
@@ -149,10 +165,10 @@ function Scale:set_scale(bits)
 		end
 	end
 
-
-	
+	if #self.intervals > 2 then
+		self.chord = self:chord_id()
+	end
 end
-
 
 function Scale:shift_scale_to_note(n)
 	n = util.clamp(n,-24,24)
@@ -164,7 +180,7 @@ function Scale:shift_scale_to_note(n)
 end
 
 
-local PLAITS = {1,129,161,137,1161,1165,1197,661,1173,2193,145}	
+
 
 function count_bits(n)
     -- Efficiently count bits using Kernighan's algorithm
@@ -184,18 +200,16 @@ end
 
 
 
-function Scale.chord_id(bits, CHORDS)
+function Scale:chord_id()
     local best = {index = nil, score = -1}
-
-	if type(bits) == 'table' then
-		bits = bits.bits
-	end
+	local bits = self.bits
 	
     bits = bits & 0xFFF  -- Ensure bits are in 12-bit range
-    local bits_count = bit_counts[bits]
+	local bits_count = bit_counts[bits]
 	
-    for i = 1, #CHORDS do
-        local set_bits = CHORDS[i] & 0xFFF
+	
+    for i = 1, #self.chord_set do
+        local set_bits = self.chord_set[i].bits & 0xFFF
         local set_bits_count = bit_counts[set_bits]
         local matching_bits = bits & set_bits
         local matching_bits_count = bit_counts[matching_bits]
@@ -203,15 +217,16 @@ function Scale.chord_id(bits, CHORDS)
         -- Compute the Dice coefficient
         local score = (2 * matching_bits_count) / (bits_count + set_bits_count)
 
-        if score > best.score then
+        if best.score and score > best.score or not best.score then
             best = {index = i, score = score}
         end
+
+		-- tab.print(self.intervals)
     end
 
     if best.index then
-        return best.index
-    else
-        return 1  -- Default to index 1 if no match is found
+		
+        return self.chord_set[best.index]
     end
 end
 
@@ -250,15 +265,14 @@ function Scale:follow_scale(notes)
 			end
 		elseif self.follow_method > 3 and notes then
 			-- MIDI controlled
-			local b = 0
 			local n = {}
-			local min = 0
-			
-			for note in pairs(notes)do
-				if min == 0 or note < min then
+			local min = nil
+
+			for note in pairs(notes) do
+				if not min or note < min then
 					min = note
 				end
-				n[#n + 1] = notes[note].note -- lol wut?
+				n[#n + 1] = note
 			end
 
 			for i= 1, #n do
@@ -288,22 +302,9 @@ end
 function Scale:midi_event(data, track)    
 	if data.note then
 		
-		if data.type == 'note_on' then
-			local current_chord = self:chord_id(PLAITS)
+		
 
-			if bit_counts[self.bits] > 2 then
-				local chord = musicutil.interval_lookup[PLAITS[current_chord]]
-				if chord then 
-					self.chord = {}
-					for k,v in pairs(chord) do
-						self.chord[k] = v
-					end
-
-					self.chord.root = self.root + chord.root
-					self.chord.index = current_chord
-				end
-			end
-		end
+		
 
 		if track.input_type == 'chord' and data.type == 'note_on' then
 
@@ -377,10 +378,10 @@ function Scale:midi_event(data, track)
 					
 				end
 			end
-
+			
 			return data
-		else
 
+		else
 			if self.bits == 0 then
 				return data
 			elseif data.type == 'note_on' then
@@ -397,7 +398,7 @@ function Scale:midi_event(data, track)
 				return data
 			end
 		end
-
+		
   	else
 		
 		  return data

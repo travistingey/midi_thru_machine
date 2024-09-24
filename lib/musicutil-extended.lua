@@ -60,6 +60,7 @@ function u.shift_scale(s, degree)
 end
 
 -- New Chords
+table.insert(u.CHORDS, { name = 'r', intervals = {0} })
 table.insert(u.CHORDS, { name = 'sus2', intervals = {0, 2, 7} })
 table.insert(u.CHORDS, { name = '7 sus2', intervals = {0, 2, 7, 10} })
 table.insert(u.CHORDS, { name = '6 sus4', intervals = {0, 5, 7, 9} })
@@ -73,20 +74,20 @@ table.insert(u.CHORDS, { name = 'm add9', intervals = {0, 2, 3, 7} })
 table.insert(u.CHORDS, { name = 'add11', intervals = {0, 4, 5, 7} })
 table.insert(u.CHORDS, { name = 'm add11', intervals = {0, 2, 3, 7} })
 
-table.insert(u.CHORDS, { name = 'm11 (no 9)', intervals = {0, 3, 5, 7, 10} })
-table.insert(u.CHORDS, { name = 'm13 (no 9)', intervals = {0, 3, 5, 7, 9, 10} })
-table.insert(u.CHORDS, { name = 'm13 (no 9, 11)', intervals = {0, 3, 7, 9, 10} })
-table.insert(u.CHORDS, { name = 'm13 (no 11)', intervals = {0, 2, 3, 7, 9, 10} })
+table.insert(u.CHORDS, { name = 'm11', intervals = {0, 3, 5, 7, 10}, voicing='-9' })
+table.insert(u.CHORDS, { name = 'm13', intervals = {0, 3, 5, 7, 9, 10}, voicing='-9'})
+table.insert(u.CHORDS, { name = 'm13', intervals = {0, 3, 7, 9, 10}, voicing='-9,-11' })
+table.insert(u.CHORDS, { name = 'm13', intervals = {0, 2, 3, 7, 9, 10}, voicing='-11'})
 
-table.insert(u.CHORDS, { name = '11 (no 9)', intervals = {0, 4, 5, 7, 10} })
-table.insert(u.CHORDS, { name = '13 (no 9)', intervals = {0, 4, 5, 7, 9, 10} })
-table.insert(u.CHORDS, { name = '13 (no 9, 11)', intervals = {0, 4, 7, 9, 10} })
-table.insert(u.CHORDS, { name = '13 (no 11)', intervals = {0, 2, 4, 7, 9, 10} })
+table.insert(u.CHORDS, { name = '11', intervals = {0, 4, 5, 7, 10},  voicing='-9' })
+table.insert(u.CHORDS, { name = '13', intervals = {0, 4, 5, 7, 9, 10}, voicing='-9'  })
+table.insert(u.CHORDS, { name = '13', intervals = {0, 4, 7, 9, 10}, voicing='-9,-11'  })
+table.insert(u.CHORDS, { name = '13', intervals = {0, 2, 4, 7, 9, 10}, voicing='-11' })
 
-table.insert(u.CHORDS, { name = 'M11 (no 9)', intervals = {0, 4, 5, 7, 11} })
-table.insert(u.CHORDS, { name = 'M13 (no 9)', intervals = {0, 4, 5, 7, 9, 11} })
-table.insert(u.CHORDS, { name = 'M13 (no 9, 11)', intervals = {0, 4, 7, 9, 11} })
-table.insert(u.CHORDS, { name = 'M13 (no 11)', intervals = {0, 2, 4, 7, 9, 11} })
+table.insert(u.CHORDS, { name = 'M11', intervals = {0, 4, 5, 7, 11},  voicing='-9' })
+table.insert(u.CHORDS, { name = 'M13', intervals = {0, 4, 5, 7, 9, 11},  voicing='-9' })
+table.insert(u.CHORDS, { name = 'M13', intervals = {0, 4, 7, 9, 11},  voicing='-9,-11' })
+table.insert(u.CHORDS, { name = 'M13', intervals = {0, 2, 4, 7, 9, 11},  voicing='-11' })
 
 table.insert(u.CHORDS, { name = '6 11', intervals = {0, 4, 5, 7, 9} })
 
@@ -133,7 +134,8 @@ for i = 1, #u.CHORDS do
     end
 
     local bits = u.intervals_to_bits(intervals)
-
+    u.CHORDS[i].bits = bits
+    
     if (u.interval_lookup[bits] == nil) then
         u.interval_lookup[bits] = u.CHORDS[i]
     else
@@ -148,12 +150,13 @@ local interval_name = {
 -- INVERSIONS
 for i = 1, #u.CHORDS do
     local chord = u.CHORDS[i]
-    local bits = u.intervals_to_bits(chord.intervals)
+    local bits = chord.bits
 
     for j = 2, #chord.intervals do
         if #chord.intervals > 2 then
             local inversion = u.shift_scale(bits, chord.intervals[j])
             local chord_inv = {
+                bits = inversion,
                 name = chord.name,
                 intervals = u.bits_to_intervals(inversion),
                 root = -chord.intervals[j],
@@ -163,6 +166,7 @@ for i = 1, #u.CHORDS do
 
             if u.interval_lookup[inversion] == nil then
                 u.interval_lookup[inversion] = chord_inv
+                table.insert(u.CHORDS, chord_inv)
             else
                 table.insert(u.interval_lookup[inversion].alternates, chord_inv)
             end
@@ -170,6 +174,7 @@ for i = 1, #u.CHORDS do
     end
 end
 
+-- PARTIALS
 -- SHELL VOICINGS
 for i = 1, #u.CHORDS do
     local chord = u.CHORDS[i]
@@ -177,36 +182,39 @@ for i = 1, #u.CHORDS do
 
     if bits & (1 << 7) > 0 then -- Check if the 5th is present
         local no_fifth = bits & ~(1 << 7) -- Remove the 5th
+
+        local shell = {
+            bits = no_fifth,
+            name = u.CHORDS[i].name,
+            intervals = u.bits_to_intervals(no_fifth),
+            parent = u.CHORDS[i],
+            root = u.CHORDS[i].root,
+            voicing = '-5',
+            alternates = u.CHORDS[i].alternates
+        }
+
         if u.interval_lookup[no_fifth] == nil and #chord.intervals > 3 then
-            u.interval_lookup[no_fifth] = {
-                name = u.CHORDS[i].name .. ' shell',
-                intervals = u.bits_to_intervals(no_fifth),
-                parent = u.CHORDS[i],
-                root = u.CHORDS[i].root,
-                alternates = { u.CHORDS[i] }
-            }
+            u.interval_lookup[no_fifth] = shell
+            table.insert(u.CHORDS, shell)
         elseif u.interval_lookup[no_fifth] and #chord.intervals > 3 then
-            table.insert(u.interval_lookup[no_fifth].alternates, {
-                name = u.CHORDS[i].name .. ' shell',
-                intervals = u.bits_to_intervals(no_fifth),
-                parent = u.CHORDS[i],
-                root = u.CHORDS[i].root,
-                alternates = { u.CHORDS[i] }
-            })
+            table.insert(u.interval_lookup[no_fifth].alternates, shell)
         end
 
         if #chord.intervals > 3 then
             local rootless_bits = bits & ~1 -- Remove the root
             local rootless = u.shift_scale(rootless_bits, chord.intervals[2])
             local rootless_chord = {
-                name = u.CHORDS[i].name .. ' rootless',
+                bits = rootless,
+                name = u.CHORDS[i].name,
                 intervals = u.bits_to_intervals(rootless),
                 parent = u.CHORDS[i],
                 root = -chord.intervals[2],
-                alternates = { u.CHORDS[i] }
+                voicing = '-R',
+                alternates = u.CHORDS[i].alternates
             }
             if u.interval_lookup[rootless] == nil then
                 u.interval_lookup[rootless] = rootless_chord
+                table.insert(u.CHORDS, rootless_chord)
             else
                 table.insert(u.interval_lookup[rootless].alternates, rootless_chord)
             end

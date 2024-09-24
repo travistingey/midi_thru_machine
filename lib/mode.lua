@@ -158,7 +158,8 @@ function Mode:draw()
         error('We lost the layer?')
     end
     
-    for i=1, #self.layer do
+    for i,v in pairs(self.layer) do
+        
         self.layer[i]()
     end
    
@@ -189,7 +190,7 @@ function Mode:context_timeout(callback)
 end
 
 function Mode:handle_context(context, screen, layer)
-    print('alt context?')
+   
     if layer then
         self.layer[layer] = screen
     end

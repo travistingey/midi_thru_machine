@@ -19,13 +19,14 @@ local LATCH_CC = 64
 function App:init()
 	self.screen_dirty = true
 	-- Model
-	self.chord = {}
+	
 	self.scale = {}
 	self.output = {}
 	self.track = {}
 	self.mode = {}
 	self.settings = {}
-
+	
+	self.playing = false
 	self.current_mode = 1
 	self.current_track = 1
 	
@@ -718,65 +719,67 @@ App.default.screen = function()
 		screen.level(2)
 	end
 
-	screen.move(95,11)
-	set_font(45)
-	screen.text_center(track_name)
-	screen.fill()
-
 	
 
 	--local chord = musicutil.interval_lookup[App.scale[1].bits]
 	local chord = App.scale[1].chord
-	local name = ''
-	local root = 0
+	if chord and #App.scale[1].intervals  > 2 then
+		local name =  chord.name
+		local root = chord.root + App.scale[1].root
+		local bass = App.scale[1].root
+		
+		screen.level(15)
+		set_font(37)
+		screen.move(60,26)
+		screen.text(musicutil.note_num_to_name(root))
+		local name_offset = screen.text_extents(musicutil.note_num_to_name(root)) + 61
+		-- set_font(6)
+		set_font(9)
+		
+		screen.move(name_offset,14)
+		screen.text(name)
+		screen.fill()
 
-	if chord then
-		root = chord.root
-		if chord.name ~= 'M' then
-			name = chord.name
+		if bass ~= root then
+			screen.move(name_offset,26)
+			screen.text('/' .. musicutil.note_num_to_name(bass) )
 		end
-	else
-		name = '?'
 	end
-
-
-	screen.level(15)
-	set_font(37)
-	screen.move(0,58)
-	screen.text(musicutil.note_num_to_name(root))
-	local name_offset = screen.text_extents(musicutil.note_num_to_name(root)) + 1
-	-- set_font(6)
-	set_font(9)
-	
-
-	-- if chord and chord.root ~= 0 then
-	-- 	screen.move(name_offset,60)
-	-- 	screen.text('/' .. musicutil.note_num_to_name(App.scale[1].root) )
-	-- end
-	
-	screen.move(name_offset,46)
-	screen.text(name)
-	screen.fill()
-
 	screen.move(127,41)
 
 	local interval_names = {'R','b2','2','b3','3','4','b5','5','b6','6','b7','7'}
 
 	set_font(1)
 	for i=1, #interval_names do
-			
-			if App.scale[1].bits & 1 << (i - 1) > 0 then
-				screen.level(15)
-			else
-				-- NO INTERVAL
-				screen.level(1)
-			end
-			screen.move(i * 10,63)
-			screen.text_center(interval_names[i])
-			screen.fill()
-
+		
+		if App.scale[1].bits & 1 << (i - 1) > 0 then
+			screen.level(15)
+		else
+			-- NO INTERVAL
+			screen.level(1)
 		end
-	
+		screen.move(i * 10,63)
+		screen.text_center(interval_names[i])
+		screen.fill()
+
+	end
+
+
+	if App.scale[1].chord.intervals then
+	for i=1, #interval_names do
+		local bits = musicutil.intervals_to_bits(App.scale[1].chord.intervals)
+		if bits & 1 << (i - 1) > 0 then
+			screen.level(15)
+		else
+			-- NO INTERVAL
+			screen.level(1)
+		end
+		screen.move(i * 10,53)
+		screen.text_center(interval_names[i])
+		screen.fill()
+
+	end
+end
 end
 
 function App:register_modes()

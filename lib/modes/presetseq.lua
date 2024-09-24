@@ -10,12 +10,13 @@ local SEQ_1_CHANNEL = 1
 local SEQ_2_CHANNEL = 2
 
 PresetSeq.__base = ModeComponent
-PresetSeq.name = 'Note Grid'
+PresetSeq.name = 'Preset Sequencer'
 
 function PresetSeq:set(o)
   self.__base.set(self, o) -- call the base set method first   
   self.active = true
   self.select = o.select or 1
+  self.index = o.index or 1
   self.step = 1
   self.component = 'input'
 
@@ -33,7 +34,56 @@ function PresetSeq:set(o)
 
   self.seq = {}
 
+  self.context = {
+  enc1 = function(d)
+    self.select = util.clamp(self.select + d,1,64)
+
+    self.seq[self.index] = self.select
+    self:set_grid()
+  end,
+  enc2 = function(d)
+    local param = 'track_'  .. App.current_track .. '_program_change'
+    print(App.current_track)
+    local value = params:get(param)
+    
+    params:set(param, value + d)
+  end
+
+}
+
+  self.screen =  function()
+    
+      screen.level(0)
+      screen.rect(0,35,128,29)
+      screen.fill() -- level 15
+
+      screen.level(15)
+      screen.rect(0,35,32,32)
+      screen.fill() -- level 15
+      
+      screen.level(0)
+      screen.move(16,62)
+      screen.font_face(56)
+      screen.font_size(28)
+      screen.text_center(self.index)
+    
+      screen.font_face(1)
+      screen.font_size(8)
+      screen.move(16, 42)
+      screen.text_center('pattern')
+      screen.fill() -- level 0
+    
+      screen.level(15)
+      screen.move(36, 42)
+      screen.text('TYPE')
+      screen.move(128, 42)
+      screen.text_right('poops')
+      screen.fill()
+
+  end
+
 end
+
 
 function PresetSeq:grid_event (component, data)
   -- TODO: Alt pad will select step
@@ -43,13 +93,21 @@ function PresetSeq:grid_event (component, data)
   local grid = self.grid
   if data.state and data.type == 'pad' then
     local index = self.grid:grid_to_index(data)
-    
-    if self.seq[index] then
+
+    if self.seq[index] and self.index == index then
       self.seq[index] = nil
+    elseif self.seq[index] and self.index ~= index then
+      self.select = self.seq[index]
+      self.mode:handle_context(self.context,self.screen,2)
     else
       self.seq[index] = self.select
+      self.mode:handle_context(self.context,self.screen,2)
     end
     
+    self.index = index
+    if not App.playing then
+      self.step = index
+    end
   end
   self:set_grid()
 end
@@ -91,9 +149,9 @@ function PresetSeq:set_grid (component)
       grid:for_each(function(s,x,y,i)
         if self.seq[i] then
           if i == current then
-            s.led[x][y] = self.grid.rainbow_on[self.seq[i]]
+            s.led[x][y] = self.grid.rainbow_on[(self.seq[i] - 1) % 16 + 1]
           else
-            s.led[x][y] = self.grid.rainbow_off[self.seq[i]]
+            s.led[x][y] = self.grid.rainbow_off[(self.seq[i] - 1) % 16 + 1]
           end
         elseif i == current then
           s.led[x][y] = 1
