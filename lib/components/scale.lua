@@ -3,9 +3,19 @@ local TrackComponent = require(path_name .. 'trackcomponent')
 local Grid = require(path_name .. 'grid')
 local musicutil = require(path_name .. 'musicutil-extended')
 
--- 
+-- CONSTANTS
+local TRANSPOSE_MODE = 1
+local SCALE_DEGREE_MODE = 2
+local PENTATONIC_MODE = 3
+local CHORD_MODE = 4
+local MIDI_ON_MODE = 5
+local MIDI_LATCH_MODE = 6
+local MIDI_LOCK_MODE = 7
+
 local ALL = musicutil.CHORDS
 local PLAITS = {musicutil.interval_lookup[1],musicutil.interval_lookup[129],musicutil.interval_lookup[161],musicutil.interval_lookup[137],musicutil.interval_lookup[1161],musicutil.interval_lookup[1165],musicutil.interval_lookup[1197],musicutil.interval_lookup[661],musicutil.interval_lookup[1173],musicutil.interval_lookup[2193],musicutil.interval_lookup[145]}	
+
+
 
 local Scale = TrackComponent:new()
 Scale.__base = TrackComponent
@@ -33,13 +43,13 @@ function Scale:set(o)
 	self.intervals = o.intervals or {}
 	self.chord_set = o.chord_set or ALL
 	self.lock = false
-	
+	self.lock_cc = 64
 end
 
 
 function Scale:register_params(id)
 	local scale = 'scale_' .. id .. '_'
-	params:add_group('Scale ' .. id, 5 ) 
+	params:add_group('Scale ' .. id, 6 ) 
 
 	params:add_number(scale .. 'bits', 'Bits',0,4095,0)
 	params:set_action(scale .. 'bits',function(bits)
@@ -74,7 +84,7 @@ function Scale:register_params(id)
 		App.settings[scale .. 'follow'] = d
 		App.scale[id].follow = d
 		
-		if App.scale[id].follow_method < 4 then
+		if App.scale[id].follow_method <= CHORD_MODE then
 			App.scale[id].follow = util.clamp(App.scale[id].follow,0,3)	
 		end
 		if d > 0 then
@@ -88,12 +98,12 @@ function Scale:register_params(id)
 		end
 	end)
 
-	params:add_option(scale .. 'follow_method', 'Follow Method',{'transpose','scale degree','pentatonic','midi on', 'midi latch','midi lock'},1)
+	params:add_option(scale .. 'follow_method', 'Follow Method',{'transpose','scale degree','pentatonic','chord','midi on', 'midi latch','midi lock'},1)
 	params:set_action(scale .. 'follow_method', function(d)
 		App.settings[scale .. 'follow_method'] = d
 		App.scale[id].follow_method = d
 
-		if d < 4 then
+		if d <= CHORD_MODE then
 			App.scale[id].follow = util.clamp(App.scale[id].follow,0,3)	
 		end
 
@@ -108,29 +118,29 @@ function Scale:register_params(id)
 
 	params:add_option(scale .. 'chord_set', 'Chord Set', {'All', 'Plaits', 'EO'}, 1)
 	params:set_action(scale .. 'chord_set', function(d) 
+		
 		App.settings[scale .. 'chord_set'] = d
+		
 		if d == 1 then
-			self.chord_set = musicutil.CHORDS
+			App.scale[id].chord_set = musicutil.CHORDS
 		elseif d == 2 then
-			self.chord_set = PLAITS
+			App.scale[id].chord_set = PLAITS
 		elseif d == 3 then
-			self.chord_set = {1} -- Insert EO logic
+			App.scale[id].chord_set = {1} -- Insert EO logic
 		end
 	end)
 
 
-	params:add_number(scale .. 'lock_cc', 'Lock CC',0,127,64)
-	params:set_action(scale .. 'lock_cc', function(cc)
-		App:subscribe_cc(cc, function(data)
-			if App.scale[id].follow == 0 then
-				return
-			end
+	local function lock_event(data)
 
-			local track = App.track[App.scale[id].follow]
-			local scale = App.scale[id]
+		local scale = App.scale[id]
+		
+		if scale.follow_method > CHORD_MODE then
+			
+			local track = App.track[scale.follow]
 
 			if data.ch == track.midi_in then
-				if scale.follow_method > 3 then
+				
 					scale.lock = (data.val == 127)
 
 					if scale.lock then
@@ -143,9 +153,17 @@ function Scale:register_params(id)
 
 						scale:follow_scale(scale.latch_notes)
 					end
-				end
 			end
-		end)
+		end
+		
+	end
+
+	params:add_number(scale .. 'lock_cc', 'Lock CC',0,127,64)
+	params:set_action(scale .. 'lock_cc', function(cc)
+		App:unsubscribe_cc(App.scale[id].lock_cc, lock_event)
+		App:subscribe_cc(cc, lock_event)
+		App.scale[id].lock_cc = cc
+		App.mode[App.current_mode]:enable()
 	end)
 end
 
@@ -180,8 +198,6 @@ function Scale:shift_scale_to_note(n)
 end
 
 
-
-
 function count_bits(n)
     -- Efficiently count bits using Kernighan's algorithm
     local count = 0
@@ -200,15 +216,16 @@ end
 
 
 
-function Scale:chord_id()
+function Scale:chord_id(bits)
     local best = {index = nil, score = -1}
-	local bits = self.bits
+	bits = bits or self.bits
 	
     bits = bits & 0xFFF  -- Ensure bits are in 12-bit range
 	local bits_count = bit_counts[bits]
 	
 	
     for i = 1, #self.chord_set do
+		
         local set_bits = self.chord_set[i].bits & 0xFFF
         local set_bits_count = bit_counts[set_bits]
         local matching_bits = bits & set_bits
@@ -225,8 +242,14 @@ function Scale:chord_id()
     end
 
     if best.index then
+		local chord = {}
+		for k,v in pairs(self.chord_set[best.index]) do
+			chord[k] = v
+		end
 		
-        return self.chord_set[best.index]
+		chord.index = best.index
+
+        return chord
     end
 end
 
@@ -237,15 +260,15 @@ function Scale:follow_scale(notes)
 	if self.follow > 0 then
 		local other = App.scale[self.follow]
 		
-		if self.follow_method == 1 then
-			-- Transpose			
+		if self.follow_method == TRANSPOSE_MODE and not self.lock then
+			-- Transpose
 			self.root = other.root
 			params:set(scale .. 'root', other.root, true)
-		elseif self.follow_method == 2 then
+		elseif self.follow_method == SCALE_DEGREE_MODE and not self.lock then
 			-- App.scale Degree
 			self:shift_scale_to_note(other.root)
 			params:set(scale .. 'root', other.root, true)
-		elseif self.follow_method == 3 then
+		elseif self.follow_method == PENTATONIC_MODE and not self.lock then
 			-- Pentatonic
 			local major = musicutil.intervals_to_bits({0,4})
 			local minor = musicutil.intervals_to_bits({0,3})
@@ -253,7 +276,7 @@ function Scale:follow_scale(notes)
 			if other.bits & major == major then
 				self:set_scale(661)
 				self.root = other.root
-				params:set(scale .. 'root', other.root, true)
+				params:set(scale .. 'root', other.root, true) -- We need to keep the params silent to avoid a loop
 			elseif other.bits & minor == minor then
 				self:set_scale(1193)
 				self.root = other.root
@@ -263,7 +286,15 @@ function Scale:follow_scale(notes)
 				self.root = other.root
 				params:set(scale .. 'root', other.root, true)
 			end
-		elseif self.follow_method > 3 and notes then
+		elseif self.follow_method == CHORD_MODE and not self.lock then
+				if #other.intervals > 2 then
+					self.root = other.root
+					self.chord = self:chord_id(other.bits)
+					self:set_scale(self.chord.bits)
+					self.root = other.root + self.chord.root
+					params:set(scale .. 'root', other.root + self.chord.root, true)
+				end
+		elseif self.follow_method > CHORD_MODE and notes then
 			-- MIDI controlled
 			local n = {}
 			local min = nil
@@ -298,22 +329,17 @@ function Scale:transport_event(data,track)
 	return data
 end
 
-
 function Scale:midi_event(data, track)    
 	if data.note then
-		
-		
-
-		
 
 		if track.input_type == 'chord' and data.type == 'note_on' then
 
 			
 			data.index = self.chord.index
-			data.note = self.chord.root + 36
+			data.note = self.root + 36
 			
 			return data
-		elseif self.follow_method == 4 and (data.type == 'note_on' or data.type == 'note_off') and track.id == self.follow then
+		elseif self.follow_method == MIDI_ON_MODE and (data.type == 'note_on' or data.type == 'note_off') and track.id == self.follow then
 			
 			if self.lock and data.type == 'note_on' then
 				for k,v in pairs(track.note_on) do
@@ -328,7 +354,7 @@ function Scale:midi_event(data, track)
 
 			return data
 		
-		elseif self.follow_method == 6  and (data.type == 'note_on' or data.type == 'note_off') and track.id == self.follow then
+		elseif self.follow_method == MIDI_LOCK_MODE  and (data.type == 'note_on' or data.type == 'note_off') and track.id == self.follow then
 			
 			if self.lock and data.type == 'note_on' then
 				for k,v in pairs(track.note_on) do
@@ -351,7 +377,7 @@ function Scale:midi_event(data, track)
 			end
 
 			return data
-		elseif self.follow_method == 5 and (data.type == 'note_on' or data.type == 'note_off') and track.id == self.follow then
+		elseif self.follow_method == MIDI_LATCH_MODE and (data.type == 'note_on' or data.type == 'note_off') and track.id == self.follow then
 			local count = 0
 			if self.lock and data.type == 'note_on' then
 				for k,v in pairs(track.note_on) do

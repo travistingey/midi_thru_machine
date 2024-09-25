@@ -240,6 +240,11 @@ function App:on_cc(data)
         end
     end
 
+	-- Pass CC event to the current mode
+    if self.mode[self.current_mode] and self.mode[self.current_mode].on_cc then
+        self.mode[self.current_mode]:on_cc(data)
+    end
+	
 	self.midi_out:send(data)
 
 end
@@ -744,7 +749,23 @@ App.default.screen = function()
 			screen.move(name_offset,26)
 			screen.text('/' .. musicutil.note_num_to_name(bass) )
 		end
+		
 	end
+
+	local plaits = App.scale[3].chord
+	if plaits and #App.scale[3].intervals  > 2 then
+		local name =  plaits.name
+		local root = plaits.root + App.scale[3].root
+		local bass = App.scale[3].root
+		
+		screen.level(15)
+		set_font(1)
+		screen.move(60,46)
+		screen.text(musicutil.note_num_to_name(root) .. name)
+		screen.fill()
+	end
+
+
 	screen.move(127,41)
 
 	local interval_names = {'R','b2','2','b3','3','4','b5','5','b6','6','b7','7'}
@@ -764,22 +785,6 @@ App.default.screen = function()
 
 	end
 
-
-	if App.scale[1].chord.intervals then
-	for i=1, #interval_names do
-		local bits = musicutil.intervals_to_bits(App.scale[1].chord.intervals)
-		if bits & 1 << (i - 1) > 0 then
-			screen.level(15)
-		else
-			-- NO INTERVAL
-			screen.level(1)
-		end
-		screen.move(i * 10,53)
-		screen.text_center(interval_names[i])
-		screen.fill()
-
-	end
-end
 end
 
 function App:register_modes()
@@ -845,22 +850,7 @@ function App:register_modes()
 		end,
 		on_row = function(s,data)
 			local notegrid = s.components[3]
-
-			
-			if data.state then
-				App.current_track = data.row
-				notegrid:set_track(App.current_track)
-				
-				for i = 2, 8 do
-					s.row_pads.led[9][i] = 0
-				end
-
-				s.row_pads.led[9][9 - data.row] = 1
-				s.row_pads:refresh()
-
-				App.screen_dirty = true
-				
-			end
+			notegrid:on_row(data)
 		end,
 		
 	})
@@ -901,6 +891,12 @@ function App:register_modes()
 			})
 		},
 		on_load = function() App.screen_dirty = true end,
+		on_row = function(s,data)
+			if data.row < 7 then
+				local scalegrid = s.components[math.ceil(data.row/2)]
+				scalegrid:on_row(data)
+			end
+		end,
 		context = {
 			enc1 = function(d)
 				params:set('scale_1_root',App.scale[1].root + d)

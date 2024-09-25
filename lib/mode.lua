@@ -294,5 +294,13 @@ function Mode:disable()
     end
 end
 
+function Mode:on_cc(data)
+    
+    for _, component in ipairs(self.components) do
+        if component.on_cc then
+            component:on_cc(data)
+        end
+    end
+end
 
 return Mode

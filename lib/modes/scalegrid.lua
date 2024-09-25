@@ -54,6 +54,7 @@ function ScaleGrid:set(o)
 		[11] = { index = 15, name = 'B' },
 		[12] = { index = 16, name = 'C' }
 	}
+	
 end
 
 function ScaleGrid:get_component()
@@ -71,6 +72,8 @@ function ScaleGrid:midi_event(scale,data)
 end
 
 function ScaleGrid:grid_event (scale, data)
+
+
    if data.type == 'pad' then
       local grid = self.grid
     	local index = grid:grid_to_index(data)
@@ -93,14 +96,14 @@ function ScaleGrid:grid_event (scale, data)
 
 			App.mode[App.current_mode]:enable()
 			
-		  end    
-    end  
+		end
+    end
 end 
 
 function ScaleGrid:set_grid(scale)
 	if scale == nil then return end
-  local grid = self.grid
-  local intervals =  musicutil.bits_to_intervals(scale.bits)
+		local grid = self.grid
+		local intervals =  musicutil.bits_to_intervals(scale.bits)
 		local root = scale.root
 		
 		for i, v in pairs(self.note_map) do
@@ -132,7 +135,39 @@ function ScaleGrid:set_grid(scale)
 			end
 		end
 		
+		
+		if scale.lock then
+			self.mode.row_pads.led[9][self.grid.offset.y + self.grid.grid_start.y - 1] = 1
+		else
+			self.mode.row_pads.led[9][self.grid.offset.y + self.grid.grid_start.y - 1] = 0
+		end
+		self.mode.row_pads:refresh()
 		grid:refresh('set grid')
   end
+
+function ScaleGrid:on_row(data)
+	if data.state then
+		if data.row % 2 == 0 then
+			local scale = self:get_component()
+			scale.lock = not scale.lock
+			self:set_grid(scale)
+		end
+		
+		App.screen_dirty = true
+	end
+end
+
+function ScaleGrid:on_cc(data)
+	local scale = self:get_component()
+	if scale.follow_method > 4 then
+		local track = App.track[scale.follow]
+		
+		if data.cc == scale.lock_cc and data.ch == track.midi_in then
+			self:set_grid(scale)
+		end
+
+	end
+end
+
 
 return ScaleGrid

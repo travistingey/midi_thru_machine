@@ -61,6 +61,7 @@ end
 
 -- New Chords
 table.insert(u.CHORDS, { name = 'r', intervals = {0} })
+table.insert(u.CHORDS, { name = '5', intervals = {0,7} })
 table.insert(u.CHORDS, { name = 'sus2', intervals = {0, 2, 7} })
 table.insert(u.CHORDS, { name = '7 sus2', intervals = {0, 2, 7, 10} })
 table.insert(u.CHORDS, { name = '6 sus4', intervals = {0, 5, 7, 9} })
@@ -222,9 +223,14 @@ for i = 1, #u.CHORDS do
     end
 end
 
-local interval_name = {
-    'b2', '2', 'b3', '3', '4', 'b5', '5', 'b6', '6', 'b7', '7'
-}
+
+for index,chord in ipairs(u.CHORDS) do
+    chord.bits = u.intervals_to_bits(chord.intervals)
+end
+
+for index,chord in pairs(u.interval_lookup) do
+    chord.bits = u.intervals_to_bits(chord.intervals)
+end
 
 -- Function to print chords without recursive parsing
 function print_chords(chords)

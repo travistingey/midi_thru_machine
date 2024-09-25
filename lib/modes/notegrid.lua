@@ -315,4 +315,20 @@ function NoteGrid:handle_send(event)
   end
 end
 
+function NoteGrid:on_row(data)
+  if data.state then
+    App.current_track = data.row
+    self:set_track(App.current_track)
+    
+    for i = 2, 8 do
+      self.mode.row_pads.led[9][i] = 0
+    end
+
+    self.mode.row_pads.led[9][9 - data.row] = 1
+    self.mode.row_pads:refresh()
+
+    App.screen_dirty = true
+  end
+end
+
 return NoteGrid
