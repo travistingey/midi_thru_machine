@@ -26,11 +26,13 @@ function App:init()
 	self.mode = {}
 	self.settings = {}
 	
+	
 	self.playing = false
 	self.current_mode = 1
 	self.current_track = 1
-	
-	self.preset = 1
+	self.current_preset = 1
+
+	self.preset = {}
 	
 	self.ppqn = 24
 	self.swing = 0.5
@@ -126,7 +128,7 @@ function App:init()
 	App:register_keys(6)
 	App:register_modes()
 	
-	params:default()
+
 end -- end App:init
 
 -- Start playback
@@ -239,7 +241,8 @@ function App:on_cc(data)
             func(data)
         end
     end
-
+	
+	
 	-- Pass CC event to the current mode
     if self.mode[self.current_mode] and self.mode[self.current_mode].on_cc then
         self.mode[self.current_mode]:on_cc(data)
@@ -434,6 +437,59 @@ function App:register_params()
 	params:add_separator()
 
 	App:register_song()
+end
+
+function App:set_preset(d, param)
+    if self.preset[d] == nil then self.preset[d] = {} end
+    local preset = self.preset[d]
+    
+    if type(param) == 'string' then
+        local value = self.settings[param]
+
+        if preset[param] ~= value then
+            preset[param] = value
+        end
+    elseif type(param) == 'table' then
+        for index, name in ipairs(param) do
+            local value = self.settings[name]
+            if preset[name] ~= value then
+                preset[name] = value
+            end
+        end
+    else
+        for name, value in pairs(self.settings) do
+            if preset[name] ~= value then
+                preset[name] = value
+            end
+        end
+    end
+end
+
+function App:load_preset(d, param)
+    local preset = self.preset[d]
+
+    if preset == nil then return end
+    
+    if type(param) == 'string' then
+        local value = preset[param]
+
+        if self.settings[param] ~= value then
+            params:set(param, value)    
+        end
+    elseif type(param) == 'table' then
+        for index, name in ipairs(param) do
+            local value = preset[name]
+            if self.settings[name] ~= value then
+                params:set(name, value)    
+            end
+        end
+    else
+        for name, value in pairs(preset) do
+            if self.settings[name] ~= value then
+                params:set(name, value)    
+            end
+        end
+    end
 end
 
 function App:register_song()
@@ -873,21 +929,7 @@ function App:register_modes()
 				grid_end = {x=8,y=1},
 				display_start = {x=1,y=1},
 				display_end = {x=8,y=2},
-				offset = {x=0,y=0},
-				on_alt = function(s)
-					local root = App.scale[1].root
-					local bits = App.scale[1].bits
-
-					s.bank[s.select] = {
-						function()
-							params:set('scale_1_root', root)
-							params:set('scale_1_bits', bits)
-						end
-					}
-
-					s.mode.alt_pad:reset()
-
-				end
+				offset = {x=0,y=0}
 			})
 		},
 		on_load = function() App.screen_dirty = true end,
@@ -897,6 +939,7 @@ function App:register_modes()
 				scalegrid:on_row(data)
 			end
 		end,
+		on_alt = function() print('peanuts') end,
 		context = {
 			enc1 = function(d)
 				params:set('scale_1_root',App.scale[1].root + d)

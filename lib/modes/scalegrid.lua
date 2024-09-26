@@ -82,6 +82,7 @@ function ScaleGrid:grid_event (scale, data)
     		local d = self.index_map[index]
 			
     		if self.mode.alt then
+				print('yes')
     			scale:shift_scale_to_note(d.note)
     			self.mode.alt_pad:reset()
     		else

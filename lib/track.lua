@@ -107,7 +107,6 @@ function Track:set(o)
 	end)
 	
 	params:set_action(track .. 'midi_in', function(d) 
-		App.settings[track .. 'midi_in'] = d
 		self:kill()
 		self.midi_in = d
 		self:load_component(Input)
@@ -128,7 +127,6 @@ function Track:set(o)
 	end)
 
 	params:set_action(track .. 'midi_out', function(d) 
-		App.settings[track .. 'midi_out'] = d
 		self:kill()
 		self.midi_out = d
 		
@@ -247,7 +245,6 @@ function Track:set(o)
 	self.trigger = o.trigger or 36
 	params:add_number(track .. 'trigger', 'Trigger', 0, 127, 36)
 	params:set_action(track .. 'trigger', function(d) 
-		App.settings[track .. 'trigger'] = d
 		self:kill()
 		self.trigger = d
 	end)
@@ -309,7 +306,6 @@ function Track:set(o)
 
 	params:add_number(track .. 'crow_in', 'Crow In', 1, 2, 1)
 	params:set_action(track .. 'crow_in', function(d) 
-		App.settings[track .. 'crow_in'] = d
 		self:kill()
 		self.crow_in = d
 
@@ -325,9 +321,7 @@ function Track:set(o)
 	local crow_options = {'1 + 2', '3 + 4'}
 	
 	params:add_option(track .. 'crow_out', 'Crow Out', crow_options, 1)
-	params:set_action(track .. 'crow_out', function(d) 
-		App.settings[track .. 'crow_out'] = d
-		
+	params:set_action(track .. 'crow_out', function(d) 		
 		self:kill()
 		self.crow_out = d
 		if self.output_type == 'crow' then

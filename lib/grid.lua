@@ -61,7 +61,7 @@ function Grid:new (o)
     end
 	
 	o.subgrids = {}
-
+	
 	o:reset()
 	return o
 end
@@ -248,10 +248,8 @@ function Grid:process (d)
 			else
 				data.type = 'pad'
 			end
+
 			--Set states
-					
-			
-			
 			local minX = math.min(self.display_start.x,self.display_end.x)
 			local minY = math.min(self.display_start.y,self.display_end.y)
 

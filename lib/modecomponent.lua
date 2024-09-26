@@ -32,7 +32,9 @@ function ModeComponent:set_track(id)
 end
 
 function ModeComponent:get_component()
-    return App.track[self.track][self.component]
+    if self.component then
+        return App.track[self.track][self.component]
+    end
 end
 
 function ModeComponent:enable()
@@ -88,14 +90,16 @@ function ModeComponent:disable()
     mode.grid.event = nil
     mode.grid.set_grid = nil
 
-    local component = self:get_component()
-    component.on_midi = nil
-    component.on_transport = nil
+    if self.component then
+        local component = self:get_component()
+        component.on_midi = nil
+        component.on_transport = nil
+        
 
-    for i,on in ipairs(self.register)do
-        component[on] = nil
+        for i,on in ipairs(self.register)do
+            component[on] = nil
+        end
     end
-
     if mode.on_disable ~= nil then
         mode:on_disable()
     end
