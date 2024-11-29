@@ -1,5 +1,6 @@
 local path_name = 'Foobar/lib/'
 local utilities = require(path_name .. 'utilities')
+local Auto = require(path_name .. 'components/auto')
 local Input = require(path_name .. 'components/input')
 local Seq = require(path_name .. 'components/seq')
 local Scale = require(path_name .. 'components/scale')
@@ -22,8 +23,9 @@ function Track:new(o)
 	self.__index = self
 
 	o.id = o.id
-	self.set(o,o) -- Set static variables
+	o:set(o)
 	
+	self.load_component(o, Auto)
 	self.load_component(o, Input)
 	self.load_component(o, Seq)
 	self.load_component(o, Mute)
@@ -155,6 +157,7 @@ function Track:set(o)
 	self.arp = o.arp or arp_options[1]
 	params:add_option(track .. 'arp','Arpeggio',arp_options, 1)
 	params:set_action(track .. 'arp',function(d)
+		App.settings[track .. 'arp'] = d
 		self.arp = arp_options[d]
 	end)
 
@@ -167,6 +170,7 @@ function Track:set(o)
 	
 	params:add_option(track .. 'step','Step',step_options, 1)
 	params:set_action(track .. 'step',function(d)
+		App.settings[track .. 'step'] = d
 		self.step = step_values[d]
 		self.reset_tick = 1
 		self.step_count = 0
@@ -189,6 +193,7 @@ function Track:set(o)
 	self.step_count = 0
 	
 	params:set_action(track .. 'reset_step',function(d)
+		App.settings[track .. 'reset_step'] = d
 		self.reset_step = d
 		self.reset_tick = 1
 		self.step_count = 0
@@ -278,7 +283,6 @@ function Track:set(o)
 
 	params:add_number(track .. 'note_range_upper', 'To Note', 0, 127, 127)
 	params:set_action(track .. 'note_range_upper', function(d) 
-		App.settings[track .. 'note_range_upper'] = d
 		self:kill()
 		self.note_range_upper = d
 
@@ -444,17 +448,15 @@ end
 
 -- Builds multiple component chains in single call.
 function Track:build_chain()
-	--[[]]
-	local pre_scale =  {self.input, self.seq, self.scale, self.mute, self.output}     
-	local post_scale = {self.input, self.scale, self.seq, self.mute, self.output} 
-	local test = {self.input,self.output}
+
+	local chain = {self.auto, self.input, self.scale, self.seq, self.mute, self.output} 
 	local send_input = {self.seq, self.scale, self.mute, self.output} 
 	local send =  {self.mute, self.output}
 
 	
 	
-	self.process_transport = self:chain_components(post_scale, 'process_transport')
-	self.process_midi = self:chain_components(post_scale, 'process_midi')
+	self.process_transport = self:chain_components(chain, 'process_transport')
+	self.process_midi = self:chain_components(chain, 'process_midi')
 
 	self.send = self:chain_components(send, 'process_midi')
 	self.send_input = self:chain_components(send_input, 'process_midi')

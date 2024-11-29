@@ -4,6 +4,7 @@ local Grid = require(path_name .. 'grid')
 local musicutil = require(path_name .. 'musicutil-extended')
 
 -- CONSTANTS
+local NO_FOLLOW = 0
 local TRANSPOSE_MODE = 1
 local SCALE_DEGREE_MODE = 2
 local PENTATONIC_MODE = 3
@@ -36,8 +37,7 @@ function Scale:set(o)
 		root = 0
 	}
 
-	self.follow_method = o.follow_method or 0
-	self.scale_select = o.scale_select or 0
+	self.follow_method = o.follow_method or 1
 	self.reset_latch = false
 	self.latch_notes = {}
 	self.intervals = o.intervals or {}
@@ -70,6 +70,7 @@ function Scale:register_params(id)
 		App.settings[scale .. 'root'] = root
 		App.scale[id].root = root
 
+		
 		for i = 1, 3 do 
 			App.scale[i]:follow_scale()
 		end
@@ -85,7 +86,7 @@ function Scale:register_params(id)
 		App.scale[id].follow = d
 		
 		if App.scale[id].follow_method <= CHORD_MODE then
-			App.scale[id].follow = util.clamp(App.scale[id].follow,0,3)	
+			App.scale[id].follow = util.clamp(App.scale[id].follow,1,3)	
 		end
 		if d > 0 then
 			for i = 1, 3 do 
@@ -104,7 +105,7 @@ function Scale:register_params(id)
 		App.scale[id].follow_method = d
 
 		if d <= CHORD_MODE then
-			App.scale[id].follow = util.clamp(App.scale[id].follow,0,3)	
+			App.scale[id].follow = util.clamp(App.scale[id].follow,1,3)	
 		end
 
 		for i = 1, 3 do 
@@ -259,15 +260,19 @@ function Scale:follow_scale(notes)
 	
 	if self.follow > 0 then
 		local other = App.scale[self.follow]
+
+		if other.lock and other.follow > 0 and not  App.scale[other.follow].lock then
+			other = App.scale[other.follow]
+		end
 		
 		if self.follow_method == TRANSPOSE_MODE and not self.lock then
 			-- Transpose
 			self.root = other.root
-			params:set(scale .. 'root', other.root, true)
+			params:set(scale .. 'root', other.root)
 		elseif self.follow_method == SCALE_DEGREE_MODE and not self.lock then
 			-- App.scale Degree
 			self:shift_scale_to_note(other.root)
-			params:set(scale .. 'root', other.root, true)
+			params:set(scale .. 'root', other.root)
 		elseif self.follow_method == PENTATONIC_MODE and not self.lock then
 			-- Pentatonic
 			local major = musicutil.intervals_to_bits({0,4})
@@ -276,15 +281,15 @@ function Scale:follow_scale(notes)
 			if other.bits & major == major then
 				self:set_scale(661)
 				self.root = other.root
-				params:set(scale .. 'root', other.root, true) -- We need to keep the params silent to avoid a loop
+				params:set(scale .. 'root', other.root) -- We need to keep the params silent to avoid a loop
 			elseif other.bits & minor == minor then
 				self:set_scale(1193)
 				self.root = other.root
-				params:set(scale .. 'root', other.root, true)
+				params:set(scale .. 'root', other.root)
 			else
 				self:set_scale(1)
 				self.root = other.root
-				params:set(scale .. 'root', other.root, true)
+				params:set(scale .. 'root', other.root)
 			end
 		elseif self.follow_method == CHORD_MODE and not self.lock then
 				if #other.intervals > 2 then
@@ -292,7 +297,7 @@ function Scale:follow_scale(notes)
 					self.chord = self:chord_id(other.bits)
 					self:set_scale(self.chord.bits)
 					self.root = other.root + self.chord.root
-					params:set(scale .. 'root', other.root + self.chord.root, true)
+					params:set(scale .. 'root', other.root + self.chord.root)
 				end
 		elseif self.follow_method > CHORD_MODE and notes then
 			-- MIDI controlled
@@ -314,7 +319,7 @@ function Scale:follow_scale(notes)
 			if s > 0 then
 				self.root = min % 12
 			end
-			params:set(scale .. 'root', self.root, true)
+			params:set(scale .. 'root', self.root)
 			
 			self:set_scale(s)
 		end

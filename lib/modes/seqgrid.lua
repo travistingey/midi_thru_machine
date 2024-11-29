@@ -299,9 +299,4 @@ function SeqGrid:on_load(seq)
     self.page = 1
 end
 
-
-function SeqGrid:set_display (seq) end
-function SeqGrid:handle_button (seq, e,d) end
-function SeqGrid:handle_enc (seq, e,d) end
-
 return SeqGrid

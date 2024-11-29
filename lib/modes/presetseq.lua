@@ -73,6 +73,8 @@ function PresetSeq:set(o)
       screen.font_size(28)
       if self.index and self.seq[self.index] then
         screen.text_center(self.seq[self.index])
+      else
+        print(self.index)
       end
       screen.font_face(1)
       screen.font_size(8)
@@ -98,32 +100,43 @@ function PresetSeq:grid_event (component, data)
   -- Left/Right select preset
   
   local grid = self.grid
-  if data.state and data.type == 'pad' then
-    
-    local index = self.grid:grid_to_index(data)
+
+  if data.type == 'pad_long' and data.pad_down and #data.pad_down == 1 then
+    local pad_1 = self.grid:grid_to_index(data)
+    local pad_2 = self.grid:grid_to_index(data.pad_down[1])
+
+    local selection_start = math.min(pad_1,pad_2)
+    local selection_end = math.max(pad_1,pad_2)
 
     if self.mode.alt then
-      if self.index == nil then
-        self.seq_start = index
-        self.index = index
-      else
-        self.seq_length = index - self.seq_start + 1
-        self.index = nil
-        self.mode.alt_pad:reset()
-      end
+      self.seq_start = selection_start
+      self.seq_length = selection_end - selection_start + 1
     else
-      self.mode:handle_context(self.context,self.screen)
+      for i = selection_start, selection_end do
+        
+          self.seq[i] = self.select
+      end
+    end
+  elseif data.type == 'pad' and data.state and not self.mode.alt then
+      local index = self.grid:grid_to_index(data)
+      self:start_blink()
+      self.mode:handle_context(self.context,self.screen, {
+        timeout = true,
+        callback = function()
+          self:end_blink()
+          self.index = nil
+          self:set_grid()
+        end
+      })
+
       if self.seq[index] then
-        self.selection = self.seq[index]
+        self.select = self.seq[index]
         self.seq[index] = nil
       else
         self.seq[index] = self.select
       end
       self.index = index
     end
-
-    
-  end
   self:set_grid()
 end
 
@@ -164,38 +177,72 @@ function PresetSeq:transport_event(component, data)
   end
 end
 
-function PresetSeq:set_grid () 
+
+
+function PresetSeq:set_grid()
   if self.mode == nil then return end
-  local current = self.step
+  local grid = self.grid
 
-    local grid = self.grid
+  local BLINK = 1
+  local VALUE = (1 << 1)
+  local INSIDE_LOOP = (1 << 2)
+  local LOOP_END = (1 << 3)
+  local STEP = (1 << 4)
+  local SELECTED = (1 << 5)
+  
+  grid:for_each(function(s, x, y, i)
 
-      
-      grid:for_each(function(s,x,y,i)
-        
-        if self.mode.alt and i == self.seq_start then
-          s.led[x][y] = 20
-        elseif self.mode.alt and i == self.seq_start + self.seq_length - 1 and i ~= current then
-          s.led[x][y] = 20
-        elseif i == self.index and self.seq[i] == nil then
-          s.led[x][y] = {5,5,5}
-        elseif self.seq[i] then
-          if i == current then
-            s.led[x][y] = self.grid.rainbow_on[(self.seq[i] - 1) % 16 + 1]
-          else
-            s.led[x][y] = self.grid.rainbow_off[(self.seq[i] - 1) % 16 + 1]
-          end
-        elseif i == current and App.playing then
-          s.led[x][y] = 1
-        else
-          s.led[x][y] = 0
-        end
+    local pad = 0
+    if self.blink_state then
+      pad = pad | BLINK
 
-      end)
-      grid:refresh('PresetSeq:set_grid')
+    end
+    if self.seq[i] then pad = pad | VALUE end
+    if i >= self.seq_start and i <= self.seq_start + self.seq_length - 1 and self.mode.alt then  pad = pad | INSIDE_LOOP end
+    if self.mode.alt and (i == self.seq_start or  i == self.seq_start + self.seq_length - 1) then  pad = pad | LOOP_END end
+    if self.index == i and not self.mode.alt then  pad = pad | SELECTED  end
+    if self.step == i and App.playing then  pad = pad | STEP  end
+
+    if pad  & (BLINK | SELECTED | INSIDE_LOOP | VALUE) >= (BLINK | SELECTED | INSIDE_LOOP | VALUE) then
+      color = self.grid.rainbow_on[(self.seq[i] - 1) % 16 + 1]
+    elseif pad  & (SELECTED | VALUE | INSIDE_LOOP) >= (SELECTED | VALUE | INSIDE_LOOP) then
+      color = self.grid.rainbow_off[(self.seq[i] - 1) % 16 + 1]
+    elseif pad  & (BLINK | SELECTED | VALUE ) >= (BLINK | SELECTED | VALUE) then
+      color = 1
+    elseif pad  & (BLINK | SELECTED) >= (BLINK | SELECTED) then
+      color = {5,5,5}
+    elseif pad  & (SELECTED) >= (SELECTED) then
+      color = 0
+    elseif pad  & (STEP | VALUE) >= (STEP | VALUE) then
+      color = self.grid.rainbow_on[(self.seq[i] - 1) % 16 + 1]
+    elseif pad  & (STEP) >= STEP then
+      color = 1
+    elseif pad  & (BLINK | LOOP_END | VALUE) >= (BLINK | LOOP_END | VALUE) then
+      color = self.grid.rainbow_on[(self.seq[i] - 1) % 16 + 1]
+    elseif pad  & (BLINK | LOOP_END ) >= (BLINK | LOOP_END ) then
+      color = {5,5,5}
+    elseif pad  & (INSIDE_LOOP | VALUE) >= (INSIDE_LOOP | VALUE) then
+      color = self.grid.rainbow_off[(self.seq[i] - 1) % 16 + 1]
+    elseif pad  & (VALUE) >= (VALUE) then
+      color = self.grid.rainbow_off[(self.seq[i] - 1) % 16 + 1]
+    else
+      color = 0
+    end
+
+    s.led[x][y] = color
+  end)
+  grid:refresh('PresetSeq:set_grid')
 end
 
 function PresetSeq:on_alt()
+  self.index = nil
+  self.mode:cancel_context()
+  self:start_blink()
+  self:set_grid()
+end
+
+function PresetSeq:on_alt_reset()
+  self:end_blink()
   self:set_grid()
 end
 

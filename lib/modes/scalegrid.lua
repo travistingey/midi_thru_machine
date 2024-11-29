@@ -142,18 +142,18 @@ function ScaleGrid:set_grid(scale)
 		else
 			self.mode.row_pads.led[9][self.grid.offset.y + self.grid.grid_start.y - 1] = 0
 		end
+
 		self.mode.row_pads:refresh()
 		grid:refresh('set grid')
   end
 
 function ScaleGrid:on_row(data)
+	local scale = self:get_component()
 	if data.state then
 		if data.row % 2 == 0 then
-			local scale = self:get_component()
 			scale.lock = not scale.lock
-			self:set_grid(scale)
 		end
-		
+		self:set_grid(scale)
 		App.screen_dirty = true
 	end
 end

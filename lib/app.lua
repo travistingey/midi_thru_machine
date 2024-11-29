@@ -17,6 +17,10 @@ local musicutil = require(path_name .. 'musicutil-extended')
 local LATCH_CC = 64
 
 function App:init()
+
+
+
+
 	self.screen_dirty = true
 	-- Model
 	
@@ -33,7 +37,28 @@ function App:init()
 	self.current_preset = 1
 
 	self.preset = {}
-	
+	self.preset_props = {
+		track = {
+			'program_change',
+			'scale_select',
+			'arp',
+			'slew',
+			'note_range_upper',
+			'note_range_lower',
+			'chance',
+			'step',
+			'step_length',
+			'reset_step'
+		}, 
+		scale = {
+			'bits',
+			'root',
+			'follow_method',
+			'chord_set',
+			'follow'
+		}
+	}
+
 	self.ppqn = 24
 	self.swing = 0.5
 	self.swing_div = 6 -- 1/16 note swing
@@ -104,7 +129,7 @@ function App:init()
 
 	-- Create the Scales
 	params:add_separator('scales','Scales')
-	for i = 0, 3 do
+	for i = 1, 3 do
 		self.scale[i] = Scale:new({id = i})
 		Scale:register_params(i)
 	end
@@ -451,6 +476,7 @@ function App:set_preset(d, param)
         end
     elseif type(param) == 'table' then
         for index, name in ipairs(param) do
+			print(name .. ' should set to ' .. self.settings[name])
             local value = self.settings[name]
             if preset[name] ~= value then
                 preset[name] = value
@@ -597,9 +623,6 @@ function App:register_mixer(n)
 	end
 end
 
-
-
-
 function App:register_launchcontrol(n)
 	LaunchControl:register(n)
 	LaunchControl:set_led()
@@ -690,8 +713,6 @@ App.default = {
 
 }
 
-
-
 App.font = 1
 local function set_font(n)
 	local fonts = {
@@ -748,11 +769,7 @@ end
 
 
 App.default.screen = function()
-	 
-
-
-	-- Tempo
-	
+	-- Tempo	
 	if App.playing then -- Pulse screen level
 		local beat = 15 - math.floor( (App.tick % 24) / 24 * 16)
 		screen.level( beat )
@@ -875,8 +892,6 @@ function App:register_modes()
 		active = true
 	})
 
-	
-
 	self.midi_grid.event = function(msg)
 		local mode = self.mode[self.current_mode]
 		self.grid:process(msg)
@@ -929,7 +944,16 @@ function App:register_modes()
 				grid_end = {x=8,y=1},
 				display_start = {x=1,y=1},
 				display_end = {x=8,y=2},
-				offset = {x=0,y=0}
+				offset = {x=0,y=0},
+				param_list={
+					'scale_1_bits',
+					'scale_1_root',
+					'scale_2_bits',
+					'scale_2_root',
+					'scale_3_bits',
+					'scale_3_root',
+					
+				}
 			})
 		},
 		on_load = function() App.screen_dirty = true end,

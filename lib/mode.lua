@@ -44,8 +44,8 @@ function Mode:set(o)
     end
 
     self.layer = o.layer or {}
-    self.layer[0] = App.default.screen
-
+    self.layer[1] = App.default.screen
+    
     -- Create the modes
     self.grid = Grid:new({
         grid_start = { x = 1, y = 1 },
@@ -124,12 +124,12 @@ function Mode:set(o)
             end
             self.alt = data.toggled
             s:refresh('alt event')
-            
+
             if data.state and data.toggled then
+                
                 if self.on_alt ~= nil then
                     self:on_alt(data)
                 end
-                
                 for i, c in pairs(self.components) do
                     if c.on_alt ~= nil then
                         c:on_alt(data)
@@ -140,9 +140,13 @@ function Mode:set(o)
         end,
         on_reset = function(s)
             self.alt = false
+            for i, c in pairs(self.components) do
+                if c.on_alt_reset then
+                    c:on_alt_reset()
+                end
+            end
 
             for i, c in pairs(self.components) do
-                c.selection = nil
                 if c.set_grid then
                     c:set_grid()
                 end
@@ -158,11 +162,7 @@ function Mode:refresh()
 end
 
 function Mode:draw()
-    if self.layer[0] then
-        self.layer[0]()
-    else
-        error('We lost the layer?')
-    end
+   
 
     for i, v in pairs(self.layer) do
         self.layer[i]()
@@ -210,7 +210,7 @@ function Mode:cancel_toast()
     App.screen_dirty = true
 end
 
-function Mode:context_timeout(callback)
+function Mode:context_timeout(timeout, callback)
     if self.context_clock then
         clock.cancel(self.context_clock)
         self.context_clock = nil
@@ -219,12 +219,12 @@ function Mode:context_timeout(callback)
     local count = 0
 
     self.context_clock = clock.run(function()
-        while count < self.timeout do
+        while count < timeout do
             clock.sleep(1 / 24)
             count = count + (1 / 24)
         end
 
-        self.alt_pad:reset()
+        self:cancel_context()
 
         if callback then
             callback()
@@ -234,7 +234,34 @@ function Mode:context_timeout(callback)
     end)
 end
 
-function Mode:handle_context(context, screen)
+-- Options is going to represent an optional third property
+-- If an option is type of function, we will assume its a callback
+-- If an option is a type of number, we will assume its a timeout
+-- if an option is type of boolean, we will assume whether or not to use a timeout
+-- if the timeout is true then we use the default timeout
+function Mode:handle_context(context, screen, option)
+    local callback
+    local timeout
+
+    if type(option) == 'table' then
+        timeout = option.timeout or nil
+        callback = option.callback or nil
+
+        if timeout == true then
+            timeout = self.timeout
+        end
+    end
+
+    if type(option) == 'number' then
+        timeout = option
+    elseif type(option) == 'function' then
+        callback = option
+    elseif type(option) == 'boolean' then
+        if option then
+            timeout = self.timeout
+        end
+    end
+
     -- Cancel any existing context
     self:cancel_context()
 
@@ -247,30 +274,36 @@ function Mode:handle_context(context, screen)
 
     App.screen_dirty = true
 
-    local function context_callback()
-        print('context callback timeout')
-        -- Perform cleanup
-        self:cancel_context()
+    if timeout then
+        self:context_timeout(timeout, callback)
     end
-
-    self:context_timeout(context_callback)
 
     for binding, func in pairs(context) do
         if func and type(func) == "function" then  -- Ensure function exists and is callable
             self.context[binding] = function(a, b)
                 func(a, b)
-                self:context_timeout(context_callback)
+                if timeout then
+                    self:context_timeout(timeout, callback)
+                end
             end
         end
     end
 end
 
-function Mode:toast(toast_screen)
+function Mode:toast(toast_text)
+    local function toast_screen()
+        screen.level(15)
+        screen.move(64,32)
+        screen.text_center(toast_text)
+        screen.fill()
+    end
+    
+    
     -- Cancel any existing toast
     self:cancel_toast()
 
     -- Insert the new toast screen and keep track of its layer index
-    table.insert(self.layer, toast_screen)
+    table.insert(self.layer,toast_screen)
     self.toast_layer_index = #self.layer  -- Keep track of the layer index
 
     local count = 0
@@ -322,10 +355,6 @@ function Mode:disable()
         component:disable()
         component.mode = nil
     end
-
-    -- Optionally, clear the layers to ensure a clean state
-    self.layer = {}
-    self.layer[0] = App.default.screen
 
     App.screen_dirty = true
 end

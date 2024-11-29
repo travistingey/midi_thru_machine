@@ -181,7 +181,13 @@ function NoteGrid:grid_event (component, data)
     
     
     if self.mode.alt and data.state then
-        self.mode:handle_context(self.alt_context, self.alt_screen)
+        self.mode:handle_context(self.alt_context, self.alt_screen, {
+          timeout = true,
+          callback = function()
+            self.selection = nil 
+            self:set_grid()
+          end
+        })
     elseif self.type[self.track][pad] == TRIGGER then
       self.state[self.track][pad] = data.state
       if data.state then

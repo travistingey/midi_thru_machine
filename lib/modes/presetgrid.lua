@@ -34,14 +34,17 @@ function PresetGrid:load_preset(number)
 end
 
 function PresetGrid:grid_event(component, data)
+    
     if data.state and data.type == 'pad' then
+
         self.select = self.grid:grid_to_index(data)
         if self.mode.alt then
+
           self:save_preset(self.select, self.param_list)
-          print('Preset saved to ' .. self.select)
+          self.mode:toast('Saved preset ' .. self.select)
         else
           self:load_preset(self.select, self.param_list)
-          print('Preset loaded from ' .. self.select)
+          self.mode:toast('Loaded preset ' .. self.select)
         end
     end
     self:set_grid()

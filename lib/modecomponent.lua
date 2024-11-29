@@ -105,4 +105,30 @@ function ModeComponent:disable()
     end
 end
 
+
+function ModeComponent:start_blink()
+    self.blink_mode = true
+    -- Start the blinking coroutine if not already running
+    if not self.blinking_clock then
+        self.blink_state = true  -- Initialize blink state
+        self.blinking_clock = clock.run(function()
+        while self.blink_mode do
+            self.blink_state = not self.blink_state
+            self:set_grid()
+            clock.sleep(0.5)  -- Adjust blink interval as desired
+        end
+        clock.cancel(self.blinking_clock)
+        self.blinking_clock = nil
+        self.blink_state = nil
+        self:set_grid()
+        end)
+    end
+end
+
+function ModeComponent:end_blink()
+-- Stop the blinking coroutine if it's running
+self.blink_mode = false
+end
+
+
 return ModeComponent
