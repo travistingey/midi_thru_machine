@@ -24,7 +24,7 @@ function Track:new(o)
 
 	o.id = o.id
 	o:set(o)
-	
+
 	self.load_component(o, Auto)
 	self.load_component(o, Input)
 	self.load_component(o, Seq)
@@ -398,6 +398,7 @@ function Track:save(o)
 end
 
 function Track:load_component(component)
+	
 	local option = self[component.name .. '_type']
 	local type = nil
 
@@ -451,10 +452,9 @@ function Track:build_chain()
 
 	local chain = {self.auto, self.input, self.scale, self.seq, self.mute, self.output} 
 	local send_input = {self.seq, self.scale, self.mute, self.output} 
+	local pre_scale = {self.scale, self.mute, self.output} 
 	local send =  {self.mute, self.output}
 
-	
-	
 	self.process_transport = self:chain_components(chain, 'process_transport')
 	self.process_midi = self:chain_components(chain, 'process_midi')
 

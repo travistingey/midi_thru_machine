@@ -262,8 +262,7 @@ function print_chord(chord, indent)
     end
 end
 
--- Now print the u.CHORDS set
-print_chords(u.CHORDS)
+
 
 -- Then return the combined table
 return u

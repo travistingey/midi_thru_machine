@@ -53,6 +53,7 @@ function r() ----------------------------- execute r() in the repl to quickly re
 	utilities.unrequire(path_name .. 'components/mute')
 	utilities.unrequire(path_name .. 'components/scale')
 	utilities.unrequire(path_name .. 'components/output')
+	utilities.unrequire(path_name .. 'components/auto')
 
 	utilities.unrequire(path_name .. 'modecomponent')
 	utilities.unrequire(path_name .. 'modes/mutegrid')

@@ -18,9 +18,6 @@ local LATCH_CC = 64
 
 function App:init()
 
-
-
-
 	self.screen_dirty = true
 	-- Model
 	
