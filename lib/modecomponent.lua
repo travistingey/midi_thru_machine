@@ -13,15 +13,6 @@ function ModeComponent:new(o)
 end
 
 function ModeComponent:set(o)
-    --[[ Required properties
-    o.id = o.id
-    o.track = o.track
-    o.grid = o.grid
-    o.name = o.name
-    o.component = o.component
-    o.register = {'on_save'}
-    ]]
-    
     self.register = o.register or {}
 end
 
@@ -31,8 +22,17 @@ function ModeComponent:set_track(id)
     self:enable()
 end
 
+-- In ModeComponent.lua
+function ModeComponent:emit(event_name, ...)
+    self.mode:emit(event_name, ...)
+end
+
+function ModeComponent:on(event_name, listener)
+    self.mode:on(event_name, listener)
+end
+
 function ModeComponent:get_component()
-    if self.component then
+    if self.component and self.track then
         return App.track[self.track][self.component]
     end
 end
@@ -86,11 +86,12 @@ end
 
 function ModeComponent:disable()
     local mode = self
+    
     mode.grid:disable()
     mode.grid.event = nil
     mode.grid.set_grid = nil
 
-    if self.component then
+    if self.component and self.track then
         local component = self:get_component()
         component.on_midi = nil
         component.on_transport = nil
@@ -106,28 +107,42 @@ function ModeComponent:disable()
 end
 
 
-function ModeComponent:start_blink()
+function ModeComponent:start_blink(callback)
+    local component = self:get_component()
+    
     self.blink_mode = true
+    
     -- Start the blinking coroutine if not already running
     if not self.blinking_clock then
         self.blink_state = true  -- Initialize blink state
         self.blinking_clock = clock.run(function()
-        while self.blink_mode do
-            self.blink_state = not self.blink_state
-            self:set_grid()
-            clock.sleep(0.5)  -- Adjust blink interval as desired
-        end
-        clock.cancel(self.blinking_clock)
-        self.blinking_clock = nil
-        self.blink_state = nil
-        self:set_grid()
+            while self.blink_mode do
+                self.blink_state = not self.blink_state
+                self:set_grid(component)
+                clock.sleep(0.5)  -- Adjust blink interval as desired
+            end
+            -- Blinking loop ended
+            clock.cancel(self.blinking_clock)
+            self.blinking_clock = nil
+            self.blink_state = nil
+            
+            -- Check whether to skip set_grid
+            if not self.skip_set_grid then
+                self:set_grid(component)
+            end
+
+            self.skip_set_grid = nil
+            -- We execute the callback only when mode is enabled
+            if callback ~= nil and type(callback) == 'function' and self.mode.enabled then
+                callback()
+            end
         end)
     end
 end
 
 function ModeComponent:end_blink()
--- Stop the blinking coroutine if it's running
-self.blink_mode = false
+    -- Stop the blinking coroutine if it's running
+    self.blink_mode = false
 end
 
 

@@ -5,12 +5,20 @@ local Grid = require(path_name .. 'grid')
 
 -- Mute controls events just before output
 
-local Mute = TrackComponent:new()
-Mute.__base = TrackComponent
+local Mute = {}
 Mute.name = 'mute'
+Mute.__index = Mute
+setmetatable(Mute,{ __index = TrackComponent })
+
+function Mute:new(o)
+    o = o or {}
+    setmetatable(o, self)
+    TrackComponent.set(o,o)
+    o:set(o)
+    return o
+end
 
 function Mute:set(o)
-	self.__base.set(self, o) -- call the base set method first   
 	o.id = o.id
     o.grid = o.grid
     o.state = {}

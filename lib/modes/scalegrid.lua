@@ -82,7 +82,6 @@ function ScaleGrid:grid_event (scale, data)
     		local d = self.index_map[index]
 			
     		if self.mode.alt then
-				print('yes')
     			scale:shift_scale_to_note(d.note)
     			self.mode.alt_pad:reset()
     		else
@@ -95,48 +94,48 @@ function ScaleGrid:grid_event (scale, data)
 				App.scale[i]:follow_scale()
 			end
 
-			App.mode[App.current_mode]:enable()
-			
+			-- App.mode[App.current_mode]:enable()
+
 		end
     end
 end 
 
 function ScaleGrid:set_grid(scale)
 	if scale == nil then return end
-		local grid = self.grid
-		local intervals =  musicutil.bits_to_intervals(scale.bits)
-		local root = scale.root
-		
-		for i, v in pairs(self.note_map) do
-			local l = grid:index_to_grid(v.index)
-			grid.led[l.x][l.y] = {5,5,5}
-		end
+	local grid = self.grid
+	local intervals =  musicutil.bits_to_intervals(scale.bits)
+	local root = scale.root
+	
+	for i, v in pairs(self.note_map) do
+		local l = grid:index_to_grid(v.index)
+		grid.led[l.x][l.y] = {5,5,5}
+	end
 
-		if #intervals > 0 then
-			for i, v in pairs(intervals) do
-				local n = (24 + v + root) % 12
-				local c = self.note_map[n]
-				local l = grid:index_to_grid(c.index)
-		
-				if (n == root % 12 ) then
+	if #intervals > 0 then
+		for i, v in pairs(intervals) do
+			local n = (24 + v + root) % 12
+			local c = self.note_map[n]
+			local l = grid:index_to_grid(c.index)
+	
+			if (n == root % 12 ) then
+				grid.led[l.x][l.y] = Grid.rainbow_on[ (scale.id - 1) % #Grid.rainbow_on + 1]
+				
+				if n == 0 then
+					l = grid:index_to_grid(16)
 					grid.led[l.x][l.y] = Grid.rainbow_on[ (scale.id - 1) % #Grid.rainbow_on + 1]
-					
-					if n == 0 then
-						l = grid:index_to_grid(16)
-						grid.led[l.x][l.y] = Grid.rainbow_on[ (scale.id - 1) % #Grid.rainbow_on + 1]
-					end
-				else
+				end
+			else
+				grid.led[l.x][l.y] = Grid.rainbow_off[ (scale.id - 1) % #Grid.rainbow_off + 1]
+				
+				if n == 0 then
+					l = grid:index_to_grid(16)
 					grid.led[l.x][l.y] = Grid.rainbow_off[ (scale.id - 1) % #Grid.rainbow_off + 1]
-					
-					if n == 0 then
-						l = grid:index_to_grid(16)
-						grid.led[l.x][l.y] = Grid.rainbow_off[ (scale.id - 1) % #Grid.rainbow_off + 1]
-					end
 				end
 			end
 		end
-		
-		
+	end
+	
+	if self.mode then
 		if scale.lock then
 			self.mode.row_pads.led[9][self.grid.offset.y + self.grid.grid_start.y - 1] = 1
 		else
@@ -144,8 +143,31 @@ function ScaleGrid:set_grid(scale)
 		end
 
 		self.mode.row_pads:refresh()
-		grid:refresh('set grid')
+	end
+	grid:refresh('set grid')
   end
+
+function ScaleGrid:on_enable()
+	
+	local scale = self:get_component()
+    -- Define the listener function
+    self.scale_changed_listener = function()
+		self:set_grid(scale)
+    end
+
+    -- Attach the listener to the Scale component
+    scale:on('scale_changed', self.scale_changed_listener)
+end
+
+function ScaleGrid:on_disable()
+	-- Detach the listener from the Scale component
+	if self.scale_changed_listener then
+		local scale = self:get_component()
+
+		scale:off('scale_changed', self.scale_changed_listener)
+		self.scale_changed_listener = nil
+	end
+end
 
 function ScaleGrid:on_row(data)
 	local scale = self:get_component()

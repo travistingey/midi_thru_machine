@@ -30,19 +30,14 @@ function Track:new(o)
 	self.load_component(o, Seq)
 	self.load_component(o, Mute)
 
-	if o.scale_select > 0 then
-		o.scale = App.scale[o.scale_select]
-	else
-		self.load_component(o,Scale)
-	end
+	o.scale = App.scale[o.scale_select]
 
 	if o.output_type == 'midi' and o.midi_out > 0 then
 		o.output = App.output[o.midi_out]
 	elseif o.output_type == 'crow' then
 		o.output = App.crow.output[o.crow_out]
-	else
-		self.load_component(o, Output)
 	end
+
 
 
 	self.build_chain(o)
@@ -55,12 +50,16 @@ end
 	Track properties must match parameter values 1 to 1 in order for update to manage values.
 ]]
 function Track:set(o)
+	
 	self.note_on = {}
 
-	self.active = o.active or false
+	self.enabled = false
 	self.mono = o.mono or false
 	self.voice = o.voice or 0
 	self.chord_type = o.chord_type or 1
+	self.current_preset = 1
+	self.current_scale = 1
+	self.event_listeners = {}
 
 	local track = 'track_' .. self.id ..'_'
 
@@ -74,8 +73,7 @@ function Track:set(o)
 		self:kill()
 		self.input_type = Input.options[d]
 		self:load_component(Input)
-		self:build_chain()
-		self:set_active()
+		self:enable()
 	end)
 
 	-- Output Type
@@ -89,12 +87,9 @@ function Track:set(o)
 			self.output = App.output[self.midi_out]
 		elseif self.output_type == 'crow' or self.output_type == 'chord' then
 			self.output = App.crow.output[self.crow_out]
-		else
-			self:load_component(Output)
 		end
 
-		self:build_chain()
-		self:set_active()
+		self:enable()
 	end)
 
 	-- MIDI In
@@ -112,7 +107,7 @@ function Track:set(o)
 		self:kill()
 		self.midi_in = d
 		self:load_component(Input)
-		self:set_active()
+		self:enable()
 	end
 	)
 
@@ -136,13 +131,10 @@ function Track:set(o)
 			
 			if self.midi_out > 0 then
 				self.output = App.output[d]
-			else
-				self:load_component(Output)
 			end
 
-			self:build_chain()
 		end
-		self:set_active()
+		self:enable()
 	end)
 
 	-- MIDI Thru
@@ -240,10 +232,8 @@ function Track:set(o)
 		local last = self.scale_select
 		self.scale = App.scale[d]
 		self.scale_select = d 
-		
-		if last ~= self.scale_select then
-			self:build_chain()
-		end
+
+		self:build_chain()
 	end)
 
 	-- Trigger
@@ -315,7 +305,6 @@ function Track:set(o)
 
 		if self.input_type == 'crow' then
 			self:load_component(Input)
-			self:build_chain()
 		end
 	end)
 
@@ -330,9 +319,9 @@ function Track:set(o)
 		self.crow_out = d
 		if self.output_type == 'crow' then
 			self.output = App.crow.output[d]
-			self:build_chain()
 		end
 		
+		if not self.enabled then self:enable() end
 	end)
 
 	-- Shoot program change events
@@ -340,7 +329,6 @@ function Track:set(o)
 	params:set_action(track .. 'program_change', function(d) 
 		App.settings[track .. 'program_change'] = d
 		if d > 0 then
-			print(App.track[self.id].midi_in)
 		    App.midi_in:program_change (d-1, App.track[self.id].midi_in)
 		end
 	end)
@@ -378,13 +366,37 @@ function Track:update(o, silent)
 	end
 end
 
-function Track:set_active()
+function Track:enable()
 	if self.output_type == 'midi' and self.midi_out > 0  or self.output_type == 'crow' or self.input_type == 'keys' and self.midi_in > 0 then
-		self.active = true
+		self.enabled = true
+		self:build_chain()
 	else
-		self.active = false
+		self:disable()
 	end
 end
+
+
+function Track:disable()
+	self.enabled = false
+end
+
+
+function Track:on(event_name, listener)
+    if not self.event_listeners[event_name] then
+        self.event_listeners[event_name] = {}
+    end
+    table.insert(self.event_listeners[event_name], listener)
+end
+
+function Track:emit(event_name, ...)
+    local listeners = self.event_listeners[event_name]
+    if listeners and self.enabled then
+        for _, listener in ipairs(listeners) do
+            listener(...)
+        end
+    end
+end
+
 
 -- Save current track paramaeters as the current preset
 function Track:save(o)
@@ -431,8 +443,9 @@ function Track:chain_components(components, process_name)
 			print(process_name .. ' on track ' .. track.id)
 		end
 		
-		if track.active then
+		if track.enabled then
 			local output = input
+			
 			for i, trackcomponent in ipairs(components) do
 				if trackcomponent[process_name] then
 					output = trackcomponent[process_name](trackcomponent, output, track)
@@ -449,7 +462,6 @@ end
 
 -- Builds multiple component chains in single call.
 function Track:build_chain()
-
 	local chain = {self.auto, self.input, self.scale, self.seq, self.mute, self.output} 
 	local send_input = {self.seq, self.scale, self.mute, self.output} 
 	local pre_scale = {self.scale, self.mute, self.output} 

@@ -31,7 +31,6 @@ function App:init()
 	self.playing = false
 	self.current_mode = 1
 	self.current_track = 1
-	self.current_preset = 1
 
 	self.preset = {}
 	self.preset_props = {
@@ -55,6 +54,11 @@ function App:init()
 			'follow'
 		}
 	}
+
+	for i=1,16 do
+		self.preset[i] = {}
+		self.preset[i]['track_1_program_change'] = i
+	end
 
 	self.ppqn = 24
 	self.swing = 0.5
@@ -102,7 +106,7 @@ function App:init()
 
 
 	-- Crow Setup
-	self.crow = {input = {0,0},output = {}}
+	self.crow = {input = {0,0}, output = {}}
 	
 	-- Set Crow device input queries and stream handlers
 	crow.send("input[1].query = function() stream_handler(1, input[1].volts) end")
@@ -124,11 +128,12 @@ function App:init()
 		self.track[i] = Track:new({id = i})
 	end
 
+	-- Creating Shared TrackComponents
 	-- Create the Scales
 	params:add_separator('scales','Scales')
-	for i = 1, 3 do
+	for i = 0, 3 do
 		self.scale[i] = Scale:new({id = i})
-		Scale:register_params(i)
+		-- Scale:register_params(i)
 	end
 
 	-- Create the Outputs
@@ -149,7 +154,6 @@ function App:init()
 	App:register_bluebox(5)
 	App:register_keys(6)
 	App:register_modes()
-	
 
 end -- end App:init
 
@@ -200,13 +204,9 @@ function App:stop()
 	self.playing = false
 	
 	if params:get('clock_source')  > 1 then
-		
-
 		self.midi_in:stop()
 		self.midi_out:stop()
 		-- self.bluebox:stop()
-
-		
 	end
 
 	if params:get('clock_source') == 1 then
@@ -265,7 +265,10 @@ function App:on_cc(data)
     end
 	
 	
-	-- Pass CC event to the current mode
+	
+
+	
+    -- Pass CC event to the current mode
     if self.mode[self.current_mode] and self.mode[self.current_mode].on_cc then
         self.mode[self.current_mode]:on_cc(data)
     end
@@ -407,8 +410,6 @@ function App:panic()
 			end
 		end
 	end)
-	print('done')
-	
 end
 
 function App:register_params()
@@ -461,7 +462,8 @@ function App:register_params()
 	App:register_song()
 end
 
-function App:set_preset(d, param)
+
+function App:save_preset(d, param)
     if self.preset[d] == nil then self.preset[d] = {} end
     local preset = self.preset[d]
     
@@ -473,7 +475,6 @@ function App:set_preset(d, param)
         end
     elseif type(param) == 'table' then
         for index, name in ipairs(param) do
-			print(name .. ' should set to ' .. self.settings[name])
             local value = self.settings[name]
             if preset[name] ~= value then
                 preset[name] = value
@@ -488,22 +489,22 @@ function App:set_preset(d, param)
     end
 end
 
-function App:load_preset(d, param)
+function App:load_preset(d, param, force)
     local preset = self.preset[d]
 
-    if preset == nil then return end
+    if preset == nil then error('App:load_preset was nil') return end
     
     if type(param) == 'string' then
         local value = preset[param]
 
-        if self.settings[param] ~= value then
+        if force or (self.settings[param] ~= value) then
             params:set(param, value)    
         end
     elseif type(param) == 'table' then
         for index, name in ipairs(param) do
             local value = preset[name]
-            if self.settings[name] ~= value then
-                params:set(name, value)    
+			if force or (value and self.settings[name] ~= value) then
+                params:set(name, value)
             end
         end
     else
@@ -682,7 +683,7 @@ function App:register_midi_grid(n)
 
 	self.midi_grid:send({240,0,32,41,2,13,0,127,247}) -- Set to Launchpad to Programmer Mode
 
-	self:register_modes()
+	self:register_modes('from midi grid')
 end
 
 -- Screens and such
@@ -788,7 +789,7 @@ App.default.screen = function()
 	local track_name = params:get('track_' .. App.current_track .. '_name')
 
 	
-	if App.track[App.current_track].active then
+	if App.track[App.current_track].enabled then
 		screen.level(10)
 	else
 		screen.level(2)
@@ -858,7 +859,6 @@ App.default.screen = function()
 end
 
 function App:register_modes()
-
 	-- Create the modes
 	self.grid = Grid:new({
 		grid_start = {x=1,y=1},
@@ -904,12 +904,23 @@ function App:register_modes()
 	local PresetGrid = require(path_name .. 'modes/presetgrid')
 	local PresetSeq = require(path_name .. 'modes/presetseq')
 	
+	local SessionMode = {
+		presetseq = PresetSeq:new({track=1}),
+		mutegrid = MuteGrid:new({track=1}),
+		notegrid = NoteGrid:new({track=1}),
+		presetgrid = PresetGrid:new({
+			track=1,
+			param_type = 'track',
+            param_ids = function() return {App.current_track} end,
+		})
+	}
+
 	self.mode[1] = Mode:new({
 		id = 1,
 		components = {
-			PresetSeq:new({track=1}),
+			SessionMode.presetseq,
 			MuteGrid:new({track=1}),
-			NoteGrid:new({track=1})
+			SessionMode.presetgrid
 		},
 		on_load = function(s,data)
 		 	s.row_pads.led[9][8] = 1
@@ -917,11 +928,53 @@ function App:register_modes()
 			 App.screen_dirty = true
 		end,
 		on_row = function(s,data)
-			local notegrid = s.components[3]
-			notegrid:on_row(data)
+			local presetseq = s.components[1]
+			local presetgrid = s.components[3]
+			
+			presetseq:on_row(data, true)
+			presetgrid:on_row(data)
+
+			for i = 2, 8 do
+				s.row_pads.led[9][i] = 0
+			end
+		
+			s.row_pads.led[9][9 - data.row] = 1
+			s.row_pads:refresh()
 		end,
 		
 	})
+
+	self.mode[5] = Mode:new({
+		id = 1,
+		components = {
+			SessionMode.presetseq,
+			SessionMode.mutegrid,
+			SessionMode.notegrid
+		},
+		on_load = function(s,data)
+		 	s.row_pads.led[9][8] = 1
+			s.row_pads:refresh()
+			 App.screen_dirty = true
+		end,
+		on_row = function(s,data)
+			local presetseq = s.components[1]
+			local notegrid = s.components[3]
+			
+			presetseq:on_row(data, true)
+			notegrid:on_row(data)
+
+			for i = 2, 8 do
+				s.row_pads.led[9][i] = 0
+			end
+		
+			s.row_pads.led[9][9 - data.row] = 1
+			s.row_pads:refresh()
+			
+		end
+		
+	})
+
+	
 
 	self.mode[2] = Mode:new({
 		id = 2,
@@ -935,7 +988,7 @@ function App:register_modes()
 			ScaleGrid:new({id=2, offset = {x=0,y=4}}),
 			ScaleGrid:new({id=3, offset = {x=0,y=2}}),
 			PresetGrid:new({
-				id = 1,
+				id = 2,
 				track=1,
 				grid_start = {x=1,y=2},
 				grid_end = {x=8,y=1},
@@ -949,7 +1002,6 @@ function App:register_modes()
 					'scale_2_root',
 					'scale_3_bits',
 					'scale_3_root',
-					
 				}
 			})
 		},
@@ -960,7 +1012,6 @@ function App:register_modes()
 				scalegrid:on_row(data)
 			end
 		end,
-		on_alt = function() print('peanuts') end,
 		context = {
 			enc1 = function(d)
 				params:set('scale_1_root',App.scale[1].root + d)
@@ -978,20 +1029,19 @@ function App:register_modes()
 	self.mode[4] = Mode:new({
 		id = 4,
 		components = {
-		SeqClip:new({ track = 1, offset = {x=0,y=7}, active = true  }),
-		SeqClip:new({ track = 2, offset = {x=0,y=6} }),
-		SeqClip:new({ track = 3, offset = {x=0,y=5} }),
-		SeqClip:new({ track = 4, offset = {x=0,y=4} }),
-		SeqClip:new({ track = 5, offset = {x=0,y=3} }),
-		SeqClip:new({ track = 6, offset = {x=0,y=2} }),
-		SeqClip:new({ track = 7, offset = {x=0,y=1} }),
-		SeqClip:new({ track = 8, offset = {x=0,y=0} })
+		-- SeqClip:new({ track = 1, offset = {x=0,y=7}, active = true  }),
+		-- SeqClip:new({ track = 2, offset = {x=0,y=6} }),
+		-- SeqClip:new({ track = 3, offset = {x=0,y=5} }),
+		-- SeqClip:new({ track = 4, offset = {x=0,y=4} }),
+		-- SeqClip:new({ track = 5, offset = {x=0,y=3} }),
+		-- SeqClip:new({ track = 6, offset = {x=0,y=2} }),
+		-- SeqClip:new({ track = 7, offset = {x=0,y=1} }),
+		-- SeqClip:new({ track = 8, offset = {x=0,y=0} })
 		}
 	})
 
-	self.mode[1]:disable() --clear out the old junk
+	-- self.mode[1]:disable() --clear out the old junk
 	self.mode[1]:enable()
-	
 end
 
 return App

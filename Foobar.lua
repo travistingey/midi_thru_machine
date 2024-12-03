@@ -1,4 +1,7 @@
--- Just remeber you're doing as good as you can today. There's no stakes and it's fun. :)
+-- Just remeber you're doing
+-- as good as you can today.
+-- There are no stakes and
+-- it's just for fun. ^_^
 
 
 script_name = 'Foobar'
@@ -7,6 +10,8 @@ path_name = script_name .. '/lib/'
 local utilities = require(path_name .. 'utilities')
 App = require(path_name .. 'app')
 
+print('\n============' .. script_name .. '============')
+print('When things blow up, manually reload using: norns.script.load("/home/we/dust/code/Foobar/Foobar.lua")\n')
 ------------------------------------------------------------------------------
 function init()
 	App:init()
@@ -37,38 +42,12 @@ function redraw() -------------- redraw() is automatically called by norns
 	screen.update()
 end
 
-function r() ----------------------------- execute r() in the repl to quickly rerun this script
-
-	--App:panic()
-	
-	utilities.unrequire(path_name .. 'app')
-	utilities.unrequire(path_name .. 'track')
-	utilities.unrequire(path_name .. 'launchcontrol')
-	utilities.unrequire(path_name .. 'grid')
-	utilities.unrequire(path_name .. 'mode')
-
-	utilities.unrequire(path_name .. 'trackcomponent')
-	utilities.unrequire(path_name .. 'components/input')
-	utilities.unrequire(path_name .. 'components/seq')
-	utilities.unrequire(path_name .. 'components/mute')
-	utilities.unrequire(path_name .. 'components/scale')
-	utilities.unrequire(path_name .. 'components/output')
-	utilities.unrequire(path_name .. 'components/auto')
-
-	utilities.unrequire(path_name .. 'modecomponent')
-	utilities.unrequire(path_name .. 'modes/mutegrid')
-	utilities.unrequire(path_name .. 'modes/allclips')
-	utilities.unrequire(path_name .. 'modes/scalegrid')
-	utilities.unrequire(path_name .. 'modes/seqgrid')
-	utilities.unrequire(path_name .. 'modes/seqclip')
-	utilities.unrequire(path_name .. 'modes/scalegrid')
-	utilities.unrequire(path_name .. 'modes/notegrid')
-	utilities.unrequire(path_name .. 'modes/presetgrid')
-	utilities.unrequire(path_name .. 'modes/presetseq')
-	
-	utilities.unrequire(path_name .. 'musicutil-extended')
-	utilities.unrequire(path_name .. 'utilities')
-	utilities.unrequire(path_name .. 'bitwise')
+function r()
+	for script,value in pairs(package.loaded) do		
+		if util.string_starts(script, script_name) then
+			utilities.unrequire(script)
+		end
+	end
 	norns.script.load(norns.state.script) -- https://github.com/monome/norns/blob/main/lua/core/state.lua
 	-- norns.script.load('/home/we/dust/code/Foobar/Foobar.lua')
 end

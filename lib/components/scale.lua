@@ -1,6 +1,5 @@
 local path_name = 'Foobar/lib/'
 local TrackComponent = require(path_name .. 'trackcomponent')
-local Grid = require(path_name .. 'grid')
 local musicutil = require(path_name .. 'musicutil-extended')
 
 -- CONSTANTS
@@ -18,15 +17,24 @@ local PLAITS = {musicutil.interval_lookup[1],musicutil.interval_lookup[129],musi
 
 
 
-local Scale = TrackComponent:new()
-Scale.__base = TrackComponent
+local Scale = {}
 Scale.name = 'scale'
+Scale.__index = Scale
+setmetatable(Scale,{ __index = TrackComponent })
 
+function Scale:new(o)
+    o = o or {}
+    setmetatable(o, self)
+    TrackComponent.set(o,o)
+    o:set(o)
+	o:register_params()
+    return o
+end
 
 function Scale:set(o)
-	self.__base.set(self, o) -- call the base set method first   
-
-	self.grid = o.grid
+	
+	if not self.id then error('Scale initialized without ID') end
+	
 	self.root = o.root or 0
 	self.bits = o.bits or 0
 	self.follow = o.follow or 0
@@ -44,49 +52,48 @@ function Scale:set(o)
 	self.chord_set = o.chord_set or ALL
 	self.lock = false
 	self.lock_cc = 64
+
+	self.event_listeners = {}
+	self.current_preset = o.preset or 1
+
 end
 
 
-function Scale:register_params(id)
-	local scale = 'scale_' .. id .. '_'
-	params:add_group('Scale ' .. id, 6 ) 
+function Scale:register_params()
+	local scale = 'scale_' .. self.id .. '_'
+	params:add_group('Scale ' .. self.id, 6 ) 
 
 	params:add_number(scale .. 'bits', 'Bits',0,4095,0)
 	params:set_action(scale .. 'bits',function(bits)
 		App.settings[scale .. 'bits'] = bits
-		App.scale[id]:set_scale(bits)
+		self:set_scale(bits)
 		
 		for i = 1, 3 do
 			App.scale[i]:follow_scale()
 		end
-
-		if App.current_mode and App.mode[App.current_mode] then
-			App.mode[App.current_mode]:enable()
-		end
+		self:emit('scale_changed', true)
 	end)
 	
 	params:add_number(scale .. 'root', 'Root',-24,24,0)
 	params:set_action(scale .. 'root', function(root)
 		App.settings[scale .. 'root'] = root
-		App.scale[id].root = root
+		self.root = root
 
 		
 		for i = 1, 3 do 
 			App.scale[i]:follow_scale()
 		end
 
-		if App.current_mode and App.mode[App.current_mode] then
-			App.mode[App.current_mode]:enable()
-		end
+		self:emit('scale_changed', true)
 	end)
 
 	params:add_number(scale .. 'follow', 'Follow',0,16,0)
 	params:set_action(scale .. 'follow', function(d)
 		App.settings[scale .. 'follow'] = d
-		App.scale[id].follow = d
+		self.follow = d
 		
-		if App.scale[id].follow_method <= CHORD_MODE then
-			App.scale[id].follow = util.clamp(App.scale[id].follow,1,3)	
+		if self.follow_method <= CHORD_MODE then
+			self.follow = util.clamp(self.follow,1,3)	
 		end
 		if d > 0 then
 			for i = 1, 3 do 
@@ -94,27 +101,23 @@ function Scale:register_params(id)
 			end
 		end
 		
-		if App.current_mode and App.mode[App.current_mode] then
-			App.mode[App.current_mode]:enable()
-		end
+		self:emit('scale_changed', true)
 	end)
 
 	params:add_option(scale .. 'follow_method', 'Follow Method',{'transpose','scale degree','pentatonic','chord','midi on', 'midi latch','midi lock'},1)
 	params:set_action(scale .. 'follow_method', function(d)
 		App.settings[scale .. 'follow_method'] = d
-		App.scale[id].follow_method = d
+		self.follow_method = d
 
 		if d <= CHORD_MODE then
-			App.scale[id].follow = util.clamp(App.scale[id].follow,1,3)	
+			self.follow = util.clamp(self.follow,1,3)	
 		end
 
 		for i = 1, 3 do 
 			App.scale[i]:follow_scale()
 		end
 
-		if App.current_mode and App.mode[App.current_mode] then
-			App.mode[App.current_mode]:enable()
-		end
+		self:emit('scale_changed', true)
 	end)
 
 	params:add_option(scale .. 'chord_set', 'Chord Set', {'All', 'Plaits', 'EO'}, 1)
@@ -123,18 +126,18 @@ function Scale:register_params(id)
 		App.settings[scale .. 'chord_set'] = d
 		
 		if d == 1 then
-			App.scale[id].chord_set = musicutil.CHORDS
+			self.chord_set = musicutil.CHORDS
 		elseif d == 2 then
-			App.scale[id].chord_set = PLAITS
+			self.chord_set = PLAITS
 		elseif d == 3 then
-			App.scale[id].chord_set = {1} -- Insert EO logic
+			self.chord_set = {1} -- Insert EO logic
 		end
 	end)
 
 
 	local function lock_event(data)
 
-		local scale = App.scale[id]
+		local scale = self
 		
 		if scale.follow_method > CHORD_MODE then
 			
@@ -161,10 +164,10 @@ function Scale:register_params(id)
 
 	params:add_number(scale .. 'lock_cc', 'Lock CC',0,127,64)
 	params:set_action(scale .. 'lock_cc', function(cc)
-		App:unsubscribe_cc(App.scale[id].lock_cc, lock_event)
+		App:unsubscribe_cc(self.lock_cc, lock_event)
 		App:subscribe_cc(cc, lock_event)
-		App.scale[id].lock_cc = cc
-		App.mode[App.current_mode]:enable()
+		self.lock_cc = cc
+		self:emit('scale_changed', true)
 	end)
 end
 

@@ -5,15 +5,28 @@ local TrackComponent = require(path_name .. 'trackcomponent')
 
 -- Input Class
 -- first component in a Track's process chain that accepts midi or transport events
-local Input = TrackComponent:new()
-Input.__base = TrackComponent
+local Input = {}
 Input.name = 'input'
+Input.__index = Input
+setmetatable(Input,{ __index = TrackComponent })
+
+function Input:new(o)
+    o = o or {}
+    setmetatable(o, self)
+    TrackComponent.set(o,o)
+    o:set(o)
+    o:register_params()
+    return o
+end
 
 function Input:set(o)
-    self.__base.set(self, o) -- call the base set method first   
     for i,prop in ipairs(Input.params) do
         self[prop] = o[prop]
     end
+end
+
+function Input:register_params()
+
 end
 
 function Input.set_midi_trigger(s, data, process)

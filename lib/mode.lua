@@ -20,6 +20,7 @@ function Mode:new(o)
     return o
 end
 
+
 function Mode:set(o)
     self.id = o.id
     self.components = o.components or {}
@@ -29,10 +30,14 @@ function Mode:set(o)
     self.on_midi = o.on_midi
     self.on_transport = o.on_transport
 
+    self.enabled = false
     self.timeout = 5
+    self.reset_timeout_count = false
     self.interupt = false
     self.context = o.context or {}
     self.default = {}
+
+    self.event_listeners = {}
 
     for binding, func in pairs(App.default) do
         if self.context[binding] then
@@ -148,12 +153,28 @@ function Mode:set(o)
 
             for i, c in pairs(self.components) do
                 if c.set_grid then
-                    c:set_grid()
+                    c:set_grid(c:get_component())
                 end
             end
 
         end
     })
+end
+
+function Mode:on(event_name, listener)
+    if not self.event_listeners[event_name] then
+        self.event_listeners[event_name] = {}
+    end
+    table.insert(self.event_listeners[event_name], listener)
+end
+
+function Mode:emit(event_name, ...)
+    local listeners = self.event_listeners[event_name]
+    if listeners then
+        for _, listener in ipairs(listeners) do
+            listener(...)
+        end
+    end
 end
 
 function Mode:refresh()
@@ -178,9 +199,14 @@ function Mode:cancel_context()
     end
 
     -- Remove the context screen from the layer
-    if self.context_layer_index then
-        table.remove(self.layer, self.context_layer_index)
-        self.context_layer_index = nil
+    if self.context_layer then
+        for i, layer in ipairs(self.layer) do
+            if layer == self.context_layer then
+                table.remove(self.layer, i)
+                break
+            end
+        end
+        self.context_layer = nil
     end
 
     -- Reset the context functions to default
@@ -189,25 +215,39 @@ function Mode:cancel_context()
     end
 
     for i, c in pairs(self.components) do
+        local component = c:get_component()
         if c.set_grid then
-            c:set_grid()
+            c:set_grid(component)
         end
     end
 
     App.screen_dirty = true
 end
 
--- Added cancel_toast method to handle toast cleanup
+
+-- cancel_toast
 function Mode:cancel_toast()
     if self.toast_clock then
         clock.cancel(self.toast_clock)
         self.toast_clock = nil
     end
-    if self.toast_layer_index then
-        table.remove(self.layer, self.toast_layer_index)
-        self.toast_layer_index = nil
+
+    if self.toast_layer then
+        for i, layer in ipairs(self.layer) do
+            if layer == self.toast_layer then
+                table.remove(self.layer, i)
+                break
+            end
+        end
+        self.toast_layer = nil
     end
     App.screen_dirty = true
+end
+
+function Mode:reset_timeout()
+    if self.context_clock then
+        self.reset_timeout_count = true
+    end
 end
 
 function Mode:context_timeout(timeout, callback)
@@ -220,6 +260,12 @@ function Mode:context_timeout(timeout, callback)
 
     self.context_clock = clock.run(function()
         while count < timeout do
+
+            if self.reset_timeout_count then
+                count = 0
+                self.reset_timeout_count = false
+            end
+
             clock.sleep(1 / 24)
             count = count + (1 / 24)
         end
@@ -246,13 +292,10 @@ function Mode:handle_context(context, screen, option)
     if type(option) == 'table' then
         timeout = option.timeout or nil
         callback = option.callback or nil
-
         if timeout == true then
             timeout = self.timeout
         end
-    end
-
-    if type(option) == 'number' then
+    elseif type(option) == 'number' then
         timeout = option
     elseif type(option) == 'function' then
         callback = option
@@ -268,9 +311,9 @@ function Mode:handle_context(context, screen, option)
     -- Cancel any existing toast when a new context is started
     self:cancel_toast()
 
-    -- Insert the context screen and keep track of its layer index
+    -- Insert the context screen and keep a reference to it
+    self.context_layer = screen
     table.insert(self.layer, screen)
-    self.context_layer_index = #self.layer
 
     App.screen_dirty = true
 
@@ -297,14 +340,13 @@ function Mode:toast(toast_text)
         screen.text_center(toast_text)
         screen.fill()
     end
-    
-    
+
     -- Cancel any existing toast
     self:cancel_toast()
 
-    -- Insert the new toast screen and keep track of its layer index
-    table.insert(self.layer,toast_screen)
-    self.toast_layer_index = #self.layer  -- Keep track of the layer index
+    -- Insert the new toast screen and keep a reference to it
+    self.toast_layer = toast_screen
+    table.insert(self.layer, toast_screen)
 
     local count = 0
     self.toast_clock = clock.run(function()
@@ -325,7 +367,12 @@ end
 
 -- Methods
 function Mode:enable()
+    if self.enabled then
+        return -- Prevent re-enabling
+    end
+
     self.grid:enable()
+    self.enabled = true
 
     if self.id then
         self.mode_pads.led[4 + self.id][9] = 3
@@ -348,7 +395,7 @@ function Mode:disable()
     -- Cancel any active context or toast
     self:cancel_context()
     self:cancel_toast()
-    
+    self.enabled = false
     self.grid:disable()
 
     for i, component in ipairs(self.components) do
@@ -356,6 +403,7 @@ function Mode:disable()
         component.mode = nil
     end
 
+    self.event_listeners = {}
     App.screen_dirty = true
 end
 

@@ -209,7 +209,7 @@ function SeqGrid:set_grid(seq)
 	local grid = self.grid
 	local wrap = 8
 
-	if seq == nil then return end
+	if seq == nil or seq.mode == nil then return end
 
 	local current_step = (math.ceil(seq.tick/seq.div) - 1) % math.ceil(seq.length/seq.div) + 1
 	local page_count = math.ceil( math.ceil(seq.length/seq.div) / wrap)
@@ -225,7 +225,8 @@ function SeqGrid:set_grid(seq)
             	self.page = page
 		    end
       	end
-	
+		
+		
 		-- Set arrow pads
 		if self.page  == 1 then
 			self.mode.arrow_pads.led[3][9] = 0 

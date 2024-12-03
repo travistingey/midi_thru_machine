@@ -3,12 +3,20 @@ local TrackComponent = require(path_name .. 'trackcomponent')
 
 -- Output Class
 -- last component in a Track's process chain that handles output to devices
-local Output = TrackComponent:new()
-Output.__base = TrackComponent
+local Output = {}
 Output.name = 'output'
+Output.__index = Output
+setmetatable(Output,{ __index = TrackComponent })
+
+function Output:new(o)
+    o = o or {}
+    setmetatable(o, self)
+    TrackComponent.set(o,o)
+    o:set(o)
+    return o
+end
 
 function Output:set(o)
-	self.__base.set(self, o) -- call the base set method first    
 	self.channel = o.channel or 0
 	self.note_on = {}
 end

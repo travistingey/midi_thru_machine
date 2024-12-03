@@ -1,14 +1,11 @@
 --- Base Class
 local TrackComponent = {}
+TrackComponent.__index = TrackComponent
 
 function TrackComponent:new(o)
 	o = o or {}
 	setmetatable(o, self)
-	self.__index = self
-
-	-- common functionality here
-	self.set(o,o)
-	
+	self:set(o)
 	return o
 end
 
@@ -70,5 +67,34 @@ function TrackComponent:process_midi(data, track)
 	end
 end
 
+
+function TrackComponent:on(event_name, listener)
+    if not self.event_listeners then
+        self.event_listeners = {}
+    end
+	if not self.event_listeners[event_name] then
+        self.event_listeners[event_name] = {}
+    end
+    table.insert(self.event_listeners[event_name], listener)
+end
+
+function TrackComponent:off(event_name, listener)
+    if self.event_listeners and self.event_listeners[event_name] then
+        for i, l in ipairs(self.event_listeners[event_name]) do
+            if l == listener then
+                table.remove(self.event_listeners[event_name], i)
+                break
+            end
+        end
+    end
+end
+
+function TrackComponent:emit(event_name, ...)
+    if self.event_listeners and self.event_listeners[event_name]then
+        for _, listener in ipairs(self.event_listeners[event_name]) do
+            listener(...)
+        end
+    end
+end
 
 return TrackComponent

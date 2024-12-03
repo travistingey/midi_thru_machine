@@ -1,20 +1,26 @@
 local path_name = 'Foobar/lib/'
-local utilities = require(path_name .. '/utilities')
+local utilities = require(path_name .. 'utilities')
 local Grid = require(path_name .. 'grid')
 local TrackComponent = require(path_name .. 'trackcomponent')
 
 -- Seq is a tick based sequencer class.
 -- Each instance provides a grid interface for a step sequencer.
 -- Sequence step values can be used to exectute arbitrary functions that are defined after instantiation.
-
-local Seq = TrackComponent:new()
-Seq.__base = TrackComponent
+local Seq = {}
 Seq.name = 'seq'
+Seq.__index = Seq
+setmetatable(Seq,{ __index = TrackComponent })
+
+function Seq:new(o)
+    o = o or {}
+    setmetatable(o, self)
+    TrackComponent.set(o,o)
+    o:set(o)
+    return o
+end
 
 --Sets Seq properties on initialization
-function Seq:set(o)
-	self.__base.set(self, o) -- call the base set method first   
-		
+function Seq:set(o)		
 	o.id = o.id or 1
 		
 	-- instances of grids are defined in track during track initialization
