@@ -1,7 +1,7 @@
 local path_name = 'Foobar/lib/'
 local utilities = require(path_name .. 'utilities')
 local Grid = require(path_name .. 'grid')
-local TrackComponent = require(path_name .. 'trackcomponent')
+local TrackComponent = require('Foobar/components/track/trackcomponent')
 
 -- Auto is short for automation!
 

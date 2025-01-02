@@ -1,5 +1,5 @@
 local path_name = 'Foobar/lib/'
-local ModeComponent = require(path_name .. 'modecomponent')
+local ModeComponent = require('Foobar/components/mode/modecomponent')
 local Grid = require(path_name .. 'grid')
 
 local MuteGrid = ModeComponent:new()
@@ -51,10 +51,9 @@ function MuteGrid:on_enable()
 
     self.grid.event = function(s,d)
         if self.grid:in_bounds(d) then
-            
-           
+
             local note = self.grid:grid_to_index(d) - 1
-            print('note: ' .. note)
+
             if self.triggers[note] ~= nil and self.triggers[note] ~= self.base then
                 self:grid_event(self.triggers[note].mute, d)
             elseif base.enabled then
@@ -117,7 +116,6 @@ end
 
 function MuteGrid:grid_event (mute, data)
   local grid = self.grid
-  print('corn')
     if data.type == 'pad' and data.state then
 
         local note = grid:grid_to_index(data) - 1

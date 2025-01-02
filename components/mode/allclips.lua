@@ -1,8 +1,8 @@
 
 local path_name = 'Foobar/lib/'
-local ModeComponent = require(path_name .. 'modecomponent')
+local ModeComponent = require('Foobar/components/mode/modecomponent')
 local Grid = require(path_name .. 'grid')
-local SeqClip = require(path_name .. 'modes/seqclip')
+local SeqClip = require('Foobar/components/mode/seqclip')
 
 local AllClips = SeqClip:new() 
 AllClips.name = 'All Clips'

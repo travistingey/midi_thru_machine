@@ -1,7 +1,7 @@
 local path_name = 'Foobar/lib/'
 local utilities = require(path_name .. 'utilities')
 local Bitwise = require(path_name .. 'bitwise')
-local TrackComponent = require(path_name .. 'trackcomponent')
+local TrackComponent = require('Foobar/components/track/trackcomponent')
 
 -- Input Class
 -- first component in a Track's process chain that accepts midi or transport events

@@ -1,10 +1,11 @@
-local path_name = 'Foobar/lib/'
 
-local utilities = require(path_name .. 'utilities')
-local Input = require(path_name .. 'components/input')
-local Seq = require(path_name .. 'components/seq')
-local Output = require(path_name .. 'components/output')
-local Grid = require(path_name .. 'grid')
+local Grid = require('Foobar/lib/grid')
+local utilities = require('Foobar/lib/utilities')
+local path_name = 'Foobar/components/track/'
+local Input = require(path_name .. 'input')
+local Seq = require(path_name .. 'seq')
+local Output = require(path_name .. 'output')
+
 
 -- Define a new class for Mode
 local Mode = {}
@@ -183,12 +184,9 @@ function Mode:refresh()
 end
 
 function Mode:draw()
-   
-
     for i, v in pairs(self.layer) do
         self.layer[i]()
     end
-
 end
 
 -- Added cancel_context method to handle context cleanup

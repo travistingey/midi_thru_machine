@@ -1,7 +1,7 @@
 -- Note: This is highly customized to interface with the 1010music BitBox Mk II
 
 local path_name = 'Foobar/lib/'
-local ModeComponent = require(path_name .. 'modecomponent')
+local ModeComponent = require('Foobar/components/mode/modecomponent')
 local Grid = require(path_name .. 'grid')
 local PresetSeq = ModeComponent:new()
 

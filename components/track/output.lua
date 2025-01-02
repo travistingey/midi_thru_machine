@@ -1,5 +1,5 @@
 local path_name = 'Foobar/lib/'
-local TrackComponent = require(path_name .. 'trackcomponent')
+local TrackComponent = require('Foobar/components/track/trackcomponent')
 
 -- Output Class
 -- last component in a Track's process chain that handles output to devices
@@ -62,19 +62,19 @@ Output.types['crow'] = {
 				gate = 4
 			end
 
-			crow.output[voct].action = '{to(dyn{note = '.. volts .. '},dyn{slew = ' .. track.slew .. '})}'
-			crow.output[voct].dyn.note = volts    
-			crow.send('output[' .. voct .. ']()')
+			local action = '{to(dyn{note = '.. volts .. '},dyn{slew = ' .. track.slew .. '})}'
+			local dyn = {note = volts}
+			App.crow:send({action = action, dyn = dyn, ch = voct})
 
 			if data.index then
 				local step = 5/11
-				crow.output[3].volts = (data.index-1) * step + step / 2				
+				App.crow:send({volts = (data.index-1) * step + step / 2, ch = 3})
 			end
 
 			if data.type == 'note_on' then
-				crow.output[gate].volts = 5
+				App.crow:send({volts = 5, ch = gate})
 			elseif data.type == 'note_off' then
-				crow.output[gate].volts = 0
+				App.crow:send({volts = 0, ch = gate})
 			end
 			
 		end

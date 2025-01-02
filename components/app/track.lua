@@ -1,12 +1,14 @@
-local path_name = 'Foobar/lib/'
-local utilities = require(path_name .. 'utilities')
-local Auto = require(path_name .. 'components/auto')
-local Input = require(path_name .. 'components/input')
-local Seq = require(path_name .. 'components/seq')
-local Scale = require(path_name .. 'components/scale')
-local Mute = require(path_name .. 'components/mute')
-local Output = require(path_name .. 'components/output')
-local Grid = require(path_name .. 'grid')
+
+local Grid = require('Foobar/lib/grid')
+local utilities = require('Foobar/lib/utilities')
+local path_name = 'Foobar/components/track/'
+local Auto = require(path_name .. 'auto')
+local Input = require(path_name .. 'input')
+local Seq = require(path_name .. 'seq')
+local Scale = require(path_name .. 'scale')
+local Mute = require(path_name .. 'mute')
+local Output = require(path_name .. 'output')
+
 
 -- Define a new class for Track
 local Track = {}

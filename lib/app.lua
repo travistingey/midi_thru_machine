@@ -3,13 +3,13 @@ local App = {}
 
 local path_name = 'Foobar/lib/'
 
-
+local DeviceManager = require('Foobar/components/app/devicemanager')
 local LaunchControl = require(path_name .. 'launchcontrol')
 local Grid = require(path_name .. 'grid')
-local Track = require(path_name .. 'track')
-local Scale = require(path_name .. 'components/scale')
-local Output = require(path_name .. 'components/output')
-local Mode = require(path_name .. 'mode')
+local Track = require('Foobar/components/app/track')
+local Scale = require('Foobar/components/track/scale')
+local Output = require('Foobar/components/track/output')
+local Mode = require('Foobar/components/app/mode')
 
 local musicutil = require(path_name .. 'musicutil-extended')
 
@@ -19,14 +19,14 @@ local LATCH_CC = 64
 function App:init()
 
 	self.screen_dirty = true
+	self.device_manager = DeviceManager:new()
+
 	-- Model
-	
 	self.scale = {}
 	self.output = {}
 	self.track = {}
 	self.mode = {}
 	self.settings = {}
-	
 	
 	self.playing = false
 	self.current_mode = 1
@@ -79,22 +79,10 @@ function App:init()
 
 	self.cc_subscribers = {}
 
-	self.midi_device = {} -- container for connected midi devices
-	local midi_device = self.midi_device
-  	self.midi_device_names = {}
-
 	-- State for modes
 	self.send_out = true
 	self.send_in = true
 
-	for i = 1,#midi.vports do -- query all ports
-		midi_device[i] = midi.connect(i) -- connect each device
-		table.insert( -- register its name:
-		  self.midi_device_names, -- table to insert to
-		  ""..util.trim_string_to_width(midi_device[i].name,70) -- value to insert
-		)
-	  end
-	
 	-- Instantiate
 	self.midi_in = {}
 	self.midi_out = {}
@@ -106,20 +94,8 @@ function App:init()
 
 
 	-- Crow Setup
-	self.crow = {input = {0,0}, output = {}}
-	
-	-- Set Crow device input queries and stream handlers
-	crow.send("input[1].query = function() stream_handler(1, input[1].volts) end")
-	crow.send("input[2].query = function() stream_handler(2, input[2].volts) end")
-	
-	crow.input[1].stream = function (v) self.crow.input[1] = v end
-	crow.input[2].stream = function (v) self.crow.input[2] = v end
-	
-	crow.input[1].mode('none')
-	crow.input[2].mode('none')
+	self.crow = self.device_manager.crow
 
-	-- Register parameters and instatiate classes
-	-- App classes register params themselves during instatiation
 	App:register_params()
 
 	-- Create the tracks
@@ -413,16 +389,15 @@ function App:panic()
 end
 
 function App:register_params()
-
+	local midi_devices =  self.device_manager.midi_device_names
 	params:add_group('DEVICES',8)
-	params:add_option("midi_in", "MIDI In",self.midi_device_names,1)
-	params:add_option("midi_out", "MIDI Out",self.midi_device_names,2)
-	params:add_option("keys", "Keys",self.midi_device_names,6)
-	params:add_option("mixer", "Mixer",self.midi_device_names,4)
-	params:add_option("midi_grid", "Grid",self.midi_device_names,3)
-	params:add_separator()
-	params:add_option("launchcontrol", "LaunchControl",self.midi_device_names,9)
-	params:add_option("bluebox", "BlueBox",self.midi_device_names,5)
+	params:add_option("midi_in", "MIDI In",midi_devices,1)
+	params:add_option("midi_out", "MIDI Out",midi_devices,2)
+	params:add_option("keys", "Keys",midi_devices,6)
+	params:add_option("mixer", "Mixer",midi_devices,4)
+	params:add_option("midi_grid", "Grid",midi_devices,3)
+	params:add_option("launchcontrol", "LaunchControl",midi_devices,9)
+	params:add_option("bluebox", "BlueBox",midi_devices,5)
 	
 	params:add_trigger('panic', "Panic")
 	params:set_action('panic', function()
@@ -630,56 +605,54 @@ function App:register_bluebox(n)
 	self.bluebox = midi.connect(n)
 end
 
-function App:register_midi_in(n)
-	-- Note: We must change existing events to nil to break the event handling.
-	-- If the App.midi_in pointer is changed, the event will still be bound to the connected device in memory.
-	-- So much confusion ensues when old devices are still bound, wreaking havoc like ghosts.
+function App.midi_in_event(data)
+	data.device = 'midi_in'
 
-	self.midi_in.event = nil
-		
-	self.midi_in = midi.connect(n)
-
-	self.midi_in.event = function(msg)
-		
-		local data = midi.to_msg(msg)
-		data.device = 'midi_in'
-
-		if self.debug then
-			print('Incoming MIDI')
-			tab.print(data)
-		end
-
-		--external midi transport
-		if params:get('clock_source') > 1 and (data.type == "start" or data.type == "continue" or data.type == "stop") then
-			App:on_transport(data)
-		end
-
-		if data.type == 'clock'then
-			App:on_tick()
-		end
-		
-		if data.type == 'cc'then
-			self:on_cc(data)
-			
-		end
-
-		if not (data.type == "cc" or data.type == "start" or data.type == "continue" or data.type == "stop" or data.type == "clock") then
-			App:on_midi(data)
-		end
-		
-		App.screen_dirty = true
-
+	if App.debug then
+		print('Incoming MIDI')
+		tab.print(data)
 	end
+
+	--external midi transport
+	if params:get('clock_source') > 1 and (data.type == "start" or data.type == "continue" or data.type == "stop") then
+		App:on_transport(data)
+	end
+
+	if data.type == 'clock'then
+		App:on_tick()
+	end
+	
+	if data.type == 'cc'then
+		App:on_cc(data)
+		
+	end
+
+	if not (data.type == "cc" or data.type == "start" or data.type == "continue" or data.type == "stop" or data.type == "clock") then
+		App:on_midi(data)
+	end
+	
+	App.screen_dirty = true
+end
+
+-- App.midi_in represents the primary transport and input device
+function App:register_midi_in(n)
+	if self.midi_in and self.midi_in.type == 'midi' then
+		self.midi_in:off('event', App.midi_in_event) -- remove event listener from previous midi device
+	end
+
+	self.midi_in = self.device_manager:get(n)
+
+	self.midi_in:on('event', App.midi_in_event)
+
 end
 
 function App:register_midi_out(n)
-	self.midi_out = midi.connect(n)
+	self.midi_out = self.device_manager:get(n)
 end
 
 function App:register_midi_grid(n)
 	
-	self.midi_grid.event = nil
-	self.midi_grid = midi.connect(n)
+	self.midi_grid = self.device_manager:get(n)
 
 	self.midi_grid:send({240,0,32,41,2,13,0,127,247}) -- Set to Launchpad to Programmer Mode
 
@@ -866,7 +839,7 @@ function App:register_modes()
 		display_start = {x=1,y=1},
 		display_end = {x=4,y=1},
 		offset = {x=4,y=8},
-		midi = App.midi_grid,
+		midi = App.midi_grid.device,
 		event = function(s,data)
 			if data.state then
 				s:reset()
@@ -895,14 +868,14 @@ function App:register_modes()
 		mode.grid:process(msg)
 	end
 	
-	local AllClips = require(path_name .. 'modes/allclips') 
-	local SeqClip = require(path_name .. 'modes/seqclip') 
-	local SeqGrid = require(path_name .. 'modes/seqgrid') 
-	local ScaleGrid = require(path_name .. 'modes/scalegrid') 
-	local MuteGrid = require(path_name .. 'modes/mutegrid') 
-	local NoteGrid = require(path_name .. 'modes/notegrid')
-	local PresetGrid = require(path_name .. 'modes/presetgrid')
-	local PresetSeq = require(path_name .. 'modes/presetseq')
+	local AllClips = require('Foobar/components/mode/allclips') 
+	local SeqClip = require('Foobar/components/mode/seqclip') 
+	local SeqGrid = require('Foobar/components/mode/seqgrid') 
+	local ScaleGrid = require('Foobar/components/mode/scalegrid') 
+	local MuteGrid = require('Foobar/components/mode/mutegrid') 
+	local NoteGrid = require('Foobar/components/mode/notegrid')
+	local PresetGrid = require('Foobar/components/mode/presetgrid')
+	local PresetSeq = require('Foobar/components/mode/presetseq')
 	
 	local SessionMode = {
 		presetseq = PresetSeq:new({track=1}),

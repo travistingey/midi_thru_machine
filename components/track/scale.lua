@@ -1,5 +1,5 @@
 local path_name = 'Foobar/lib/'
-local TrackComponent = require(path_name .. 'trackcomponent')
+local TrackComponent = require('Foobar/components/track/trackcomponent')
 local musicutil = require(path_name .. 'musicutil-extended')
 
 -- CONSTANTS

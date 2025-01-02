@@ -1,5 +1,5 @@
 local path_name = 'Foobar/lib/'
-local ModeComponent = require(path_name .. 'modecomponent')
+local ModeComponent = require('Foobar/components/mode/modecomponent')
 local Grid = require(path_name .. 'grid')
 local PresetGrid = ModeComponent:new()
 
