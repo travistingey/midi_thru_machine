@@ -267,15 +267,25 @@ function Track:set(o)
 	end)
 	
 
+	local interrupt_notes = function(note)
+		self.output_device:emit('interrupt', {type='interrupt', note_class=note, ch=self.midi_out})
+	end
 
 	params:set_action(track .. 'scale_select', function(d) 
 		App.settings[track .. 'scale_select'] = d
 		self:kill()
 		local last = self.scale_select
 		
+		if self.scale_select ~= 0 then
+			self.scale:off('interrupt', interrupt_notes)
+		end
+
 		self.scale = App.scale[d]
 		self.scale_select = d 
-		print('scale select', d)
+		
+		if self.scale_select ~= 0 then
+			self.scale:on('interrupt', interrupt_notes)
+		end
 
 		self:build_chain()
 	end)

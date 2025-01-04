@@ -71,7 +71,7 @@ function Scale:register_params()
 		for i = 1, 3 do
 			App.scale[i]:follow_scale()
 		end
-		self:emit('scale_changed', true)
+		self:emit('scale_changed', 'bits')
 	end)
 	
 	params:add_number(scale .. 'root', 'Root',-24,24,0)
@@ -84,7 +84,7 @@ function Scale:register_params()
 			App.scale[i]:follow_scale()
 		end
 
-		self:emit('scale_changed', true)
+		self:emit('scale_changed', 'root')
 	end)
 
 	params:add_number(scale .. 'follow', 'Follow',0,16,0)
@@ -101,7 +101,7 @@ function Scale:register_params()
 			end
 		end
 		
-		self:emit('scale_changed', true)
+		self:emit('scale_changed', 'follow')
 	end)
 
 	params:add_option(scale .. 'follow_method', 'Follow Method',{'transpose','scale degree','pentatonic','chord','midi on', 'midi latch','midi lock'},1)
@@ -117,7 +117,7 @@ function Scale:register_params()
 			App.scale[i]:follow_scale()
 		end
 
-		self:emit('scale_changed', true)
+		self:emit('scale_changed', 'follow_method')
 	end)
 
 	params:add_option(scale .. 'chord_set', 'Chord Set', {'All', 'Plaits', 'EO'}, 1)
@@ -167,12 +167,25 @@ function Scale:register_params()
 		App:unsubscribe_cc(self.lock_cc, lock_event)
 		App:subscribe_cc(cc, lock_event)
 		self.lock_cc = cc
-		self:emit('scale_changed', true)
+		self:emit('scale_changed', 'lock_cc')
 	end)
 end
 
 
 function Scale:set_scale(bits)
+	-- Store the old bits
+    local old_bits = self.bits or 0
+    local new_bits = bits
+
+    -- Identify changed bits using XOR
+    local changed_bits = old_bits ~ new_bits
+	local changed_notes = musicutil.bits_to_intervals(changed_bits)
+
+	-- Send interrupt request to stop changed notes
+	for i=1,#changed_notes do
+		self:emit('interrupt', changed_notes[i])
+	end
+
 	self.bits = bits
 	self.intervals = musicutil.bits_to_intervals(bits)
 	self.notes = {}
@@ -180,8 +193,8 @@ function Scale:set_scale(bits)
 	params:set('scale_'..self.id..'_bits', bits)
 
 	local i = 0
-  
 	for oct=1,10 do
+		-- Create a list of notes that changed in scale change
 		for i=1,#self.intervals do
 			self.notes[(oct - 1) * #self.intervals + i] = self.intervals[i] + (oct-1) * 12
 		end
@@ -344,7 +357,7 @@ function Scale:midi_event(data, track)
 
 			
 			data.index = self.chord.index
-			data.note = self.root + 36
+			data.new_note = self.root + 36
 			
 			return data
 		elseif self.follow_method == MIDI_ON_MODE and (data.type == 'note_on' or data.type == 'note_off') and track.id == self.follow then
@@ -417,6 +430,7 @@ function Scale:midi_event(data, track)
 
 		else
 			if self.bits == 0 then
+				data.new_note = data.note + self.root
 				return data
 			else
 				data.new_note = musicutil.snap_note_to_array(data.note, self.notes) + self.root

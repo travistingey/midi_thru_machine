@@ -88,6 +88,7 @@ function MIDIDevice:send(data)
             
             local off = {
                 type = 'note_off',
+                note_id = data.note,
                 note = data.note,
                 vel = data.vel,
                 ch = data.ch,
@@ -100,28 +101,25 @@ function MIDIDevice:send(data)
             -- One-time listener
             local function last_note_on (next)
                 local remove_event = false
-                
+
                 if not next then -- no 'next' note data means kill triggered callback
                     self.device:send(off)
                     remove_event = true
-                elseif next.ch == data.ch then
+                elseif next.type == 'stop' then
+                    -- If stop is recieved, and a note_off wasn't processed (might cause double note_off events)
+                    print('stop recieved')
+                    self.device:send(off)
+                    remove_event = true
+                elseif next.ch == off.ch then
                     -- This will trigger for all subsequent note events on the device's channel
                     
-                    if next.note == data.note then
-                        
-                        if next.type == 'interrupt' then
-                            print('interrupting note')
-                        end
-
-                        if next.type == 'note_on' or next.type == 'interrupt' then
-                            self.device:send(off) -- If we recieve duplicate events
-                        end
-
+                    if next.note == off.note_id then
+                        self.device:send(off) -- If we recieve duplicate events
                         remove_event = true
-                    elseif next.type == 'stop' then
-                        -- If stop is recieved, and a note_off wasn't processed (might cause double note_off events)
+                    elseif next.type == 'interrupt' and next.note_class == off.note_id % 12 then
                         self.device:send(off)
                         remove_event = true
+
                     end
                 
                 end
@@ -141,11 +139,16 @@ function MIDIDevice:send(data)
         end
     end
 
+    local send = {}
+    for key, value in pairs(data) do
+        send[key] = value
+    end
+    
     if data.new_note then
-        data.note = data.new_note
+        send.note = data.new_note
     end
 
-    self.device:send(data)
+    self.device:send(send)
 end
 
 function MIDIDevice:kill()
@@ -367,10 +370,6 @@ function DeviceManager:register_midi_device(port)
 
         
     end
-
-    device:on('stop', function()
-        print('playback was stopped')
-    end)
 
 end
 
