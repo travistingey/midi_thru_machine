@@ -226,9 +226,9 @@ end
 
 -- MIDI events triggered from MIDI In device
 function App:on_midi(data)
-	for i=1,#self.track do
-		self.track[i]:process_midi(data)
-	end
+	-- for i=1,#self.track do
+	-- 	self.track[i]:process_midi(data)
+	-- end
 end
 
 -- CC Events
@@ -239,11 +239,7 @@ function App:on_cc(data)
             func(data)
         end
     end
-	
-	
-	
 
-	
     -- Pass CC event to the current mode
     if self.mode[self.current_mode] and self.mode[self.current_mode].on_cc then
         self.mode[self.current_mode]:on_cc(data)
@@ -286,15 +282,8 @@ function App:crow_query(i)
 	crow.send('input[' .. i .. '].query()')
 end
 
-
-
-
-
-
 -- Setter for static variables
 function App:set(prop, value) self[prop] = value end
-
-
 
 -- CONTROL HANDLING --
 function App:set_context(newContext)
@@ -347,7 +336,6 @@ end
 -- Norns Buttons
 function App:handle_key(k,z)
 	local context = self.mode[self.current_mode].context
-	
 	
 	if k == 1 then
 		self.alt_down = z == 1
@@ -503,25 +491,25 @@ function App:register_song()
 end
 
 function App:register_keys(n)
-	self.keys.event = nil
+	-- self.keys.event = nil
 		
-	self.keys = midi.connect(n)
-	self.keys.event = function(msg)
-		local data = midi.to_msg(msg)
-		data.device = 'keys'
+	-- self.keys = midi.connect(n)
+	-- self.keys.event = function(msg)
+	-- 	local data = midi.to_msg(msg)
+	-- 	data.device = 'keys'
 		
-		if data.type == 'cc' then
-			self:on_cc(data)
-		end
+	-- 	if data.type == 'cc' then
+	-- 		self:on_cc(data)
+	-- 	end
 
-		if not (data.type == "cc" or data.type == "start" or data.type == "continue" or data.type == "stop" or data.type == "clock") then
-			App:on_midi(data)
-		end
+	-- 	if not (data.type == "cc" or data.type == "start" or data.type == "continue" or data.type == "stop" or data.type == "clock") then
+	-- 		App:on_midi(data)
+	-- 	end
 
-		if data.type == "note_on" then
-			App.screen_dirty = true
-		end
-	end
+	-- 	if data.type == "note_on" then
+	-- 		App.screen_dirty = true
+	-- 	end
+	-- end
 end
 
 -- Bezier curve control points

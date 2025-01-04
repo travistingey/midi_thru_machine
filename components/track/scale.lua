@@ -418,17 +418,8 @@ function Scale:midi_event(data, track)
 		else
 			if self.bits == 0 then
 				return data
-			elseif data.type == 'note_on' then
-
-				data.note = musicutil.snap_note_to_array(data.note, self.notes) + self.root
-				track.note_on[data.note] = data
-				
-				return data
-			elseif data.type == 'note_off' then
-
-				if track.note_on[data.note] then
-					data.note = track.note_on[data.note].note
-				end
+			else
+				data.new_note = musicutil.snap_note_to_array(data.note, self.notes) + self.root
 				return data
 			end
 		end

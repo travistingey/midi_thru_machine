@@ -1,3 +1,4 @@
+
 -- device_manager.lua
 local path_name = 'Foobar/lib/'
 local utilities = require(path_name .. 'utilities')
@@ -79,12 +80,11 @@ function MIDIDevice:send(data)
     -- Perform note handling check here
 
     if data.type then
-        
         self.manager:emit(self.id, data.type, data)
 
         if data.type == 'note_on' then
             -- Create one-time listener that waits for subsequent events on device
-            local note_handle_events = { 'note_on', 'note_off', 'stop', 'kill' }
+            local note_handle_events = { 'note_on', 'note_off', 'stop', 'kill', 'interrupt' }
             
             local off = {
                 type = 'note_off',
@@ -93,27 +93,37 @@ function MIDIDevice:send(data)
                 ch = data.ch,
             }
 
+            if data.new_note then
+                off.note = data.new_note
+            end
+
             -- One-time listener
             local function last_note_on (next)
-                
                 local remove_event = false
                 
-                -- This will trigger for all subsequent note events on the device's channel
-                if next.note == data.note and next.ch == data.ch then
-
-                    -- If we recieve duplicate events
-                    if next.type == 'note_on' then
-                        self.device:send(off)
-                    elseif next.type == 'note_off' then
-                        -- If this is executing, standard note_off should resolve open note
-                        -- Watching off events is needed for killing the listener
-                    end
-
-                    remove_event = true
-                elseif next.type == 'stop' then
-                    -- If stop is recieved, then a note_off wasn't processed
+                if not next then -- no 'next' note data means kill triggered callback
                     self.device:send(off)
                     remove_event = true
+                elseif next.ch == data.ch then
+                    -- This will trigger for all subsequent note events on the device's channel
+                    
+                    if next.note == data.note then
+                        
+                        if next.type == 'interrupt' then
+                            print('interrupting note')
+                        end
+
+                        if next.type == 'note_on' or next.type == 'interrupt' then
+                            self.device:send(off) -- If we recieve duplicate events
+                        end
+
+                        remove_event = true
+                    elseif next.type == 'stop' then
+                        -- If stop is recieved, and a note_off wasn't processed (might cause double note_off events)
+                        self.device:send(off)
+                        remove_event = true
+                    end
+                
                 end
 
                 -- Remove listener
@@ -122,18 +132,24 @@ function MIDIDevice:send(data)
                         self.manager:off(self.id, event, last_note_on)
                     end
                 end
-                
-            end
+            end -- End last_note_on
             
             -- Bind on-time listener
             for i,event in ipairs(note_handle_events) do
                 self.manager:on(self.id, event, last_note_on)
             end
-            
         end
     end
 
+    if data.new_note then
+        data.note = data.new_note
+    end
+
     self.device:send(data)
+end
+
+function MIDIDevice:kill()
+    self.manager:emit(self.id, 'kill')
 end
 
 -- CrowDevice inherits from DeviceMethods and adds Crow-specific methods
@@ -190,7 +206,7 @@ function DeviceManager:add(props, methods)
     table.insert(self.devices, new_device)
 
     -- Assign the trimmed name directly based on device.id
-    self.device_names[new_device.id] = props.trimmed_name or new_device.name
+    self.device_names[new_device.id] = new_device.name
 
     return new_device
 end
@@ -203,15 +219,21 @@ function DeviceManager:new()
     d.virtual = {}
     d.crow = {input = {}, output = {}}
     d.event_listeners = {}
+    
+    -- TESTING THIS!!!!!!
+    d.remove_events = {}
+    -- REMOVE AFTER TEST!
+
     d.device_names = {} -- Indexed by device.id
     d.midi_device_names = {}
     
-
+    print('Registering Devices:')
     -- Register MIDI devices
     for i = 1, #midi.vports do
         d:register_midi_device(i)
     end
 
+    print('\n')
     -- Register Crow device
     d:register_crow_device()
 
@@ -258,7 +280,10 @@ function DeviceManager:emit(device_id, event_name, data)
        and self.event_listeners[device_id]
        and self.event_listeners[device_id][event_name] then
 
-        for _, listener in ipairs(self.event_listeners[device_id][event_name]) do
+        -- Create a shallow copy of the listeners to prevent issues during iteration
+        local listeners = { table.unpack(self.event_listeners[device_id][event_name]) }
+
+        for _, listener in ipairs(listeners) do
             listener(data)
         end
     end
@@ -282,11 +307,13 @@ end
 -- Register a MIDI Device
 function DeviceManager:register_midi_device(port)
     local midi_device = midi.connect(port)
+    
 
     if not midi_device or midi_device.name == 'none' then
-        print("Failed to connect to MIDI port " .. port)
-        return
+        return -- Skip if no MIDI device is connected
     end
+
+    print("MIDI " .. port .. "\t\t" .. midi_device.name)
 
     local trimmed_name = util.trim_string_to_width(midi_device.name, 70)
 
@@ -307,8 +334,6 @@ function DeviceManager:register_midi_device(port)
     device.triggers = {}
 
     table.insert(self.midi,device)
-    -- Assign the trimmed name directly based on device.id
-    -- Already handled in add method
 
     -- Setup MIDI event handler
     midi_device.event = function(msg)
@@ -336,12 +361,17 @@ function DeviceManager:register_midi_device(port)
             --     end
 
             -- end
-
+            self:emit(device.id, event.type, event)
             self:emit(device.id, 'event', event)
         end
 
         
     end
+
+    device:on('stop', function()
+        print('playback was stopped')
+    end)
+
 end
 
 -- Register a Virtual Device
@@ -378,6 +408,7 @@ function DeviceManager:register_crow_device()
 
     crow_device.input = {}
     crow_device.output = {}
+
     -- Crow Setup
     local CROW_INPUTS = 2
     for index = 1, CROW_INPUTS do
@@ -394,7 +425,6 @@ function DeviceManager:register_crow_device()
 
         crow_device.device.input[index].mode('none')
 
-        
     end
 
     -- Register a default stream event listener

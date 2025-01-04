@@ -74,27 +74,24 @@ end
 function ScaleGrid:grid_event (scale, data)
 
 
-   if data.type == 'pad' then
-      local grid = self.grid
-    	local index = grid:grid_to_index(data)
-    	
+	if data.type == 'pad' then
+		local grid = self.grid
+		local index = grid:grid_to_index(data)
+		
 		if(index and data.state and self.index_map[index])then
-    		local d = self.index_map[index]
+			local d = self.index_map[index]
 			
-    		if self.mode.alt then
-    			scale:shift_scale_to_note(d.note)
-    			self.mode.alt_pad:reset()
-    		else
+			if self.mode.alt then
+				scale:shift_scale_to_note(d.note)
+				self.mode.alt_pad:reset()
+			else
 				local bit_flag = (1 << ((24 + d.note - scale.root) % 12) ) -- bit representation for note
-    			scale:set_scale(scale.bits ~ bit_flag )
-    		end
-
+				scale:set_scale(scale.bits ~ bit_flag )
+			end
 
 			for i = 1, 3 do
 				App.scale[i]:follow_scale()
 			end
-
-			-- App.mode[App.current_mode]:enable()
 
 		end
     end

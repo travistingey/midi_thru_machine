@@ -31,16 +31,9 @@ function Track:new(o)
 	self.load_component(o, Input)
 	self.load_component(o, Seq)
 	self.load_component(o, Mute)
+	self.load_component(o, Output)
 
 	o.scale = App.scale[o.scale_select]
-
-	if o.output_type == 'midi' and o.midi_out > 0 then
-		o.output = App.output[o.midi_out]
-	elseif o.output_type == 'crow' then
-		o.output = App.crow.output[o.crow_out]
-	end
-
-
 
 	self.build_chain(o)
 	
@@ -65,9 +58,55 @@ function Track:set(o)
 
 	local track = 'track_' .. self.id ..'_'
 
-	params:add_group('Track '.. self.id, 21)
+	params:add_group('Track '.. self.id, 23)
 
 	params:add_text(track .. 'name', 'Name', 'Track ' .. o.id)
+
+
+	-- Input Devive Listeners
+	local function input_event(data)
+		if not (data.type == "cc" or data.type == "start" or data.type == "continue" or data.type == "stop" or data.type == "clock") then
+			self:process_midi(data)
+		end
+	end
+
+	local function note_on_event(data)
+		self.note_on[data.note] = data
+	end
+		
+	local function note_off_event(data)
+		self.note_on[data.note] = nil
+	end
+
+	
+	
+
+	-- Device In/Out
+	local midi_devices =  App.device_manager.midi_device_names
+	params:add_option(track .. "device_in", "Device In", midi_devices)
+	
+	params:set_action(track .. 'device_in',function(d)
+		-- Remove old input device listeners
+		if self.input_device and self.input_device.type then
+			self.input_device:off('event', input_event)
+			self.input_device:off('note_on', note_on_event)
+			self.input_device:off('note_off', note_off_event)
+		end
+		
+		self.input_device = App.device_manager:get(d)
+		self.input_device:on('event', input_event)
+		self.input_device:on('note_on', note_on_event)
+		self.input_device:on('note_off', note_off_event)
+
+		self:load_component(Input)
+		self:enable()
+	end)
+
+	params:add_option(track .. "device_out", "Device Out",midi_devices,2)
+	params:set_action(track .. 'device_out',function(d)
+		self.output_device = App.device_manager:get(d)
+	end)
+
 	-- Input Type
 	self.input_type = o.input_type or Input.options[1]
 	params:add_option(track .. 'input_type', 'Input Type', Input.options, 1)
@@ -113,7 +152,6 @@ function Track:set(o)
 	end
 	)
 
-	
 	-- MIDI Out
 	self.midi_out = o.midi_out or 0
 	params:add_number(track .. 'midi_out', 'MIDI Out', 0, 16, 0, function(param)
@@ -219,7 +257,7 @@ function Track:set(o)
 	-- Scale
 	self.scale_select = o.scale_select or 0
 	
-	params:add_number(track .. 'scale_select', 'Scale', 0, 4, 0,function(param)
+	params:add_number(track .. 'scale_select', 'Scale', 0, 3, 0,function(param)
 		local ch = param:get()
 		if ch == 0 then 
 		   return 'off'
@@ -227,13 +265,17 @@ function Track:set(o)
 		   return ch
 		end
 	end)
- 
+	
+
+
 	params:set_action(track .. 'scale_select', function(d) 
 		App.settings[track .. 'scale_select'] = d
 		self:kill()
 		local last = self.scale_select
+		
 		self.scale = App.scale[d]
 		self.scale_select = d 
+		print('scale select', d)
 
 		self:build_chain()
 	end)
@@ -444,10 +486,9 @@ function Track:chain_components(components, process_name)
 		if track.debug then
 			print(process_name .. ' on track ' .. track.id)
 		end
-		
+
 		if track.enabled then
 			local output = input
-			
 			for i, trackcomponent in ipairs(components) do
 				if trackcomponent[process_name] then
 					output = trackcomponent[process_name](trackcomponent, output, track)
@@ -480,9 +521,8 @@ end
 
 -----------
 function Track:kill()
-	
-	if self.output then
-		self.output:kill()
+	if self.output_device then
+		self.output_device:emit('kill')
 	end
 	self.note_on = {}
 end
@@ -495,53 +535,7 @@ end
 ]]
 
 function Track:handle_note(data, chain, debug) -- 'send', 'send_input', 'send_output' etc
-	if data ~= nil then
-		if data.type == 'note_on' then    
-			
-			-- Any incoming notes already on will have an off message sent
-			if data.id ~= nil then
-				-- This note has already been processed
-				
-			elseif self.note_on[data.note] ~= nil then
-				-- the same note_on event came but wasn't processed
-				local last =  self.note_on[data.note]
-				local off = {
-					type = 'note_off',
-					note = last.note,
-					vel = last.vel,
-					ch = last.ch,
-				}
-
-				if last and last.id then
-					self.note_on[last.id] = nil
-				else
-					self.note_on[last.note] = nil
-				end
-
-				if chain ~= nil then
-					if self.debug then
-						print(last.id .. ' off sent during note on')
-					end
-					self[chain](self, off)
-				end
-			end
-
-			data.id = data.note -- id is equal to the incoming note to track note off events for quantized notes
-			self.note_on[data.id] = data
-
-		elseif data.type == 'note_off' then
-			local off = data
-			if self.note_on[data.note] ~= nil then
-				local last =  self.note_on[data.note]
-				self.note_on[data.note] = nil
-				if last.id then
-					self.note_on[last.id] = nil
-				end
-				data.note = last.note
-			end
-		end
-
-	end
+	
 end
 
 
