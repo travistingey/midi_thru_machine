@@ -39,6 +39,7 @@ function Mode:set(o)
     self.default = {}
 
     self.event_listeners = {}
+    self.cleanup_functions = {}
 
     for binding, func in pairs(App.default) do
         if self.context[binding] then
@@ -90,9 +91,13 @@ function Mode:set(o)
                 component.grid:event(data)
             end
 
+            -- [ DELETE
             if self.on_arrow ~= nil then
                 self:on_arrow(data)
             end
+            -- DELETE ]
+
+            self:emit('arrow', data)
 
         end
     })
@@ -107,10 +112,15 @@ function Mode:set(o)
             for i, component in ipairs(mode.components) do
                 component.grid:event(data)
             end
-
+            
+            -- [ DELETE
             if self.on_row ~= nil then
                 self:on_row(data)
             end
+            -- DELETE ]
+            
+            self:emit('row', data)
+
         end
     })
 
@@ -132,15 +142,21 @@ function Mode:set(o)
             s:refresh('alt event')
 
             if data.state and data.toggled then
-                
+                --  [ DELETE
                 if self.on_alt ~= nil then
                     self:on_alt(data)
                 end
+                -- DELETE ]
+
+                self:emit('alt', data)
+                
+                -- [ DELETE
                 for i, c in pairs(self.components) do
                     if c.on_alt ~= nil then
                         c:on_alt(data)
                     end
                 end
+                -- DELETE ]
             end
 
         end,
@@ -162,15 +178,18 @@ function Mode:set(o)
     })
 end
 
+-- Mode event listeners
 function Mode:on(event_name, listener)
     if not self.event_listeners[event_name] then
         self.event_listeners[event_name] = {}
     end
+    
     table.insert(self.event_listeners[event_name], listener)
 
-    return function()
-        self:off(event_name, listener)
-    end
+    local cleanup = function() self:off(event_name, listener) end
+    table.insert(self.cleanup_functions, cleanup)
+
+    return cleanup
 end
 
 function Mode:off(event_name, listener)
@@ -392,12 +411,16 @@ function Mode:enable()
         self.mode_pads:refresh()
     end
 
+    self:emit('load')
+
+    -- [ DELETE
     if self.on_load ~= nil then
         self:on_load()
     end
+    -- DELETE ]
 
     for i, component in ipairs(self.components) do
-        component.mode = App.mode[App.current_mode]
+        component.mode = self
         component:enable()
     end
 
@@ -420,6 +443,7 @@ function Mode:disable()
     App.screen_dirty = true
 end
 
+-- [ DELETE
 function Mode:on_cc(data)
     for _, component in ipairs(self.components) do
         if component.on_cc then
@@ -427,5 +451,6 @@ function Mode:on_cc(data)
         end
     end
 end
+-- DELETE ]
 
 return Mode

@@ -1,4 +1,4 @@
--- Just remeber you're doing
+-- Just remember you're doing
 -- as good as you can today.
 -- There are no stakes and
 -- it's just for fun. ^_^

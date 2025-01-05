@@ -66,17 +66,18 @@ function ModeComponent:enable()
     mode_component.grid:set_grid(track_component)
 
     if mode_component.midi_event ~= nil then
-        track_component.on_midi = function(track_component, data)
+        track_component:on('midi_event', function(data)
             mode_component:midi_event(track_component, data)
-        end
+        end)
     end
 
     
     if mode_component.transport_event ~= nil then
         
-        track_component.on_transport = function(track_component, data)
+        self.mode:on('transport_event', function(data)
             mode_component:transport_event(track_component, data)
-        end
+        end)
+
     end
 
     

@@ -210,25 +210,32 @@ end
 
 -- Transport events triggered from MIDI In device
 function App:on_transport(data)
-	if data.type == "start" then
-		self:start()
-	elseif data.type == "continue" then
-		self:start(true)
-	elseif data.type == "stop" then
-		self:stop()
-	end			
-	
-	for i=1,#self.track do
-		self.track[i]:process_transport(data)
-	end
+	if params:get('clock_source') > 1 then
 
+		if data.type == "start" then
+			self:start()
+		elseif data.type == "continue" then
+			self:start(true)
+		elseif data.type == "stop" then
+			self:stop()
+		elseif data.type == "clock" then
+			self:on_tick()
+		end
+		
+		for i=1,#self.track do
+			self.track[i]:process_transport(data)
+		end
+
+		self.screen_dirty = true
+	end
+	
 end
 
 -- MIDI events triggered from MIDI In device
 function App:on_midi(data)
-	-- for i=1,#self.track do
-	-- 	self.track[i]:process_midi(data)
-	-- end
+	if App.debug then
+		tab.print(data)
+	end
 end
 
 -- CC Events
@@ -243,7 +250,10 @@ function App:on_cc(data)
     -- Pass CC event to the current mode
     if self.mode[self.current_mode] and self.mode[self.current_mode].on_cc then
         self.mode[self.current_mode]:on_cc(data)
+		self.mode[self.current_mode]:emit('cc',data)
     end
+
+
 	
 	self.midi_out:send(data)
 
@@ -273,8 +283,11 @@ function App:on_tick()
 	self.tick = self.tick + 1
 	self.midi_out:clock()
 
-	for i = 1, #self.track do
-		self.track[i]:process_transport({type = 'clock'})
+	if clock_source == 1 then
+		-- Send clock to all tracks
+		for i = 1, #self.track do
+			self.track[i]:process_transport({type = 'clock'})
+		end
 	end
 end
 
@@ -593,44 +606,21 @@ function App:register_bluebox(n)
 	self.bluebox = midi.connect(n)
 end
 
-function App.midi_in_event(data)
-	data.device = 'midi_in'
-
-	if App.debug then
-		print('Incoming MIDI')
-		tab.print(data)
-	end
-
-	--external midi transport
-	if params:get('clock_source') > 1 and (data.type == "start" or data.type == "continue" or data.type == "stop") then
-		App:on_transport(data)
-	end
-
-	if data.type == 'clock'then
-		App:on_tick()
-	end
-	
-	if data.type == 'cc'then
-		App:on_cc(data)
-		
-	end
-
-	if not (data.type == "cc" or data.type == "start" or data.type == "continue" or data.type == "stop" or data.type == "clock") then
-		App:on_midi(data)
-	end
-	
-	App.screen_dirty = true
-end
-
 -- App.midi_in represents the primary transport and input device
 function App:register_midi_in(n)
-	if self.midi_in and self.midi_in.type == 'midi' then
-		self.midi_in:off('event', App.midi_in_event) -- remove event listener from previous midi device
+
+	if self.midi_in_cleanup then
+		for _,cleanup in ipairs(self.midi_in_cleanup) do
+			cleanup()
+		end
 	end
 
+	self.midi_in_cleanup = {}
 	self.midi_in = self.device_manager:get(n)
-
-	self.midi_in:on('event', App.midi_in_event)
+	print('Registering MIDI In Device ' .. n)
+	
+	table.insert( self.midi_in_cleanup, self.midi_in:on('transport_event', function(data) self:on_transport(data) end))
+	table.insert( self.midi_in_cleanup, self.midi_in:on('cc', function(data) self:on_cc(data) end))
 
 end
 
@@ -856,152 +846,17 @@ function App:register_modes()
 		mode.grid:process(msg)
 	end
 	
-	local AllClips = require('Foobar/lib/components/mode/allclips') 
-	local SeqClip = require('Foobar/lib/components/mode/seqclip') 
-	local SeqGrid = require('Foobar/lib/components/mode/seqgrid') 
-	local ScaleGrid = require('Foobar/lib/components/mode/scalegrid') 
-	local MuteGrid = require('Foobar/lib/components/mode/mutegrid') 
-	local NoteGrid = require('Foobar/lib/components/mode/notegrid')
-	local PresetGrid = require('Foobar/lib/components/mode/presetgrid')
-	local PresetSeq = require('Foobar/lib/components/mode/presetseq')
-	
-	local SessionMode = {
-		presetseq = PresetSeq:new({track=1}),
-		mutegrid = MuteGrid:new({track=1}),
-		notegrid = NoteGrid:new({track=1}),
-		presetgrid = PresetGrid:new({
-			track=1,
-			param_type = 'track',
-            param_ids = function() return {App.current_track} end,
-		})
-	}
-
-	self.mode[1] = Mode:new({
-		id = 1,
-		components = {
-			SessionMode.presetseq,
-			MuteGrid:new({track=1}),
-			SessionMode.presetgrid
-		},
-		on_load = function(s,data)
-		 	s.row_pads.led[9][8] = 1
-			s.row_pads:refresh()
-			 App.screen_dirty = true
-		end,
-		on_row = function(s,data)
-			local presetseq = s.components[1]
-			local presetgrid = s.components[3]
-			
-			presetseq:on_row(data, true)
-			presetgrid:on_row(data)
-
-			for i = 2, 8 do
-				s.row_pads.led[9][i] = 0
-			end
-		
-			s.row_pads.led[9][9 - data.row] = 1
-			s.row_pads:refresh()
-		end,
-		
-	})
-
-	self.mode[5] = Mode:new({
-		id = 1,
-		components = {
-			SessionMode.presetseq,
-			SessionMode.mutegrid,
-			SessionMode.notegrid
-		},
-		on_load = function(s,data)
-		 	s.row_pads.led[9][8] = 1
-			s.row_pads:refresh()
-			 App.screen_dirty = true
-		end,
-		on_row = function(s,data)
-			local presetseq = s.components[1]
-			local notegrid = s.components[3]
-			
-			presetseq:on_row(data, true)
-			notegrid:on_row(data)
-
-			for i = 2, 8 do
-				s.row_pads.led[9][i] = 0
-			end
-		
-			s.row_pads.led[9][9 - data.row] = 1
-			s.row_pads:refresh()
-			
-		end
-		
-	})
-
+	local SessionMode = require('Foobar/lib/modes/session')
+	local DrumsMode = require('Foobar/lib/modes/drums')
+	local KeysMode = require('Foobar/lib/modes/keys')
+	local UserMode = require('Foobar/lib/modes/user')
 	
 
-	self.mode[2] = Mode:new({
-		id = 2,
-		components = {SeqGrid:new({track=1})}
-	})
-
-	self.mode[3] = Mode:new({
-		id = 3,
-		components = {
-			ScaleGrid:new({id=1, offset = {x=0,y=6}}),
-			ScaleGrid:new({id=2, offset = {x=0,y=4}}),
-			ScaleGrid:new({id=3, offset = {x=0,y=2}}),
-			PresetGrid:new({
-				id = 2,
-				track=1,
-				grid_start = {x=1,y=2},
-				grid_end = {x=8,y=1},
-				display_start = {x=1,y=1},
-				display_end = {x=8,y=2},
-				offset = {x=0,y=0},
-				param_list={
-					'scale_1_bits',
-					'scale_1_root',
-					'scale_2_bits',
-					'scale_2_root',
-					'scale_3_bits',
-					'scale_3_root',
-				}
-			})
-		},
-		on_load = function() App.screen_dirty = true end,
-		on_row = function(s,data)
-			if data.row < 7 then
-				local scalegrid = s.components[math.ceil(data.row/2)]
-				scalegrid:on_row(data)
-			end
-		end,
-		context = {
-			enc1 = function(d)
-				params:set('scale_1_root',App.scale[1].root + d)
-				App.screen_dirty = true
-			end,
-			alt_enc1 = function(d)
-				App.scale[1]:shift_scale_to_note(App.scale[1].root + d)
-				App.screen_dirty = true
-			end,
-
-		}
-
-	})
-
-	self.mode[4] = Mode:new({
-		id = 4,
-		components = {
-		-- SeqClip:new({ track = 1, offset = {x=0,y=7}, active = true  }),
-		-- SeqClip:new({ track = 2, offset = {x=0,y=6} }),
-		-- SeqClip:new({ track = 3, offset = {x=0,y=5} }),
-		-- SeqClip:new({ track = 4, offset = {x=0,y=4} }),
-		-- SeqClip:new({ track = 5, offset = {x=0,y=3} }),
-		-- SeqClip:new({ track = 6, offset = {x=0,y=2} }),
-		-- SeqClip:new({ track = 7, offset = {x=0,y=1} }),
-		-- SeqClip:new({ track = 8, offset = {x=0,y=0} })
-		}
-	})
-
-	-- self.mode[1]:disable() --clear out the old junk
+	self.mode[1] = SessionMode
+	self.mode[2] = DrumsMode
+	self.mode[3] = KeysMode
+	self.mode[4] = SessionMode
+	
 	self.mode[1]:enable()
 end
 

@@ -81,8 +81,6 @@ function Track:set(o)
 	
 	params:set_action(track .. 'device_in',function(d)
 		-- Remove old input device listeners
-		self:remove_trigger()
-		
 		if self.input_device then
 			self.input_device:off('event', input_event)
 			self:remove_trigger()
@@ -513,7 +511,7 @@ end
 function Track:chain_components(components, process_name)
 	local track = self
 	return function(s, input)
-
+		
 		if track.debug then
 			print(process_name .. ' on track ' .. track.id)
 		end

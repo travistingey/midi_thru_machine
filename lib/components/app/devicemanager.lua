@@ -27,7 +27,7 @@ local DeviceMethods = {}
 setmetatable(DeviceMethods, {__index = Device})
 
 function DeviceMethods:on(event_name, func)
-    self.manager:on(self.id, event_name, func)
+    return self.manager:on(self.id, event_name, func)
 end
 
 function DeviceMethods:off(event_name, func)
@@ -263,10 +263,18 @@ function DeviceManager:on(device_id, event_name, callback)
     if not self.event_listeners[device_id] then
         self.event_listeners[device_id] = {}
     end
+
     if not self.event_listeners[device_id][event_name] then
         self.event_listeners[device_id][event_name] = {}
     end
+
     table.insert(self.event_listeners[device_id][event_name], callback)
+
+    local cleanup = function()
+        self:off(device_id, event_name, callback)
+    end
+
+    return cleanup
 end
 
 function DeviceManager:off(device_id, event_name, listener)
@@ -353,33 +361,37 @@ function DeviceManager:register_midi_device(port)
         if device.event then
             device.event(msg) -- Call device's event method if it exists eg. Midi Grid
         else
-            if event.type == 'start' or event.type == 'stop' or event.type == 'continue' or event.type == 'clock' or event.type == 'cc' then
-                return -- Skip transport and cc events. Handled by main transport device
-            end
-            
-            local send = true
-            local midi_tracks = {}
-            
-            -- Check for single note triggers
-            for i,track in ipairs(device.triggers) do
-                if track.midi_in == event.ch then
-                    if track.input_type ~= 'midi' and event.note == track.trigger then
-                        if track.step == 0 then track:emit('midi_trigger', event) end
-                        send = false
-                    elseif track.input_type == 'midi' then
-                        table.insert(midi_tracks, track)
+            if event.type == 'start' or event.type == 'stop' or event.type == 'continue' or event.type == 'clock' then
+                self:emit(device.id, 'transport_event', event)
+            elseif event.type == 'program_change' then
+                self:emit(device.id, 'program_change', event)
+            elseif event.type == 'cc' then
+                self:emit(device.id, 'cc', event)
+            else
+                local send = true
+                local midi_tracks = {}
+                
+                -- Check for single note triggers
+                for i,track in ipairs(device.triggers) do
+                    if track.midi_in == event.ch then
+                        if track.input_type ~= 'midi' and event.note == track.trigger then
+                            if track.step == 0 then track:emit('midi_trigger', event) end
+                            send = false
+                        elseif track.input_type == 'midi' then
+                            table.insert(midi_tracks, track)
+                        end
                     end
                 end
-            end
 
-            -- If no triggers are found, send event to all MIDI tracks
-            if send then
-                for i,track in ipairs(midi_tracks) do
-                    track:emit('midi_event', event)
+                -- If no triggers are found, send event to all MIDI tracks
+                if send then
+                    for i,track in ipairs(midi_tracks) do
+                        track:emit('midi_event', event)
+                    end
                 end
-            end
 
-            self:emit(device.id, event.type, event)
+                self:emit(device.id, event.type, event)
+            end
         end
 
     end

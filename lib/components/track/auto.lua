@@ -106,6 +106,7 @@ end
 
 -- Transport Event Handling
 function Auto:transport_event(data)
+
     if data.type == 'start' then
         local first_value = self.seq[self.seq_start]
 

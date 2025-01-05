@@ -48,8 +48,7 @@ function TrackComponent:process_transport(data, track)
 			send = self:transport_event(data, track)
 		end
 
-		
-		self:emit('transport', data, track)
+		self:emit('transport_event', data, track)
 		
 		return send
 	end
@@ -63,7 +62,7 @@ function TrackComponent:process_midi(data, track)
 			send = self:midi_event(data, track)
 		end
 
-		self:emit('midi', data, track)
+		self:emit('midi_event', data, self)
 
 		return send
 	end

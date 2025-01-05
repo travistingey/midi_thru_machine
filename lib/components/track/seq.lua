@@ -262,10 +262,14 @@ function Seq:save_bank(id, save_current)
 	
 	self.bank[id] = {value = self.value, length = self.length}
 
+	-- [DELETE]
 	if self.on_save ~= nil then
 		-- self.page = 1
 		self:on_save()
 	end
+
+	self:emit('save')
+
 end
 
 -- Load bank to values
@@ -279,11 +283,14 @@ function Seq:load_bank(id)
 	self.tick = 0
 	
 	
-	-- TODO: Tie this into seq_grid, then remove page assignment above
+	-- [DELETE?] TODO: Tie this into seq_grid, then remove page assignment above
 	if self.on_load ~= nil then
 		-- self.page = 1
 		self:on_load()
 	end
+
+	self:emit('load')
+
 end
 
 -- start recording incoming Midi into Seq
@@ -314,6 +321,9 @@ function Seq:record()
 	if self.on_record ~= nil then
 		self:on_record()
 	end
+	
+	self:emit('record')
+
 end
 
 function Seq:send_note(event)
@@ -524,6 +534,7 @@ function Seq:arm_event()
 	if self.on_arm ~= nil then
 	  self:on_arm()
 	end
+	self:emit('arm')
 end
 
 -- Recording step events into buffer

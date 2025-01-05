@@ -35,7 +35,6 @@ function AllClips:grid_event (component, data)
       
       SeqClip.grid_event(self, App.track[i].seq, data)
   end
-
 end
 
 function AllClips:set_grid (seq)

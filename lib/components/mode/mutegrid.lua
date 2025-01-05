@@ -79,7 +79,6 @@ function MuteGrid:on_disable()
 end
 
 function MuteGrid:midi_event (mute, data)
-
     if data and data.note then
         local note = data.note
         local grid = self.grid
