@@ -60,13 +60,21 @@ function MIDIDevice:clock()
     self.device:clock()
 end
 
-function MIDIDevice:add_trigger(trigger)
-    table.insert(self.triggers, trigger)
+-- Register track trigger on midi device
+function MIDIDevice:add_trigger(track)
+
+    for i,t in ipairs(self.triggers) do
+        if t.id == track.id then
+            table.remove(self.triggers,i)
+        end
+    end
+
+    table.insert(self.triggers, track)
 end
 
 function MIDIDevice:remove_trigger(track)
     for i,t in ipairs(self.triggers) do
-        if t.track.id == track.id then
+        if t.id == track.id then
             table.remove(self.triggers,i)
         end
     end
@@ -345,33 +353,40 @@ function DeviceManager:register_midi_device(port)
         if device.event then
             device.event(msg) -- Call device's event method if it exists eg. Midi Grid
         else
-            -- if event and event.type then
-            --     local send = true
+            if event.type == 'start' or event.type == 'stop' or event.type == 'continue' or event.type == 'clock' or event.type == 'cc' then
+                return -- Skip transport and cc events. Handled by main transport device
+            end
+            
+            local send = true
+            local midi_tracks = {}
+            
+            -- Check for single note triggers
+            for i,track in ipairs(device.triggers) do
+                if track.midi_in == event.ch then
+                    if track.input_type ~= 'midi' and event.note == track.trigger then
+                        if track.step == 0 then track:emit('midi_trigger', event) end
+                        send = false
+                    elseif track.input_type == 'midi' then
+                        table.insert(midi_tracks, track)
+                    end
+                end
+            end
 
-            --     -- Run through devices triggers to determine if we should send the event
-            --     if event.note then
-            --         for i, trigger in ipairs(device.triggers) do
-            --             if trigger.track.trigger == event.note and trigger.track.midi_in == event.ch then
-            --                 self:emit(self.virtual.id, 'trigger', {track = trigger.track, trigger.callback, data = event})
-            --                 send = false
-            --             end
-            --         end
-            --     end
+            -- If no triggers are found, send event to all MIDI tracks
+            if send then
+                for i,track in ipairs(midi_tracks) do
+                    track:emit('midi_event', event)
+                end
+            end
 
-            --     -- This prevents device from sending an event
-            --     if send then
-            --         self:emit(device.id, event.type, event)
-            --     end
-
-            -- end
             self:emit(device.id, event.type, event)
-            self:emit(device.id, 'event', event)
         end
 
-        
     end
 
 end
+
+
 
 -- Register a Virtual Device
 function DeviceManager:register_virtual_device()

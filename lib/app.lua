@@ -3,13 +3,13 @@ local App = {}
 
 local path_name = 'Foobar/lib/'
 
-local DeviceManager = require('Foobar/components/app/devicemanager')
+local DeviceManager = require('Foobar/lib/components/app/devicemanager')
 local LaunchControl = require(path_name .. 'launchcontrol')
 local Grid = require(path_name .. 'grid')
-local Track = require('Foobar/components/app/track')
-local Scale = require('Foobar/components/track/scale')
-local Output = require('Foobar/components/track/output')
-local Mode = require('Foobar/components/app/mode')
+local Track = require('Foobar/lib/components/app/track')
+local Scale = require('Foobar/lib/components/track/scale')
+local Output = require('Foobar/lib/components/track/output')
+local Mode = require('Foobar/lib/components/app/mode')
 
 local musicutil = require(path_name .. 'musicutil-extended')
 
@@ -856,14 +856,14 @@ function App:register_modes()
 		mode.grid:process(msg)
 	end
 	
-	local AllClips = require('Foobar/components/mode/allclips') 
-	local SeqClip = require('Foobar/components/mode/seqclip') 
-	local SeqGrid = require('Foobar/components/mode/seqgrid') 
-	local ScaleGrid = require('Foobar/components/mode/scalegrid') 
-	local MuteGrid = require('Foobar/components/mode/mutegrid') 
-	local NoteGrid = require('Foobar/components/mode/notegrid')
-	local PresetGrid = require('Foobar/components/mode/presetgrid')
-	local PresetSeq = require('Foobar/components/mode/presetseq')
+	local AllClips = require('Foobar/lib/components/mode/allclips') 
+	local SeqClip = require('Foobar/lib/components/mode/seqclip') 
+	local SeqGrid = require('Foobar/lib/components/mode/seqgrid') 
+	local ScaleGrid = require('Foobar/lib/components/mode/scalegrid') 
+	local MuteGrid = require('Foobar/lib/components/mode/mutegrid') 
+	local NoteGrid = require('Foobar/lib/components/mode/notegrid')
+	local PresetGrid = require('Foobar/lib/components/mode/presetgrid')
+	local PresetSeq = require('Foobar/lib/components/mode/presetseq')
 	
 	local SessionMode = {
 		presetseq = PresetSeq:new({track=1}),

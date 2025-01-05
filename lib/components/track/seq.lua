@@ -1,7 +1,7 @@
 local path_name = 'Foobar/lib/'
 local utilities = require(path_name .. 'utilities')
 local Grid = require(path_name .. 'grid')
-local TrackComponent = require('Foobar/components/track/trackcomponent')
+local TrackComponent = require('Foobar/lib/components/track/trackcomponent')
 
 -- Seq is a tick based sequencer class.
 -- Each instance provides a grid interface for a step sequencer.

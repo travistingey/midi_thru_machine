@@ -1,5 +1,5 @@
 local path_name = 'Foobar/lib/'
-local TrackComponent = require('Foobar/components/track/trackcomponent')
+local TrackComponent = require('Foobar/lib/components/track/trackcomponent')
 local Grid = require(path_name .. 'grid')
 
 

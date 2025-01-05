@@ -1,7 +1,7 @@
 
 local Grid = require('Foobar/lib/grid')
 local utilities = require('Foobar/lib/utilities')
-local path_name = 'Foobar/components/track/'
+local path_name = 'Foobar/lib/components/track/'
 local Auto = require(path_name .. 'auto')
 local Input = require(path_name .. 'input')
 local Seq = require(path_name .. 'seq')
@@ -65,21 +65,15 @@ function Track:set(o)
 
 	-- Input Devive Listeners
 	local function input_event(data)
-		if not (data.type == "cc" or data.type == "start" or data.type == "continue" or data.type == "stop" or data.type == "clock") then
-			self:process_midi(data)
+		-- Midi Events are bound by the track's Input component
+		if data.type == "note_on" then
+			self.note_on[data.note] = data
+		elseif data.type == "note_off" then
+			self.note_on[data.note] = nil
+		elseif (data.type == "cc") then
+			self:process_cc(data)
 		end
 	end
-
-	local function note_on_event(data)
-		self.note_on[data.note] = data
-	end
-		
-	local function note_off_event(data)
-		self.note_on[data.note] = nil
-	end
-
-	
-	
 
 	-- Device In/Out
 	local midi_devices =  App.device_manager.midi_device_names
@@ -87,17 +81,16 @@ function Track:set(o)
 	
 	params:set_action(track .. 'device_in',function(d)
 		-- Remove old input device listeners
-		if self.input_device and self.input_device.type then
-			self.input_device:off('event', input_event)
-			self.input_device:off('note_on', note_on_event)
-			self.input_device:off('note_off', note_off_event)
-		end
+		self:remove_trigger()
 		
+		if self.input_device then
+			self.input_device:off('event', input_event)
+			self:remove_trigger()
+		end
+
 		self.input_device = App.device_manager:get(d)
 		self.input_device:on('event', input_event)
-		self.input_device:on('note_on', note_on_event)
-		self.input_device:on('note_off', note_off_event)
-
+		self:add_trigger()
 		self:load_component(Input)
 		self:enable()
 	end)
@@ -146,6 +139,7 @@ function Track:set(o)
 	
 	params:set_action(track .. 'midi_in', function(d) 
 		self:kill()
+
 		self.midi_in = d
 		self:load_component(Input)
 		self:enable()
@@ -202,6 +196,7 @@ function Track:set(o)
 	
 	params:add_option(track .. 'step','Step',step_options, 1)
 	params:set_action(track .. 'step',function(d)
+		self:kill()
 		App.settings[track .. 'step'] = d
 		self.step = step_values[d]
 		self.reset_tick = 1
@@ -308,7 +303,6 @@ function Track:set(o)
 
 
 	-- Note Range 
-
 	-- Lower
 	self.note_range_lower = o.note_range_lower or 0
 	
@@ -383,7 +377,7 @@ function Track:set(o)
 	params:set_action(track .. 'program_change', function(d) 
 		App.settings[track .. 'program_change'] = d
 		if d > 0 then
-		    App.midi_in:program_change (d-1, App.track[self.id].midi_in)
+		    self.input_device:program_change (d-1, self.midi_in)
 		end
 	end)
 
@@ -420,8 +414,20 @@ function Track:update(o, silent)
 	end
 end
 
+function Track:remove_trigger()
+	if self.input_device then
+		self.input_device:remove_trigger(self)
+	end
+end
+
+function Track:add_trigger()
+	if self.input_device then
+		self.input_device:add_trigger(self)
+	end
+end
+
 function Track:enable()
-	if self.output_type == 'midi' and self.midi_out > 0  or self.output_type == 'crow' or self.input_type == 'keys' and self.midi_in > 0 then
+	if self.output_type == 'midi' and self.midi_out > 0  or self.output_type == 'crow' then
 		self.enabled = true
 		self:build_chain()
 	else
@@ -434,18 +440,32 @@ function Track:disable()
 	self.enabled = false
 end
 
-
+-- Event listener management
 function Track:on(event_name, listener)
     if not self.event_listeners[event_name] then
         self.event_listeners[event_name] = {}
     end
     table.insert(self.event_listeners[event_name], listener)
+
+    return function()
+        self:off(event_name, listener)
+    end
+end
+
+function Track:off(event_name, listener)
+    if self.event_listeners and self.event_listeners[event_name] then
+        for i, l in ipairs(self.event_listeners[event_name]) do
+            if l == listener then
+                table.remove(self.event_listeners[event_name], i)
+                break
+            end
+        end
+    end
 end
 
 function Track:emit(event_name, ...)
-    local listeners = self.event_listeners[event_name]
-    if listeners and self.enabled then
-        for _, listener in ipairs(listeners) do
+	if self.event_listeners and self.event_listeners[event_name]then
+        for _, listener in ipairs(self.event_listeners[event_name]) do
             listener(...)
         end
     end
@@ -464,27 +484,28 @@ function Track:save(o)
 end
 
 function Track:load_component(component)
-	
-	local option = self[component.name .. '_type']
-	local type = nil
+    local option = self[component.name .. '_type']
+    local type = nil
 
-	if component.types ~= nil then
-		type = component.types[option]
-	end
+    if component.types ~= nil then
+        type = component.types[option]
+    end
 
-	local props = {}
-	props.track = self
-	props.id = self.id
-	props.type = option
+    local props = {
+        track = self,
+        id = self.id,
+        type = option
+    }
 
-	if type ~= nil then
-		-- Component with Types that are set via Params
-		for i, prop in ipairs(type.props) do
-			props[prop] = self[prop] -- Create an object with values passed down from Track
-		end
-	end
+    if type ~= nil then
+        -- Assign type-specific properties
+        for _, prop in ipairs(type.props) do
+            props[prop] = self[prop]
+        end
+    end
 
-	self[component.name] = component:new(props)
+    -- Instantiate the component
+    self[component.name] = component:new(props)
 
 end
 

@@ -1,6 +1,6 @@
 
 local path_name = 'Foobar/lib/'
-local ModeComponent = require('Foobar/components/mode/modecomponent')
+local ModeComponent = require('Foobar/lib/components/mode/modecomponent')
 local Grid = require(path_name .. 'grid')
 local SeqClip = ModeComponent:new()
 

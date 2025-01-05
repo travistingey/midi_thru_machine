@@ -1,5 +1,5 @@
 local path_name = 'Foobar/lib/'
-local TrackComponent = require('Foobar/components/track/trackcomponent')
+local TrackComponent = require('Foobar/lib/components/track/trackcomponent')
 
 -- Output Class
 -- last component in a Track's process chain that handles output to devices

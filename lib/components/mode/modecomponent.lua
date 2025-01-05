@@ -27,8 +27,16 @@ function ModeComponent:emit(event_name, ...)
     self.mode:emit(event_name, ...)
 end
 
+-- Convenience function to register and deregister event listeners to the Mode
 function ModeComponent:on(event_name, listener)
     self.mode:on(event_name, listener)
+    return function()
+        self.mode:off(event_name, listener)
+    end
+end
+
+function ModeComponent:off(event_name, listener)
+    self.mode:off(event_name, listener)
 end
 
 function ModeComponent:get_component()

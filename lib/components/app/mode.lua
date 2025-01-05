@@ -1,7 +1,7 @@
 
 local Grid = require('Foobar/lib/grid')
 local utilities = require('Foobar/lib/utilities')
-local path_name = 'Foobar/components/track/'
+local path_name = 'Foobar/lib/components/track/'
 local Input = require(path_name .. 'input')
 local Seq = require(path_name .. 'seq')
 local Output = require(path_name .. 'output')
@@ -167,6 +167,21 @@ function Mode:on(event_name, listener)
         self.event_listeners[event_name] = {}
     end
     table.insert(self.event_listeners[event_name], listener)
+
+    return function()
+        self:off(event_name, listener)
+    end
+end
+
+function Mode:off(event_name, listener)
+    if self.event_listeners and self.event_listeners[event_name] then
+        for i, l in ipairs(self.event_listeners[event_name]) do
+            if l == listener then
+                table.remove(self.event_listeners[event_name], i)
+                break
+            end
+        end
+    end
 end
 
 function Mode:emit(event_name, ...)

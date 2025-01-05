@@ -27,10 +27,16 @@ function TrackComponent:set(o)
 			self.midi_event = type.midi_event
 		end
 
+		if type.process ~= nil then
+			self.process = type.process
+		end
+
 		if type.set_action ~= nil then
 			self.set_action = type.set_action
 			self:set_action(self.track)
 		end
+
+		
 	end
 end
 
@@ -43,9 +49,7 @@ function TrackComponent:process_transport(data, track)
 		end
 
 		
-		if self.on_transport ~= nil then
-			self:on_transport(data, track)
-		end
+		self:emit('transport', data, track)
 		
 		return send
 	end
@@ -58,10 +62,8 @@ function TrackComponent:process_midi(data, track)
 		if self.midi_event ~= nil then
 			send = self:midi_event(data, track)
 		end
-		
-		if self.on_midi ~= nil then
-			self:on_midi(data, track)
-		end
+
+		self:emit('midi', data, track)
 
 		return send
 	end
@@ -76,6 +78,10 @@ function TrackComponent:on(event_name, listener)
         self.event_listeners[event_name] = {}
     end
     table.insert(self.event_listeners[event_name], listener)
+
+	return function()
+		self:off(event_name, listener)
+	end
 end
 
 function TrackComponent:off(event_name, listener)
