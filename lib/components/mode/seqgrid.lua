@@ -296,7 +296,7 @@ function SeqGrid:set_grid(seq)
 end
 
 -- Component specific
-function SeqGrid:on_load(seq)
+function SeqGrid:load_event()
     self.page = 1
 end
 

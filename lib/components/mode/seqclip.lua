@@ -175,7 +175,7 @@ function SeqClip:set_grid (seq)
 	  
 end 
 
-function SeqClip:on_arm(seq)
+function SeqClip:arm_event(seq)
   self:set_grid(seq)    
 end
 
