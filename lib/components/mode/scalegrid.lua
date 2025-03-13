@@ -54,7 +54,27 @@ function ScaleGrid:set(o)
 		[11] = { index = 15, name = 'B' },
 		[12] = { index = 16, name = 'C' }
 	}
-	
+
+end
+
+function ScaleGrid:enable_event()
+	local scale = self:get_component()
+	-- Define the listener function
+	self.scale_changed_listener = function()
+		self:set_grid(scale)
+	end
+	-- Attach the listener to the Scale component
+	scale:on('scale_changed', self.scale_changed_listener)
+end
+
+function ScaleGrid:disable_event()
+	-- Detach the listener from the Scale component
+	if self.scale_changed_listener then
+		local scale = self:get_component()
+
+		scale:off('scale_changed', self.scale_changed_listener)
+		self.scale_changed_listener = nil
+	end
 end
 
 function ScaleGrid:get_component()
@@ -142,31 +162,10 @@ function ScaleGrid:set_grid(scale)
 		self.mode.row_pads:refresh()
 	end
 	grid:refresh('set grid')
-  end
-
-function ScaleGrid:on_enable()
-	
-	local scale = self:get_component()
-    -- Define the listener function
-    self.scale_changed_listener = function()
-		self:set_grid(scale)
-    end
-
-    -- Attach the listener to the Scale component
-    scale:on('scale_changed', self.scale_changed_listener)
 end
 
-function ScaleGrid:on_disable()
-	-- Detach the listener from the Scale component
-	if self.scale_changed_listener then
-		local scale = self:get_component()
 
-		scale:off('scale_changed', self.scale_changed_listener)
-		self.scale_changed_listener = nil
-	end
-end
-
-function ScaleGrid:on_row(data)
+function ScaleGrid:row_event(data)
 	local scale = self:get_component()
 	if data.state then
 		if data.row % 2 == 0 then
@@ -177,7 +176,7 @@ function ScaleGrid:on_row(data)
 	end
 end
 
-function ScaleGrid:on_cc(data)
+function ScaleGrid:cc_event(data)
 	local scale = self:get_component()
 	if scale.follow_method > 4 then
 		local track = App.track[scale.follow]

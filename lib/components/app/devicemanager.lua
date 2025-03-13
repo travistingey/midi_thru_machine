@@ -230,10 +230,6 @@ function DeviceManager:new()
     d.virtual = {}
     d.crow = {input = {}, output = {}}
     d.event_listeners = {}
-    
-    -- TESTING THIS!!!!!!
-    d.remove_events = {}
-    -- REMOVE AFTER TEST!
 
     d.device_names = {} -- Indexed by device.id
     d.midi_device_names = {}

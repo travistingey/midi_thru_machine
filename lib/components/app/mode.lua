@@ -27,9 +27,6 @@ function Mode:set(o)
     self.components = o.components or {}
 
     self.set_action = o.set_action
-    self.on_load = o.on_load
-    self.on_midi = o.on_midi
-    self.on_transport = o.on_transport
 
     self.enabled = false
     self.timeout = 5
@@ -61,7 +58,6 @@ function Mode:set(o)
         display_end = { x = 9, y = 9 },
         midi = App.midi_grid,
         active = false,
-
         process = function(s, msg)
             for i, g in ipairs(self.grid.subgrids) do
                 g.active = true
@@ -85,17 +81,11 @@ function Mode:set(o)
         grid_start = { x = 1, y = 9 },
         grid_end = { x = 4, y = 9 },
         event = function(s, data)
-            local mode = App.mode[App.current_mode]
+            local mode = self
 
             for i, component in ipairs(mode.components) do
                 component.grid:event(data)
             end
-
-            -- [ DELETE
-            if self.on_arrow ~= nil then
-                self:on_arrow(data)
-            end
-            -- DELETE ]
 
             self:emit('arrow', data)
 
@@ -107,20 +97,7 @@ function Mode:set(o)
         grid_start = { x = 9, y = 2 },
         grid_end = { x = 9, y = 8 },
         event = function(s, data)
-            local mode = App.mode[App.current_mode]
-
-            for i, component in ipairs(mode.components) do
-                component.grid:event(data)
-            end
-            
-            -- [ DELETE
-            if self.on_row ~= nil then
-                self:on_row(data)
-            end
-            -- DELETE ]
-            
             self:emit('row', data)
-
         end
     })
 
@@ -140,42 +117,11 @@ function Mode:set(o)
             end
             self.alt = data.toggled
             s:refresh('alt event')
-
-            if data.state and data.toggled then
-                --  [ DELETE
-                if self.on_alt ~= nil then
-                    self:on_alt(data)
-                end
-                -- DELETE ]
-
-                self:emit('alt', data)
-                
-                -- [ DELETE
-                for i, c in pairs(self.components) do
-                    if c.on_alt ~= nil then
-                        c:on_alt(data)
-                    end
-                end
-                -- DELETE ]
-            end
-
-        end,
-        on_reset = function(s)
-            self.alt = false
-            for i, c in pairs(self.components) do
-                if c.on_alt_reset then
-                    c:on_alt_reset()
-                end
-            end
-
-            for i, c in pairs(self.components) do
-                if c.set_grid then
-                    c:set_grid(c:get_component())
-                end
-            end
-
+            self:emit('alt', data)
         end
     })
+
+
 end
 
 -- Mode event listeners
@@ -402,6 +348,11 @@ function Mode:enable()
     if self.enabled then
         return -- Prevent re-enabling
     end
+    
+    for _, component in ipairs(self.components) do
+        component.mode = self
+        component:enable()
+    end
 
     self.grid:enable()
     self.enabled = true
@@ -411,18 +362,16 @@ function Mode:enable()
         self.mode_pads:refresh()
     end
 
+        -- Listen for an 'alt_reset' event so that components can trigger a reset of the alt pad.
+    self:on('alt_reset', function()
+        if self.alt_pad and self.alt_pad.reset then
+        self.alt_pad:reset()
+        self.alt = false
+        self.alt_pad:refresh('alt reset')
+        end
+    end)
+
     self:emit('load')
-
-    -- [ DELETE
-    if self.on_load ~= nil then
-        self:on_load()
-    end
-    -- DELETE ]
-
-    for i, component in ipairs(self.components) do
-        component.mode = self
-        component:enable()
-    end
 
     screen_dirty = true
 end
@@ -432,8 +381,20 @@ function Mode:disable()
     self:cancel_context()
     self:cancel_toast()
     self.enabled = false
+    
+    -- reset alt
+    self.alt_pad.toggled[1][9] = false
+    self.alt = false
+
     self.grid:disable()
 
+    -- First, execute all cleanup functions
+    for i, cleanup in ipairs(self.cleanup_functions) do
+        cleanup()
+    end
+    self.cleanup_functions = {}
+
+    -- Then disable each component and clear its mode reference
     for i, component in ipairs(self.components) do
         component:disable()
         component.mode = nil
@@ -442,15 +403,5 @@ function Mode:disable()
     self.event_listeners = {}
     App.screen_dirty = true
 end
-
--- [ DELETE
-function Mode:on_cc(data)
-    for _, component in ipairs(self.components) do
-        if component.on_cc then
-            component:on_cc(data)
-        end
-    end
-end
--- DELETE ]
 
 return Mode

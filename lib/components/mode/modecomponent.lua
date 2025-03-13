@@ -14,6 +14,7 @@ end
 
 function ModeComponent:set(o)
     self.register = o.register or {}
+    self.cleanup_functions = {}
 end
 
 function ModeComponent:set_track(id)
@@ -65,53 +66,83 @@ function ModeComponent:enable()
 
     mode_component.grid:set_grid(track_component)
 
+    -- Register standard event listeners for ModeComponents
+    -- ModeComponent's events bubble up to the parent Mode
+    -- The functions bound to the event are defined with the
+    -- same name as the event with '_event' appended
+
+    if mode_component.enable_event ~= nil then
+        table.insert(self.mode.cleanup_functions, mode_component:on('enable', function()
+            mode_component:enable_event()
+        end))
+    end
+
+    if mode_component.disable_event ~= nil then
+        table.insert(self.mode.cleanup_functions, mode_component:on('disable', function()
+            mode_component:disable_event()
+        end))
+    end
+
+    if mode_component.alt_event ~= nil then
+        table.insert(self.mode.cleanup_functions, mode_component:on('alt', function(data)
+            mode_component:alt_event(data)
+        end))
+    end
+
+    if mode_component.row_event ~= nil then
+        table.insert(self.mode.cleanup_functions, mode_component:on('row', function(data)
+            mode_component:row_event(data)
+        end))
+    end
+
+    -- Register event listeners for track components
+    -- Each ModeComponent assumes a binding to a specific track component
+    -- The standard events for TrackComponents are 'midi_event', 'transport_event', and eventually 'cc_event'
     if mode_component.midi_event ~= nil then
-        track_component:on('midi_event', function(data)
+        table.insert(self.mode.cleanup_functions, track_component:on('midi_event', function(data)
             mode_component:midi_event(track_component, data)
-        end)
+        end))
     end
 
-    
+
     if mode_component.transport_event ~= nil then
-        
-        self.mode:on('transport_event', function(data)
+        table.insert(self.mode.cleanup_functions, track_component:on('transport_event', function(data)
             mode_component:transport_event(track_component, data)
-        end)
-
+        end))
     end
 
-    
+
     for i,on in ipairs(self.register)do
-        track_component[on] = function(track_component, data)
-            mode_component[on](mode_component, track_component, data)
-        end
-    end
-    
-    if mode_component.on_enable ~= nil then
-        mode_component:on_enable()
+        local cleanup = track_component:on(on, function(data)
+            mode_component[on .. '_event'](data)
+        end)
+        table.insert(self.cleanup_functions, cleanup)
     end
 
+    self:emit('enable')
 end
 
 function ModeComponent:disable()
-    local mode = self
     
-    mode.grid:disable()
-    mode.grid.event = nil
-    mode.grid.set_grid = nil
+
+    self.grid:disable()
+    self.grid.event = nil
+    self.grid.set_grid = nil
 
     if self.component and self.track then
         local component = self:get_component()
         component.on_midi = nil
         component.on_transport = nil
-        
 
-        for i,on in ipairs(self.register)do
-            component[on] = nil
+        -- Removes event listeners from track components
+        for i,cleanup in ipairs(self.cleanup_functions)do
+            cleanup()
         end
+
     end
-    if mode.on_disable ~= nil then
-        mode:on_disable()
+
+    if self.mode ~= nil then
+        self:emit('disable')
     end
 end
 

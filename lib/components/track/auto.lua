@@ -111,7 +111,6 @@ function Auto:transport_event(data)
         local first_value = self.seq[self.seq_start]
 
         if first_value then
-            tab.print(first_value)
             self:run_step(first_value)
         end
         
@@ -185,7 +184,6 @@ end
 
 
 function Auto:run_preset(action)
-    tab.print(action)
     local component_props = App.preset_props.track
     local id = self.track.id
     

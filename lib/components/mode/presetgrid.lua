@@ -54,6 +54,16 @@ function PresetGrid:get_param_list()
             end
         end
         return params
+    elseif self.param_type and self.track  then
+        local params = {}
+        local props = App.preset_props[self.param_type]
+        
+        for _, prop in ipairs(props) do
+            local param_name
+            param_name = self.param_type  .. '_' .. self.track .. '_' .. prop
+            table.insert(params, param_name)
+        end
+        return params
     else
         return {}
     end
@@ -111,7 +121,7 @@ function PresetGrid:set_grid(component)
     grid:refresh('PresetGrid:set_grid')
 end
 
-function PresetGrid:on_row(data)
+function PresetGrid:row_event(data)
     if data.state and self.param_type then
         App.current_track = data.row
         self:set_track(App.current_track)

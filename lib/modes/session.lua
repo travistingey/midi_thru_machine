@@ -10,7 +10,7 @@ local Mode = require('Foobar/lib/components/app/mode')
 
 local presetseq = PresetSeq:new({track=1})
 local mutegrid = MuteGrid:new({track=1})
-local presetgrid = PresetGrid:new({track=1})
+local presetgrid = PresetGrid:new({track=1, param_type='track'})
 
 
 local SessionMode = Mode:new({
@@ -23,12 +23,11 @@ local SessionMode = Mode:new({
     on_load = function(s,data)
         s.row_pads.led[9][8] = 1
         s.row_pads:refresh()
-         App.screen_dirty = true
+        App.screen_dirty = true
     end,
-    on_row = function(s,data)
-
-        presetseq:on_row(data, true)
-        presetgrid:on_row(data)
+    row_event = function(s,data)
+        presetseq:row_event(data, true)
+        presetgrid:row_event(data)
 
         for i = 2, 8 do
             s.row_pads.led[9][i] = 0

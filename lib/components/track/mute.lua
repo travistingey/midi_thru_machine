@@ -19,13 +19,24 @@ function Mute:new(o)
 end
 
 function Mute:set(o)
-	o.id = o.id
-    o.grid = o.grid
-    o.state = {}
-    o.active = false
+	self.id = o.id
+    self.grid = o.grid
+    self.state = {}
+    self.active = false
+    
     for i= 0, 127 do
-        o.state[i] = false
+        self.state[i] = false
     end
+
+    -- set the mute state of a note
+    self:on('set_mute', function(note, state)
+        self.state[note] = state    
+    end)
+
+    -- set the mute state of entire track (used for triggers)
+    self:on('set_active', function(state)
+        self.active = state
+    end)
 end
 
 function Mute:midi_event(data)

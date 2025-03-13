@@ -16,7 +16,6 @@ print('When things blow up, manually reload using: norns.script.load("/home/we/d
 function init()
 	App:init()
 	redraw_clock_id = clock.run(redraw_clock)
-	params:default()
 end -- end Init
 
 function enc(e, d) --------------- enc() is automatically called by norns

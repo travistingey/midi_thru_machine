@@ -332,10 +332,6 @@ function Grid:reset()
 		s.toggled[x][y] = false
 		s.led[x][y] = 0
 	end)
-	-- We need to implement listeners for reset
-	if self.on_reset ~= nil then
-		self:on_reset()
-	end
 
 	self:refresh()
 end

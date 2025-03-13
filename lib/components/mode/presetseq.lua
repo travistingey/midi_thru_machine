@@ -80,7 +80,7 @@ function PresetSeq:set(o)
     end
 end
 
-function PresetSeq:on_enable()
+function PresetSeq:enable_event()
     self:on('preset_select', function(selection)
         self.mode:reset_timeout()
         if self.blink_mode then
@@ -273,7 +273,7 @@ function PresetSeq:transport_event(component, data)
     self:set_grid(component)
 end
 
-function PresetSeq:on_alt()
+function PresetSeq:alt_event()
     self.index = nil
     self.mode:cancel_context()
     self:start_blink()
@@ -281,13 +281,14 @@ function PresetSeq:on_alt()
     self:set_grid(auto)
 end
 
-function PresetSeq:on_alt_reset()
+function PresetSeq:alt_reset_event()
+    print('never')
     self:end_blink()
     local auto = self:get_component()
     self:set_grid(auto)
 end
 
-function PresetSeq:on_row(data, skip_grid)
+function PresetSeq:row_event(data, skip_grid)
     if data.state and App.track[data.row].enabled then
       
       App.current_track = data.row

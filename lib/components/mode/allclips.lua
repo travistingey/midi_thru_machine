@@ -12,7 +12,7 @@ function AllClips:set(o)
   o.track = 1
   
   o.component = 'seq'
-  o.register = {'on_arm'} -- list events outside of transport, midi and grid events
+  o.register = {'arm'} -- list events outside of transport, midi and grid events
    
   o.grid = Grid:new({
       name = 'All Clips',

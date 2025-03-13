@@ -46,8 +46,9 @@ end
 ]]
 function Track:set(o)
 	
+	self.input_device = o.input_device or App.device_manager:get(1)
 	self.note_on = {}
-
+	
 	self.enabled = false
 	self.mono = o.mono or false
 	self.voice = o.voice or 0
@@ -55,6 +56,7 @@ function Track:set(o)
 	self.current_preset = 1
 	self.current_scale = 1
 	self.event_listeners = {}
+	self.triggered = o.triggered or false
 
 	local track = 'track_' .. self.id ..'_'
 
@@ -104,6 +106,13 @@ function Track:set(o)
 	params:set_action(track .. 'input_type',function(d)
 		self:kill()
 		self.input_type = Input.options[d]
+
+		if self.input_type ~= 'midi' then
+			self.triggered = true
+		else
+			self.triggered = false
+		end
+
 		self:load_component(Input)
 		self:enable()
 	end)

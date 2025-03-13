@@ -8,7 +8,7 @@ MuteGrid.name = 'Mute Grid'
 
 function MuteGrid:set(o)
 	self.__base.set(self, o) -- call the base set method first   
-
+    self.triggers = {}
    o.component = 'mute'
 
     o.grid = Grid:new({
@@ -22,60 +22,31 @@ function MuteGrid:set(o)
 
 end
 
-function MuteGrid:on_enable()
+function MuteGrid:enable_event()
     self.triggers = {}
-    local base = App.track[1]
+    self.base = App.track[self.track]
     
+   
     -- for each track find the triggers matching the base track
-    if base.enabled then
-        for i = 1, #App.track do
-            local track = App.track[i]
 
-            if base ~= track and track.midi_in == base.midi_in  and track.triggered then
-                -- store the trigger in the mode
-                self.triggers[track.trigger] = track
-                
-                -- and assign the mode's midi event to the trigger
-                track.mute.on_midi = function(s, data)
-                    self:midi_event(s, data)
-                end
+        
+        if(self.base.input_device) then
+            for i,track in ipairs(self.base.input_device.triggers) do
+                if track.midi_in == self.base.midi_in then
+                    self.triggers[track.trigger] = track
 
-                base.mute.state[track.trigger] = false
-            elseif base == track then
-                track.mute.on_midi = function(s,data)
-                    self:midi_event(s,data)
+                    table.insert(self.cleanup_functions, track:on('midi_trigger', function(data)
+                        self:midi_event(self.base.mute, data)
+                    end))
                 end
             end
-        end
-    end
+         end
 
-    self.grid.event = function(s,d)
-        if self.grid:in_bounds(d) then
-
-            local note = self.grid:grid_to_index(d) - 1
-
-            if self.triggers[note] ~= nil and self.triggers[note] ~= self.base then
-                self:grid_event(self.triggers[note].mute, d)
-            elseif base.enabled then
-                self:grid_event(base.mute, d)
-            
-            end
-        end
-    end
-
-    
 end
 
-function MuteGrid:on_disable()
-    
+function MuteGrid:disable_event()
     self.triggers = nil
     self.base = nil
-
-    for i = 1, #App.track do
-        App.track[i].mute.on_midi = nil
-    end
-
-    self.grid.event = nil
 end
 
 function MuteGrid:midi_event (mute, data)
@@ -83,14 +54,14 @@ function MuteGrid:midi_event (mute, data)
         local note = data.note
         local grid = self.grid
         local target = grid:index_to_grid(note + 1)
-        local state
-        
-        if mute.track.triggered then
-            state = mute.active
-            note = mute.track.trigger
-            target = grid:index_to_grid(note + 1)
-        else
-            state = mute.state[note] 
+        local state = mute.state[note] 
+        local color = mute.track.id
+
+
+        if self.triggers[note] then
+            local track = self.triggers[note]
+            state = track.mute.active
+            color = track.id
         end
 
         if (not state) then
@@ -103,9 +74,9 @@ function MuteGrid:midi_event (mute, data)
         else
             -- Mute is on
             if data.type == 'note_on' then
-                grid.led[target.x][target.y] = Grid.rainbow_on[mute.track.id] -- note_on muted.
+                grid.led[target.x][target.y] = Grid.rainbow_on[color] -- note_on muted.
             elseif data.type == 'note_off' then
-                grid.led[target.x][target.y] = Grid.rainbow_off[mute.track.id] -- note_off muted.
+                grid.led[target.x][target.y] = Grid.rainbow_off[color] -- note_off muted.
             end
         end
             
@@ -118,36 +89,31 @@ function MuteGrid:grid_event (mute, data)
     if data.type == 'pad' and data.state then
 
         local note = grid:grid_to_index(data) - 1
+        local isTrigger = false
         
-        if mute.track.triggered then
-            mute.active = data.toggled
+        -- Set Mute state
+        if self.triggers[note] then
+            isTrigger = true
+            self.triggers[note].mute:emit('set_active',data.toggled)
         else
-            mute.state[note] = data.toggled
+            mute:emit('set_mute', note, data.toggled)
         end
         
-        if mute.track.triggered then
-            
-            if mute.active then
-                mute.track:kill()
-                mute.track.note_on = {}
-                grid.led[data.x][data.y] = Grid.rainbow_off[mute.track.id]
+        -- Set the grid led and kill notes
+        if isTrigger then
+            local track = self.triggers[note]
+            if track.mute.active then
+                track:kill()
+                grid.led[data.x][data.y] = Grid.rainbow_off[track.id]
             else
                 grid.led[data.x][data.y] = 0
             end            
         else
             local state = mute.state[note]
-            
-            if state then
 
+            if state then
                 grid.led[data.x][data.y] = Grid.rainbow_off[mute.track.id]
-                
-                local on = mute.track.note_on[note] -- added check to help preserve note on/off while recording
-                
-                if on then
-                    local off = {type='note_off', ch = on.ch, note = on.note, vel = on.vel}
-                    mute.track:send_output(off)
-                end
-            
+                mute.track.input_device:emit('interrupt',{note = note, type='interrupt'})
             else
                 grid.led[data.x][data.y] = 0
             end

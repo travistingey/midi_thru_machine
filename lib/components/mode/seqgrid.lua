@@ -11,7 +11,7 @@ function SeqGrid:set(o)
     
     o.component = 'seq'
     o.page = 1
-    o.register = {'on_load'}
+    o.register = {'load'}
 
     o.grid = Grid:new({
         name = 'Sequence ' .. o.track,

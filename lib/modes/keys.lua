@@ -10,7 +10,7 @@ local KeysMode = Mode:new({
         ScaleGrid:new({id=3, offset = {x=0,y=2}}),
         PresetGrid:new({
             id = 2,
-            track=1,
+            track = 1,
             grid_start = {x=1,y=2},
             grid_end = {x=8,y=1},
             display_start = {x=1,y=1},
@@ -27,10 +27,10 @@ local KeysMode = Mode:new({
         })
     },
     on_load = function() App.screen_dirty = true end,
-    on_row = function(s,data)
+    row_event = function(s,data)
         if data.row < 7 then
             local scalegrid = s.components[math.ceil(data.row/2)]
-            scalegrid:on_row(data)
+            scalegrid:row_event(data)
         end
     end,
     context = {

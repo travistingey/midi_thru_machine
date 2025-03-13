@@ -130,15 +130,6 @@ function NoteGrid:set(o)
 
 end
 
-function NoteGrid:on_enable()
-  local base = App.track[self.track]
-  
-  base.output.on_transport = function(s, data)    
-      self:transport_event(s, data)
-  end
-
-end
-
 function NoteGrid:reset_state()
   for i,v in pairs(self.state[self.track]) do
     if v == true then
@@ -165,6 +156,7 @@ function NoteGrid:reset_state()
 end
 
 function NoteGrid:transport_event (component,data)
+  print('notegrid transport')
   local track = App.track[self.track]
   if data.type == 'stop' then
     self:reset_state()   
@@ -321,7 +313,7 @@ function NoteGrid:handle_send(event)
   end
 end
 
-function NoteGrid:on_row(data)
+function NoteGrid:row_event(data)
   if data.state then
     App.current_track = data.row
     self:set_track(App.current_track)

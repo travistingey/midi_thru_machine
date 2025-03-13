@@ -25,10 +25,10 @@ local SessionMode = Mode:new({
         s.row_pads:refresh()
          App.screen_dirty = true
     end,
-    on_row = function(s,data)
+    row_event = function(s,data)
 
-        presetseq:on_row(data, true)
-        presetgrid:on_row(data)
+        presetseq:row_event(data, true)
+        presetgrid:row_event(data)
 
         for i = 2, 8 do
             s.row_pads.led[9][i] = 0

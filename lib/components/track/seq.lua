@@ -1,595 +1,280 @@
+-- seq.lua
+-- Refactored sequencer class.
+-- The sequencer now continuously records MIDI events into a history buffer.
+-- A portion of that history (or a separately recorded performance) can be quantized and
+-- transferred to the playback buffer. Clips (or “banks”) can be saved from the playback buffer.
+--
+-- Requirements addressed:
+--   • Increased ppqn (96) lets us remove coroutines and use simple tick‐based processing.
+--   • Three buffers (history, recording, playback) are maintained as Lua tables.
+--   • Buffer segmentation is supported so that a segment (e.g. one bar) can be mapped
+--     to a grid pad, and clips can be saved “on the fly.”
+--   • All major state changes use an event–based API (emit/on) inherited from TrackComponent.
+--
 local path_name = 'Foobar/lib/'
 local utilities = require(path_name .. 'utilities')
 local Grid = require(path_name .. 'grid')
 local TrackComponent = require('Foobar/lib/components/track/trackcomponent')
 
--- Seq is a tick based sequencer class.
--- Each instance provides a grid interface for a step sequencer.
--- Sequence step values can be used to exectute arbitrary functions that are defined after instantiation.
 local Seq = {}
 Seq.name = 'seq'
 Seq.__index = Seq
-setmetatable(Seq,{ __index = TrackComponent })
+setmetatable(Seq, { __index = TrackComponent })
 
+-----------------------------------------------
+-- Constructor & Initialization
+-----------------------------------------------
 function Seq:new(o)
-    o = o or {}
-    setmetatable(o, self)
-    TrackComponent.set(o,o)
-    o:set(o)
-    return o
+  o = o or {}
+  setmetatable(o, self)
+  -- call TrackComponent’s set() to initialize common methods, etc.
+  TrackComponent.set(o, o)
+  o:initialize(o)
+  return o
 end
 
---Sets Seq properties on initialization
-function Seq:set(o)		
-	o.id = o.id or 1
-		
-	-- instances of grids are defined in track during track initialization
-	-- consider offloading grid implementations to sub-classes? 
-	o.clip_grid = o.clip_grid
-	o.seq_grid = o.seq_grid
+function Seq:initialize(o)
+  -- Basic identification and timing
+  self.id = self.id or 1
+  self.tick = 0
+  self.segment_length = self.segment_length or 48
+  self.history_length = self.history_length or self.segment_length * 32
 
-		
-		
-	o.value = o.value or {} -- holds active sequence of events
-	o.buffer = o.buffer or {} -- holds recorded sequence of events
-	o.bank = o.bank or {} -- stores value tables for reloading
-	
-	o.current_bank = o.current_bank or 1
-	o.next_bank = o.next_bank or 0
-	o.last_bank = o.last_bank or 0
-	
-	o.length = o.length or 96 -- in ticks, 96 = 24 ppqn x 4
-	o.buffer_length = o.length or 96
+  -- Playback length defaults to one bar; you can change this to 4 or 32 bars as needed.
+  self.length = self.length or self.segment_length
 
-	o.arm_time = 0
-	o.tick = o.tick or 0 
-	o.step = o.step or o.length
-	o.quantize_step = o.quantize_step or 96
-	o.div = o.div or 6
-	
-	o.follow = false
-	o.page = o.page or 1
-	o.current_note = o.current_note or 36
-	
-	o.armed	= false
-	o.arm = {}
-		
-	self.playing = false
+  -- Buffers:
+  -- history_buffer: continuously records events (indexed by absolute tick)
+  -- recording_buffer: a temporary buffer used when “recording” a clip segment (quantization is applied)
+  -- playback_buffer: the clip currently being looped out (indexed 1…length)
+  self.history_buffer   = {}  -- e.g. history_buffer[tick] = { event1, event2, ... }
+  self.recording_buffer = {}  -- similarly segmented (by segment_length)
+  self.playback_buffer  = {}  -- active clip for playback
 
-	o.on_step = o.on_step or function(s,value)  end
-		
-	o.note_on = {}
+  -- Bank for saved clips; each entry is a table with keys: clip and length.
+  self.clip_bank = {}
 
-	if(o.enabled == nil) then
-		o.enabled = true
-	else
-		o.enabled = false
-	end
-
-	-- o:load_bank(1)
-
-	return o
-end
-
-
--- BASE METHODS ---------------
-
--- Returns a table of values for a specified step
-function Seq:get_step(step, div)
-	div = div or 1
-	local step_value = {}
-	local value = {}
-	
-	for i = (step - 1) * div + 1, step * div do
-		if self.value[i] then
-			for n,event in pairs(self.value[i]) do
-				for _,e in pairs(event)do
-					value[#value + 1] = e
-				end
-			end
-		end
-	end
-	
-
-	return value
-end
-
-
-function Seq:calculate_swing(tick)
-	local swing = App.swing
-	local swing_div = App.swing_div
-	local set  = 2 * swing_div
-	local tick_time = 1 / App.ppqn
-	local odd =  set * swing / swing_div-- Scaling factor for first subdivision of set
-	local even = set * (1 - swing) / swing_div -- Scaling factor for first subdivision of set
-	local step = (tick - 1) % set + 1 -- tick order within set
-	local set_order = math.ceil(tick / set) -- current set's order
-
-	if step <= swing_div then
-		-- tick is an odd subdivision
-		local t = (step - 1) * odd
-		local offset = t % 1 / App.ppqn 
-		tick = math.floor(t) + 1 + (set_order - 1) * set
-		return {tick = tick, offset = offset}
-	else
-		-- tick is an even subdivision
-		local t = (step - swing_div - 1) * even + (odd * swing_div)
-		local offset = t % 1 / App.ppqn 
-		tick = math.floor(t) + 1 + (set_order - 1) * set
-		return {tick = tick, offset = offset}
-	end
+  -- Recording/playback/arm state flags
+  self.playing   = false
+  self.recording = false
+  self.armed     = false
+  self.overdub   = false  -- if needed
 
 end
 
-function Seq:print_values(target_note)
-	for i = 1, self.length do
-		if self.value[i] then
-			for note,n in pairs(self.value[i]) do
-				if target_note == note or target_note == nil then
-					for event,e in pairs(n) do
-						print(i .. ' ' .. note .. ' ' .. e.type)
-					end
-				end
-			end
-		end
-	end
+-----------------------------------------------
+-- Buffer Recording and Clip Management
+-----------------------------------------------
+-- Always record incoming events into the history buffer.
+function Seq:record_event(event)
+  -- Use the current absolute tick as key.
+  local tick = ((self.tick - 1) % self.history_length) + 1
+  if not self.history_buffer[tick] then
+    self.history_buffer[tick] = {}
+  end
+  -- A shallow copy of event (in case later modifications occur)
+  local evt = {}
+  for k, v in pairs(event) do
+    evt[k] = v
+  end
+  evt.tick = tick  -- tag with absolute tick
+  table.insert(self.history_buffer[tick], evt)
+
+  -- If in “recording” mode (for the current clip), also record into the recording buffer.
+  if self.recording then
+    -- Map tick into a step within the current quantize segment.
+    local step = ((tick - 1) % self.segment_length) + 1
+    if not self.recording_buffer[step] then
+      self.recording_buffer[step] = {}
+    end
+    table.insert(self.recording_buffer[step], evt)
+  end
 end
 
---unquantized	|-o--x-|o--x--|---o--|-x--ox|-o-x-ox|o--x-o|-x--o-|x-----|------|--ox--|--o---|---x--|ox-ox-|-----o|-----x|
---				  s		s		  s		  s   s   d  s	d	 s				   s	  s		   s  d		s
---quantized 	|o--x--|o--x--|o---x-|ox----|o-x----|o--x--|o-x---|------|------|ox----|o-----|x-----|ox----|o-----|x-----|
- 
--- Reduces seq value to unique events per step
--- This will slow down a running sequence for large tables
-function Seq:quantize(div)
-	local note_on = {}
-	local reduced = {}
-	local length = math.ceil(self.length/div)
-	
-	for step = 1, length do
-		
-		local tick = (step-1) * div + 1
-		local value = self:get_step(step, div)
-		local step_on = {}
-
-		for i,v in pairs(value)do
-			-- for each step get the first on note
-			if v.type == 'note_on' and not step_on[v.note] then
-
-				--and save the new tick location and the old tick location in the note_on array
-				note_on[v.note] = { old = {tick = v.tick, offset = v.offset}, new = self:calculate_swing(tick)}
-
-				local new_tick = note_on[v.note].new.tick
-
-				-- set values
-				local new_value = {}
-				for prop,val in pairs(v) do
-					 new_value[prop] = val -- copy tables to prevent wierdness
-				end
-				
-				new_value.tick =  note_on[v.note].new.tick
-				new_value.offset =  note_on[v.note].new.offset
-
-				--check to make sure the reduced stuff exists
-				if reduced[new_tick]  == nil then
-					reduced[new_tick] = {}
-				end
-
-				if reduced[new_tick][v.note] == nil then
-					reduced[new_tick][v.note] = {}
-				end
-
-				reduced[new_tick][v.note]['note_on'] = new_value
-				step_on[v.note] = true
-				
-			elseif v.type == 'note_off' and note_on[v.note] and note_on[v.note].off == nil then
-				-- new_tick + current_tick - old_tick
-				local duration = v.tick - note_on[v.note].old.tick
-				local new = self:calculate_swing(note_on[v.note].new.tick + duration)
-				
-				-- set values
-				local new_value = {}
-				for prop,val in pairs(v) do
-					 new_value[prop] = val -- copy tables to prevent wierdness
-				end
-				
-				new_value.tick =  new.tick
-				new_value.offset =  new.offset
-
-				--check to make sure the reduced stuff exists
-				if reduced[new.tick]  == nil then
-					reduced[new.tick] = {}
-				end
-
-				if reduced[new.tick][v.note] == nil then
-					reduced[new.tick][v.note] = {}
-				end
-
-				reduced[new.tick][v.note]['note_off'] = new_value
-				reduced[note_on[v.note].new.tick][v.note]['note_on'].duration = duration
-
-				note_on[v.note].off = new.tick
-			end 
-
-		end -- end value loop
-	end -- end step loop
-
-	self.value = reduced
+-- Quantize the recording buffer (if needed) and move its contents into the playback buffer.
+-- For simplicity, this example simply copies over the events, remapping their tick values.
+function Seq:quantize_recording()
+  local quantized = {}
+  for step, events in pairs(self.recording_buffer) do
+    quantized[step] = {}
+    for _, event in ipairs(events) do
+      local q_event = {}
+      for k, v in pairs(event) do q_event[k] = v end
+      -- Set the event’s tick relative to the clip (step number)
+      q_event.tick = step
+      table.insert(quantized[step], q_event)
+    end
+  end
+  self.playback_buffer = quantized
+  self.length = self.segment_length  -- update playback loop length accordingly
+  self.recording_buffer = {}         -- clear recording buffer after quantizing
+  -- Emit an event to notify listeners that quantization is complete.
+  self:emit('quantized', self.playback_buffer)
 end
 
-
--- Reset the sequencer values
-function Seq:clear(id)
-	self.playing = false
-	self.value = {}
-	self.current_bank = 0
-	self.next_bank = 0
-	
-	if id and id > 0 then
-	  self.bank[id] = nil
-	end
-end
-
--- Save values to bank
-function Seq:save_bank(id, save_current)
-	local track = track
-
-	self.playing = true
-	for note,event in pairs(self.track.note_on) do
-		local off = {
-			note = event.note,
-			type = 'note_off',
-			vel = event.vel,
-			ch = self.track.midi_out,
-		}
-
-		self.track:handle_note(off, 'send')
-		self:record_event(off)
-	end
-
-	if not save_current then
-		self.value = self.buffer
-	end
-
-	if not self.overdub  and not save_current then
-		self.length = self.buffer_length
-		self.step = self.length
-	end
-
-	self.recording = false
-	self.overdub = false
-	self.bounce = false
-	
-	self.bank[id] = {value = self.value, length = self.length}
-
-	-- [DELETE]
-	if self.on_save ~= nil then
-		-- self.page = 1
-		self:on_save()
-	end
-
-	self:emit('save')
-
-end
-
--- Load bank to values
-function Seq:load_bank(id)
-	self.playing = true
-	local bank = self.bank[id] or { value = {}, length = self.quantize_step }
-	self.value = bank.value
-	self.page = 1
-	self.length = bank.length
-	self.step = bank.length
-	self.tick = 0
-	
-	
-	-- [DELETE?] TODO: Tie this into seq_grid, then remove page assignment above
-	if self.on_load ~= nil then
-		-- self.page = 1
-		self:on_load()
-	end
-
-	self:emit('load')
-
-end
-
--- start recording incoming Midi into Seq
-function Seq:record()
-	self.recording = true
-	self.playing = false
-	-- recording a new clip in empty bank
-	if not self.overdub and not self.bounce then
-		self.tick = 0
-		self.value = {}
-		self.buffer = self.value -- this points to the same table
-		self.length = self.quantize_step
-		self.buffer_length = self.quantize_step
-	
-	-- recording over existing clip
-	elseif self.overdub then
-		self.buffer = self.value
-		self.buffer_length = self.length
-		
-	-- bounces performance of one clip into a new bank
-	elseif self.bounce then
-		self.playing = true
-		self.bounce_start = self.tick
-		self.buffer = {}
-		self.buffer_length = self.quantize_step
-	end
-
-	if self.on_record ~= nil then
-		self:on_record()
-	end
-	
-	self:emit('record')
-
-end
-
-function Seq:send_note(event)
-	local track = App.track[self.track.id]
-    local sent = false
-    for i=1, #App.track do  
-      local other = App.track[i]
-      if other.id ~= track.id and other.midi_in == track.midi_in and event.note == other.trigger then
-        track:handle_note(event,'send')
-		other:send_event(event)
-        sent = true
+-- Save the currently active playback buffer as a clip into the bank.
+-- segment_range is optional here; if provided (as {start, end}), only that range is saved.
+function Seq:save_clip(segment_range, bank_id)
+  bank_id = bank_id or 1
+  local clip = {}
+  if segment_range then
+    local start_tick, end_tick = segment_range[1], segment_range[2]
+    for tick = start_tick, end_tick do
+      if self.history_buffer[tick] then
+        clip[tick - start_tick + 1] = self.history_buffer[tick]
       end
     end
-
-	if not sent then
-    	track:handle_note(event,'send')
-		track:send(event)
-	end
+  else
+    -- If no range specified, save the current playback buffer.
+    clip = self.playback_buffer
+  end
+  self.clip_bank[bank_id] = { clip = clip, length = #clip }
+  self:emit('clip_saved', bank_id)
 end
-------------------------
 
--- MAIN EVENTS
+-- Load a clip from the bank into the playback buffer.
+function Seq:load_clip(bank_id)
+  local clip_data = self.clip_bank[bank_id]
+  if clip_data then
+    self.playback_buffer = clip_data.clip
+    self.length = clip_data.length
+    self.tick = 0
+    self:emit('clip_loaded', bank_id)
+  end
+end
 
--------------------------
--- Transport process chain
-function Seq:transport_event(data, track)
-	-- Tick based sequencer
+function Seq:load_history(start_tick, end_tick)
+	-- Default values: if no range is provided, load from the beginning to the current tick.
+	start_tick = start_tick or 1
+	end_tick = end_tick or self.tick
+  
+	local segment = {}
+	local seg_length = 0
+  
+	for t = start_tick, end_tick do
+	  if self.history_buffer[t] then
+		seg_length = seg_length + 1
+		segment[seg_length] = self.history_buffer[t]
+	  end
+	end
+  
+	return segment, seg_length
+  end
+
+-- Clear all buffers.
+function Seq:clear()
+  self.history_buffer   = {}
+  self.recording_buffer = {}
+  self.playback_buffer  = {}
+  self.clip_bank        = {}
+  self:emit('cleared')
+end
+
+-----------------------------------------------
+-- Transport and Timing
+-----------------------------------------------
+-- The transport_event method is called on every clock or transport event.
+-- (Data such as 'start', 'stop' and 'clock' are expected.)
+function Seq:transport_event(data)
 	if data.type == 'start' then
-
-		self.tick = 0
-		self.step = self.length
-		
-		if self.armed then
-			self:arm_event()
-		end
+	  self.tick = 0
+	  -- Only set playing to true if a playback buffer exists (i.e. a clip is loaded)
+	  if self.playback_buffer and next(self.playback_buffer) then
+		self.playing = true
+	  else
+		self.playing = false
+	  end
 	elseif data.type == 'stop' then
-
-		for i,c in pairs(track.note_on) do
-			-- send off
-			local off = {
-				type = 'note_off',
-				note = c.note,
-				vel = c.vel,
-				ch = c.ch
-			}
-
-			track:handle_note(off,'send')
-			track:send(off)
-
-			if self.recording then
-				self:record_event(off)
-			end
-		end
-		
-		if self.recording then
-			self:save_bank(self.current_bank)
-			self:load_bank(self.current_bank)
-		end
-
+	  self.playing = false
+	  -- On stop, if recording was in progress, quantize and finalize it.
+	  if self.recording then
+		self:quantize_recording()
 		self.recording = false
-		self.armed = false
-		
+	  end
 	elseif data.type == 'clock' then
-		self.tick = self.tick + 1
-		
-		local next_step = (self.tick - 1 ) % self.length + 1
-		local last_step = self.step
-		self.step = next_step
-
-		-- Enter new step. c = current step, l = last step
-		if next_step > last_step or next_step == 1 and last_step == self.length then
-
-			if self.enabled then 
-
-				local current = self:get_step(next_step)
-				
-				local last_value = nil
-				
-				for i,c in pairs(current) do
-
-					if c.enabled then
-						clock.run(function()
-							local offset = c.offset
-							
-							-- offset for unquantized rhythm
-							if c.offset > 0 then
-								clock.sync(c.offset)
-							end
-							
-							-- manage note on/off
-							-- if bouncing a track, record sequence to buffer if note is not muted
-							if c.type == 'note_on' and  track.note_on[c.note] == nil then
-								if self.recording and self.bounce and not track.mute.state[c.note] then
-									self:record_event(c)
-								end
-								self:send_note(c)
-									
-							elseif c.type == 'note_off' and track.note_on[c.note] ~= nil then
-								if self.recording and self.bounce then
-									self:record_event(c)
-								end
-								self:send_note(c)	
-							end
-						end)
-					end
-				end
-				
-				self:on_step(current)
-				-- Handle arm events
-				if self.tick % self.quantize_step == 0 then
-					if self.armed then
-						self:arm_event()
-					elseif self.recording and not self.overdub  then
-						self.buffer_length = self.buffer_length + self.quantize_step
-						if not self.bounce then
-							self.length = self.buffer_length
-						end
-					end				
-				end
-			end
+	  self.tick = self.tick + 1
+	  -- Only process playback events if playing is enabled
+	  if self.playing then
+		local current_step = ((self.tick - 1) % self.length) + 1
+		local events = self.playback_buffer[current_step]
+		if events then
+		  for _, event in ipairs(events) do
+			self:emit('play_event', event)
+		  end
 		end
-	end	
- 
-	if self.seq_grid ~= nil then
-		self:seq_set_grid()
+		-- Every full quantize period, process any pending arm actions.
+		if (self.tick % self.segment_length) == 0 and self.armed then
+		  self:arm_event()
+		end
+	  end
 	end
-
-	if self.on_transport ~= nil then
-		self:on_transport(data)
-	end
-
+	self:emit('transport_event', data)
 	return data
+  end
+
+-----------------------------------------------
+-- MIDI Event Processing
+-----------------------------------------------
+-- midi_event is called when a MIDI message is received.
+-- Here we always record incoming MIDI events.
+function Seq:midi_event(data)
+  -- Always record the incoming event into the history (and recording if enabled)
+  self:record_event(data)
+
+  -- Optionally, if you want to pass through events immediately (when not looping),
+  -- you can do so here. Otherwise, playback will come from the playback buffer.
+  if (not self.playing) or self.track.midi_thru then
+    return data
+  end
+  -- Otherwise, do not return data here (the sequencer handles playback via transport ticks).
 end
 
-
--- Midi process chain
-function Seq:midi_event(data, track)
-	if self.recording then
-		-- process note_off events when a note_on occurs OR any note_on/note_off event that isn't muted 
-		
-		if track.triggered then
-			if not track.mute.state[track.trigger] or (data.type == 'note_off' and track.note_on[data.note] ~= nil)  then
-				if self.bounce and track.midi_thru then
-					self:record_event(data)
-				elseif not self.bounce then
-					self:record_event(data)
-				end
-			end
-		elseif(data.type == 'note_off' and track.note_on[data.note] ~= nil) or not (data.note and track.mute.state[data.note])  then
-			self:record_event(data)
-		end
-		
-	end
- 
- 
-	if not self.playing or track.midi_thru then
-		return data
-	end
-end
-
--- Handle arm events
+-----------------------------------------------
+-- Arm / Overdub / Save Actions
+-----------------------------------------------
+-- When an “arm” event occurs (for example, triggered by a grid pad), quantize the recording buffer,
+-- optionally save it, or start overdubbing.
 function Seq:arm_event()
-	
-	self.arm_time = clock.get_beats()
-
-	local actions = {}
-	local save_current = false
-
-	if self.armed then
-		if type(self.armed) == 'table' then
-			actions = self.armed
-			if actions[1] == 'save' then
-				save_current = true
-			end
-		else
-			actions = {self.armed}
-		end
-	end
-
-	for i,action in ipairs(actions) do
-		if action == 'record' then
-			self:record()
-		elseif action == 'bounce' then
-		  self.bounce = true
-		  self:record()
-		elseif action == 'overdub' then
-		  self.overdub = true
-		  self:record()
-		elseif action == 'save' then
-			if save_current then
-				self:save_bank(self.current_bank)
-			else
-				self:save_bank(self.next_bank)
-			end
-		elseif action == 'load' then
-			self:load_bank(self.next_bank)
-			
-		elseif action == 'clear' then
-			self:clear()
-		end
-	end
-	
-	self.current_bank = self.next_bank
-	self.next_bank = 0
-
-	self.armed = false
-	
-	if self.on_arm ~= nil then
-	  self:on_arm()
-	end
-	self:emit('arm')
+  if self.armed then
+    if self.recording then
+      -- Quantize what has been recorded so far into the playback buffer.
+      self:quantize_recording()
+      -- (Optionally, immediately save to the current bank.)
+      self:save_clip(nil, self.current_bank or 1)
+    end
+    self.armed = false
+    self:emit('arm')
+  end
 end
 
--- Recording step events into buffer
-function Seq:record_event(event)
-	
-	local val = {}
-	local tick = self.tick
-	local step = (tick - 1) % self.buffer_length + 1
-
-
-	
-	if self.bounce and tick == self.tick then
-		step = (tick - self.bounce_start - 1) % self.buffer_length + 1
-	end
-
-	for prop,v in pairs(event) do
-		val[prop] = v -- copy tables to prevent wierdness
-	end
-	
-	val.enabled = true
-	val.tick = tick
-
-	if self.bounce and tick == self.tick then
-		val.tick = tick - self.bounce_start
-	end
-
-	val.offset = math.floor((clock.get_beats() - App.last_time) * 100) / 100
-
-	if self.buffer[step] == nil then
-		self.buffer[step] = {}
-	end
-
-	-- Record
-	if val.note then
-		if self.buffer[step][val.note] == nil then
-			self.buffer[step][val.note] = {}
-		end
-	
-		self.buffer[step][val.note][val.type] = val
-	end
-
-end
-
+-----------------------------------------------
+-- Utility: Iterate Over Sequence Events
+-----------------------------------------------
 function Seq:for_each(func)
-	local val = {}
-	for step,v in pairs(self.value) do
-		for note,t in pairs(v) do
-			for e,event in pairs(t) do
-				val[#val + 1] = func(event)
-			end
-		end
-	end
+  local results = {}
+  for step, events in pairs(self.playback_buffer) do
+    for _, event in ipairs(events) do
+      results[#results + 1] = func(event)
+    end
+  end
+  return results
+end
 
-	return val
+-----------------------------------------------
+-- (Optional) Legacy Methods
+-----------------------------------------------
+-- If needed, you can keep a “get_step” method for retrieving events
+function Seq:get_step(step, div)
+  div = div or 1
+  local out = {}
+  for i = (step - 1) * div + 1, step * div do
+    if self.playback_buffer[i] then
+      for _, event in ipairs(self.playback_buffer[i]) do
+        table.insert(out, event)
+      end
+    end
+  end
+  return out
 end
 
 return Seq
-

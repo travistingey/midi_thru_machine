@@ -11,7 +11,7 @@ function SeqClip:set(o)
 	self.__base.set(self, o) -- call the base set method first   
 
    o.component = 'seq'
-   o.register = {'on_arm'} -- list events outside of transport, midi and grid events
+   o.register = {'arm'} -- list events outside of transport, midi and grid events
 
     o.grid = Grid:new({
       name = 'Seq clips',
