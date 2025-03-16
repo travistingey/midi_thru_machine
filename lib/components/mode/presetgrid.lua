@@ -95,6 +95,7 @@ function PresetGrid:grid_event(component, data)
         self.select = self.grid:grid_to_index(data)
         if self.mode.alt then
             self:save_preset(self.select)
+            self:emit('alt_reset')
         else
             self:emit('preset_select', self.select)
             self:load_preset(self.select)

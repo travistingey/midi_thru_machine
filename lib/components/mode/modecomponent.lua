@@ -89,11 +89,6 @@ function ModeComponent:enable()
         end))
     end
 
-    if mode_component.row_event ~= nil then
-        table.insert(self.mode.cleanup_functions, mode_component:on('row', function(data)
-            mode_component:row_event(data)
-        end))
-    end
 
     -- Register event listeners for track components
     -- Each ModeComponent assumes a binding to a specific track component

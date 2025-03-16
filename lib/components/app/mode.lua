@@ -97,7 +97,8 @@ function Mode:set(o)
         grid_start = { x = 9, y = 2 },
         grid_end = { x = 9, y = 8 },
         event = function(s, data)
-            self:emit('row', data)
+            tab.print(data)
+            self:emit('row', self, data)
         end
     })
 
@@ -362,7 +363,7 @@ function Mode:enable()
         self.mode_pads:refresh()
     end
 
-        -- Listen for an 'alt_reset' event so that components can trigger a reset of the alt pad.
+    -- Listen for an 'alt_reset' event so that components can trigger a reset of the alt pad.
     self:on('alt_reset', function()
         if self.alt_pad and self.alt_pad.reset then
         self.alt_pad:reset()
@@ -370,8 +371,14 @@ function Mode:enable()
         self.alt_pad:refresh('alt reset')
         end
     end)
+    
+    if self.load_event ~= nil then
+        self:load_event()
+    end
 
-    self:emit('load')
+    if self.row_event ~= nil then
+        self:on('row', self.row_event)
+    end
 
     screen_dirty = true
 end

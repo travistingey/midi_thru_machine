@@ -20,7 +20,8 @@ local SessionMode = Mode:new({
         mutegrid,
         presetgrid
     },
-    on_load = function(s,data)
+   load_event = function(s,data)
+        print('loaded')
         s.row_pads.led[9][8] = 1
         s.row_pads:refresh()
         App.screen_dirty = true
