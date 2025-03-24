@@ -120,18 +120,18 @@ function LaunchControl:handle_note(data)
             self.state = ARM
         elseif control.type == 'up' then
             self.toggle[UP] = not self.toggle[UP]
-            self:emit('up', self.toggle[UP])
+            self:on_up(self.toggle[UP])
         elseif control.type == 'down' then
             self.toggle[DOWN] = not self.toggle[DOWN]
-            self:emit('down', self.toggle[DOWN])
+            self:on_down(self.toggle[DOWN])
         end
 
     elseif control.type == 'left' then
         self.toggle[LEFT] = not self.toggle[LEFT]
-        self:emit('left', self.toggle[LEFT])
+        self:on_left(self.toggle[LEFT])
     elseif control.type == 'right' then
         self.toggle[RIGHT] = not self.toggle[RIGHT]
-        self:emit('right', self.toggle[RIGHT])
+        self:on_right(self.toggle[RIGHT])
     end
     
 end

@@ -17,11 +17,6 @@ function ModeComponent:set(o)
     self.cleanup_functions = {}
 end
 
-function ModeComponent:set_track(id)
-    self:disable()
-    self.track = id
-    self:enable()
-end
 
 -- In ModeComponent.lua
 function ModeComponent:emit(event_name, ...)
@@ -64,7 +59,7 @@ function ModeComponent:enable()
         end
     end
 
-    mode_component.grid:set_grid(track_component)
+    mode_component.grid:set_grid()
 
     -- Register standard event listeners for ModeComponents
     -- ModeComponent's events bubble up to the parent Mode
@@ -114,11 +109,10 @@ function ModeComponent:enable()
         table.insert(self.cleanup_functions, cleanup)
     end
 
-    self:emit('enable')
 end
 
 function ModeComponent:disable()
-    
+
 
     self.grid:disable()
     self.grid.event = nil
@@ -126,8 +120,9 @@ function ModeComponent:disable()
 
     if self.component and self.track then
         local component = self:get_component()
-        component.on_midi = nil
-        component.on_transport = nil
+        print('removed old on_ methods modecomponent L:123')
+        -- component.on_midi = nil
+        -- component.on_transport = nil
 
         -- Removes event listeners from track components
         for i,cleanup in ipairs(self.cleanup_functions)do
@@ -136,9 +131,6 @@ function ModeComponent:disable()
 
     end
 
-    if self.mode ~= nil then
-        self:emit('disable')
-    end
 end
 
 

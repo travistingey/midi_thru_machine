@@ -89,7 +89,6 @@ function MIDIDevice:send(data)
 
     if data.type then
         self.manager:emit(self.id, data.type, data)
-
         if data.type == 'note_on' then
             -- Create one-time listener that waits for subsequent events on device
             local note_handle_events = { 'note_on', 'note_off', 'stop', 'kill', 'interrupt' }
@@ -120,7 +119,6 @@ function MIDIDevice:send(data)
                     remove_event = true
                 elseif next.ch == off.ch then
                     -- This will trigger for all subsequent note events on the device's channel
-                    
                     if next.note == off.note_id then
                         self.device:send(off) -- If we recieve duplicate events
                         remove_event = true
@@ -163,6 +161,30 @@ function MIDIDevice:kill()
     self.manager:emit(self.id, 'kill')
 end
 
+function MIDIDevice:process_midi(event)
+    local send = true
+    local midi_tracks = {}
+
+    for i, track in ipairs(self.triggers) do
+        if track.midi_in == event.ch then
+            if track.input_type ~= 'midi' and event.note == track.trigger then
+                if track.step == 0 then 
+                    track:emit('midi_trigger', event) 
+                end
+                send = false
+            elseif track.input_type == 'midi' then
+                table.insert(midi_tracks, track)
+            end
+        end
+    end
+
+    if send then
+        for i, track in ipairs(midi_tracks) do
+            track:emit('midi_event', event)
+        end
+    end
+end
+
 -- CrowDevice inherits from DeviceMethods and adds Crow-specific methods
 local CrowDevice = {}
 setmetatable(CrowDevice, {__index = DeviceMethods})
@@ -201,6 +223,7 @@ function DeviceManager:add(props, methods)
     local new_device = setmetatable({
         type = props.type or 'none',
         name = props.name or 'None',
+        abbr = props.abbr or '',
         manager = self,
         id = props.id or #self.devices + 1,
         device = props.device or {
@@ -340,6 +363,7 @@ function DeviceManager:register_midi_device(port)
     local props = {
         type = 'midi',
         name = midi_device.name,
+        abbr = string.gsub(string.upper(string.sub(midi_device.name, 1,8)), "%s+$", ""),
         port = port,
         device = midi_device,
         trimmed_name = trimmed_name,
@@ -364,29 +388,9 @@ function DeviceManager:register_midi_device(port)
             elseif event.type == 'cc' then
                 self:emit(device.id, 'cc', event)
             else
-                local send = true
-                local midi_tracks = {}
+
+                device:process_midi(event)
                 
-                -- Check for single note triggers
-                for i,track in ipairs(device.triggers) do
-                    if track.midi_in == event.ch then
-                        if track.input_type ~= 'midi' and event.note == track.trigger then
-                            if track.step == 0 then track:emit('midi_trigger', event) end
-                            send = false
-                        elseif track.input_type == 'midi' then
-                            table.insert(midi_tracks, track)
-                        end
-                    end
-                end
-
-                -- If no triggers are found, send event to all MIDI tracks
-                if send then
-                    for i,track in ipairs(midi_tracks) do
-                        track:emit('midi_event', event)
-                    end
-                end
-
-                self:emit(device.id, event.type, event)
             end
         end
 
@@ -435,24 +439,20 @@ function DeviceManager:register_crow_device()
     local CROW_INPUTS = 2
     for index = 1, CROW_INPUTS do
         -- Initialize state for each input
-        crow_device.input[index] = { volts = 0 }
+        crow_device.input[index] = 0
 
         -- Set up Crow input handlers
-        crow.send("input[" .. index .. "].query = function() stream_handler(1, input[" .. index .. "].volts) end")
+        crow.send("input[" .. index .. "].query = function() stream_handler(" .. index .. ", input[" .. index .. "].volts) end")
 
         crow_device.device.input[index].stream = function(v)
-            crow_device.input[index].volts = v -- Update the state
-            self:emit(crow_device.id, 'stream', { input = index, volts = v }) -- Include input index in the event
+            crow_device.input[index] = v -- Update the state
+            self:emit(crow_device.id, 'stream', { input = index, v }) -- Include input index in the event
         end
 
         crow_device.device.input[index].mode('none')
 
     end
 
-    -- Register a default stream event listener
-    self:on(crow_device.id, 'stream', function(data)
-        print("Crow input " .. data.input .. " stream event: " .. data.volts .. "V")
-    end)
 
 end
 

@@ -21,35 +21,42 @@ end
 function Auto:set(o)
     self.id = o.id or 1
     self.seq = o.seq or {}
-    self.seq_start = o.seq_start or 1
-    self.seq_length = o.seq_length or 8
-    self.step = o.step or self.seq_start - 1
-    self.step_length = o.step_length or 96
-    self.tick = o.tick or 0
+    self.seq_start = o.seq_start or 0
+    self.seq_length = App.ppqn * 16
+    self.step = o.step or 0
     self.playing = false
     self.enabled = true
 
     self.active_cc = nil  -- Holds active CC automation data
-    self.cc_start_tick = 0  -- Records the start tick for CC automation
-
-    self.on_start = o.on_start or function() end
-    self.on_stop = o.on_stop or function() end
-    self.on_clock = o.on_clock or function() end
-    self.on_step = o.on_step or function() end
 
     self.track.current_preset = 1
+
+    self:on('record_event', function(data)
+        local step = self.step
+        if data.quantize then
+            step = math.floor(step / data.quantize) * data.quantize
+        end
+        self:set_action(self.step, data.type, data.value)
+    end)
+
 end
 
-function Auto:set_action(step, option, value)
+function Auto:get_action(step, lane)
+    if self.seq[step] then
+        return self.seq[step][lane]
+    end
+end
+
+function Auto:set_action(step, lane, value)
     local action = {}
 
-    -- Initialize Step
+    -- Initialize step
     if not self.seq[step] then
         self.seq[step] = {}
     end
 
-    if type(option) == 'table' then
-        local action = option
+    if type(lane) == 'table' then
+        local action = lane
 
         -- Manage nested table of CC
         if action.type == 'cc' then
@@ -67,10 +74,10 @@ function Auto:set_action(step, option, value)
             end
         else
             -- Standard action
-            self.seq[step][action.type] = option
+            self.seq[step][action.type] = lane
         end
-    elseif type(option) == 'string' then
-        action.type = option
+    elseif type(lane) == 'string' then
+        action.type = lane
         action.value = value
 
         -- Remove nil value entries
@@ -106,87 +113,71 @@ end
 
 -- Transport Event Handling
 function Auto:transport_event(data)
-
     if data.type == 'start' then
-        local first_value = self.seq[self.seq_start]
-
-        if first_value then
-            self:run_step(first_value)
-        end
-        
         self.playing = true
+        self.step = 0
+        self.active_cc = nil
+        
+        if self.seq[self.step] then
+            self:run_events(self.seq[self.step])
+        end
     elseif data.type == 'stop' then
         self.playing = false
-        self.step = self.seq_start - 1
-        self.tick = 0
-        local first_value = self.seq[self.seq_start]
-        if first_value then
-            self:run_step(first_value)
+        self.step = 0
+        if self.seq[self.step] then
+            self:run_events(self.seq[self.step])
         end
     elseif data.type == 'clock' and self.playing then
-        self:on_clock()
-    end
-    return data
-end
+        self:update_cc()
+        -- Offset run steps ahead of step
+        local run_offset = 2 
 
-function Auto:on_clock()
-    local ticks_per_step = self.step_length
-    local ticks_into_step = self.tick % ticks_per_step
-    local step_run_offset = 2
-    -- Execute run one tick before the step changes
-    if ticks_into_step == ticks_per_step - step_run_offset then
+        if self.step < run_offset then
+            if self.seq[self.step] then
+                self:run_events(self.seq[self.step])
+            end
+        end
+
         -- Calculate the next step
-        local next_step = self.step + 1
+        local next_step = self.step + run_offset
+
         if next_step >= self.seq_start + self.seq_length then
             next_step = self.seq_start
+            self.step = self.seq_start
+        else
+            self.step = self.step + 1
         end
 
         local actions = self.seq[next_step]
+
         if actions then
-            self:run_step(actions)
+            self:run_events(actions)
         end
 
-        self.next_step = next_step
     end
 
-    -- Advance the step at the start of the step
-    if ticks_into_step == 0 then
-        if self.next_step then
-            self.step = self.next_step
-            self.next_step = nil
-        else
-            -- In case next_step wasn't set
-            self.step = self.step + 1
-            if self.step >= self.seq_start + self.seq_length then
-                self.step = self.seq_start
-            end
-        end
-    end
-
-    self.tick = self.tick + 1
+    return data
 end
 
-function Auto:run_step(actions)
+function Auto:run_events(actions)
     for action_type, action_data in pairs(actions) do
-
-        if action_type == 'preset' and action_data then
+        if action_type == 'track' and action_data then
             self:run_preset(action_data)
+            self:emit('preset_change', action_data)
         elseif action_type == 'scale' and action_data then
-                self:run_scale(action_data)
+            self:run_scale(action_data)
+            self:emit('scale_change', action_data)
         elseif action_type == 'cc' and action_data then
             self:run_cc(action_data)
+            self:emit('cc_change', action_data)
         end
-        -- Add more action types as needed
     end
 end
-
-
-
 
 function Auto:run_preset(action)
     local component_props = App.preset_props.track
     local id = self.track.id
-    
+
     self.track.current_preset = action.value
 
     if component_props then
@@ -202,7 +193,7 @@ end
 function Auto:run_scale(action)
     local component_props = App.preset_props.scale
     local props = {}
-    
+
     self.track.current_scale = action.value
 
     for id=1,3 do
@@ -213,16 +204,6 @@ function Auto:run_scale(action)
             App:load_preset(action.value, props)
         end
     end
-end
-
-function Auto:on_start()
-    -- Reset any active automation
-    self.active_cc = nil
-end
-
-function Auto:on_stop()
-    -- Handle stopping of automation if needed
-    self.active_cc = nil
 end
 
 function Auto:run_cc(cc_actions)

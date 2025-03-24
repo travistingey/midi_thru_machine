@@ -9,14 +9,14 @@
 --==============================================================================
 -- Dependencies and Global Variables
 --==============================================================================
-local path_name = 'Foobar/lib/'
-local utilities   = require(path_name .. 'utilities')
-local Grid        = require(path_name .. 'grid')
-local Track       = require('Foobar/lib/components/app/track')
-local Scale       = require('Foobar/lib/components/track/scale')
-local Output      = require('Foobar/lib/components/track/output')
-local Mode        = require('Foobar/lib/components/app/mode')
-local musicutil   = require(path_name .. 'musicutil-extended')
+local path_name     = 'Foobar/lib/'
+local utilities     = require(path_name .. 'utilities')
+local Grid          = require(path_name .. 'grid')
+local Track         = require('Foobar/lib/components/app/track')
+local Scale         = require('Foobar/lib/components/track/scale')
+local Output        = require('Foobar/lib/components/track/output')
+local Mode          = require('Foobar/lib/components/app/mode')
+local musicutil     = require(path_name .. 'musicutil-extended')
 local DeviceManager = require('Foobar/lib/components/app/devicemanager')
 local LaunchControl = require(path_name .. 'launchcontrol')
 
@@ -40,6 +40,238 @@ function App:new(o)
   return o
 end
 
+
+
+local function set_font(n)
+  local fonts = {
+    {name = '04B_03', face = 1, size = 8},
+    {name = 'ALEPH', face = 2, size = 8},
+    {name = 'tom-thumb', face = 25, size = 6},
+    {name = 'creep', face = 26, size = 16},
+    {name = 'ctrld', face = 27, size = 10},
+    {name = 'ctrld', face = 28, size = 10},
+    {name = 'ctrld', face = 29, size = 13},
+    {name = 'ctrld', face = 30, size = 13},
+    {name = 'ctrld', face = 31, size = 13},
+    {name = 'ctrld', face = 32, size = 13},
+    {name = 'ctrld', face = 33, size = 16},
+    {name = 'ctrld', face = 34, size = 16},
+    {name = 'ctrld', face = 35, size = 16},
+    {name = 'ctrld', face = 36, size = 16},
+    {name = 'scientifica', face = 37, size = 11},
+    {name = 'scientifica', face = 38, size = 11},
+    {name = 'scientifica', face = 39, size = 11},
+    {name = 'ter', face = 40, size = 12},
+    {name = 'ter', face = 41, size = 12},
+    {name = 'ter', face = 42, size = 14},
+    {name = 'ter', face = 43, size = 14},
+    {name = 'ter', face = 44, size = 14},
+    {name = 'ter', face = 45, size = 16},
+    {name = 'ter', face = 46, size = 16},
+    {name = 'ter', face = 47, size = 16},
+    {name = 'ter', face = 48, size = 18},
+    {name = 'ter', face = 49, size = 18},
+    {name = 'ter', face = 50, size = 20},
+    {name = 'ter', face = 51, size = 20},
+    {name = 'ter', face = 52, size = 22},
+    {name = 'ter', face = 53, size = 22},
+    {name = 'ter', face = 54, size = 24},
+    {name = 'ter', face = 55, size = 24},
+    {name = 'ter', face = 56, size = 28},
+    {name = 'ter', face = 57, size = 28},
+    {name = 'ter', face = 58, size = 32},
+    {name = 'ter', face = 59, size = 32},
+    {name = 'unscii', face = 60, size = 16},
+    {name = 'unscii', face = 61, size = 16},
+    {name = 'unscii', face = 62, size = 8},
+    {name = 'unscii', face = 63, size = 8},
+    {name = 'unscii', face = 64, size = 8},
+    {name = 'unscii', face = 65, size = 8},
+    {name = 'unscii', face = 66, size = 16},
+    {name = 'unscii', face = 67, size = 8}
+  }
+  screen.font_face(fonts[n].face)
+  screen.font_size(fonts[n].size)
+end
+
+local function draw_tempo()
+  if App.playing then
+      local beat = 15 - math.floor((App.tick % App.ppqn) / App.ppqn * 16)
+      screen.level(beat)
+  else
+      screen.level(5)
+  end
+  
+  screen.rect(76, 0, 127, 32)
+  screen.fill()
+
+  screen.move(102, 28)
+  set_font(34)
+  screen.level(0)
+  screen.text_center(math.floor(clock.get_tempo() + 0.5))
+  screen.fill()
+
+  
+  screen.level(0)
+  
+  if App.playing then
+    set_font(5)
+    screen.move(79, 7)
+    screen.text('\u{25b8}')
+  else
+    set_font(1)
+    screen.move(79, 7)
+    screen.text('||')
+  end
+  
+  set_font(1)
+  screen.move(124, 7)
+  local quarter = math.floor(App.tick / (App.ppqn) ) + 1
+  local measure = math.floor(quarter / 4) + 1
+  local count = math.floor(quarter % 4) + 1
+  screen.text_right( measure .. ':' .. count)
+  screen.fill()
+
+
+  if App.recording  then
+    screen.level(0)
+    set_font(1)
+    screen.move(85, 7)
+    screen.text('REC')
+    screen.fill()
+  end
+end
+
+local function draw_chord(select, x, y)
+  x = x or 60
+  y = y or 14
+  local scale = App.scale[select]
+  local chord = scale.chord
+  if chord and #scale.intervals > 2 then
+      local name = chord.name
+      local root = chord.root + scale.root
+      local bass = scale.root
+      
+      screen.level(15)
+      set_font(37)
+      screen.move(x, y + 12)
+      screen.text(musicutil.note_num_to_name(root))
+      local name_offset = screen.text_extents(musicutil.note_num_to_name(root)) + x
+      set_font(9)
+      
+      screen.move(name_offset, y)
+      screen.text(name)
+      screen.fill()
+      
+      if bass ~= root then
+      screen.move(name_offset, y + 12)
+      screen.text('/' .. musicutil.note_num_to_name(bass))
+      end
+  end
+end
+
+local function draw_chord_small(select, x, y)
+  x = x or 60
+  y = y or 46
+  local scale = App.scale[select]
+  local chord = scale.chord
+  if chord and #scale.intervals > 2 then
+      local name = chord.name
+      local root = chord.root + scale.root
+      local bass = scale.root
+      
+      screen.level(15)
+      set_font(1)
+      screen.move(x, y)
+      screen.text(musicutil.note_num_to_name(root) .. name)
+      screen.fill()
+  end
+end
+
+function draw_intervals(select, x, y)
+  x = x or 0
+  y = y or 63
+  screen.move(127, 41)
+
+  local interval_names = {'R', 'b2', '2', 'b3', '3', '4', 'b5', '5', 'b6', '6', 'b7', '7'}
+
+  set_font(1)
+  for i = 1, #interval_names do
+      if App.scale[1].bits & (1 << (i - 1)) > 0 then
+              screen.level(15)
+      else
+              screen.level(1)
+      end
+      screen.move(i * 10 + x, y)
+      screen.text_center(interval_names[i])
+      screen.fill()
+  end
+end
+  
+function draw_tag(label, value, x, y)
+  x = x or 0
+  y = y or 35
+  screen.level(0)
+  screen.rect(x, y, 128, 29)
+  screen.fill()
+  
+  screen.level(15)
+  screen.rect(x, y, 32, 32)
+  screen.fill()
+  
+  screen.level(0)
+  screen.move(x + 1, y + 7)
+  screen.text(label)
+  
+  screen.move(x + 16, y + 27)
+  set_font(34)
+  screen.text_center(value)
+  
+  set_font(1)
+  screen.move(x + 16, y + 17)
+  screen.text_center('shit')
+  screen.fill()
+end
+
+local function draw_status()
+  set_font(1)
+  screen.level(15)
+  screen.rect(0, 0, 10, 9)
+  screen.fill()
+  screen.level(0)
+  screen.move(5,7)
+  screen.text_center(App.current_track)
+  screen.fill()
+  
+  screen.level(15)
+  screen.move(15,7)
+  screen.text(App.track[App.current_track].name )
+  
+  set_font(5)
+  screen.move(0,20)
+  screen.text('\u{25b8}')
+  screen.move(0,30)
+  screen.text('\u{25c2}')
+
+  set_font(1)
+  screen.move(6,20)
+  screen.text('I')
+  screen.move(6,30)
+  screen.text('O')
+
+  screen.move(15,20)
+  screen.text(App.track[App.current_track].input_device.abbr)
+
+  
+  screen.move(50,20)
+  if App.track[App.current_track].midi_in ~= 0 then
+    screen.text('ch ' ..  App.track[App.current_track].midi_in)
+  else
+    screen.text('off')
+  end
+end
+
+
 function App:init(o)
   ----------------------------------------------------------------------------
   -- Model & State Variables
@@ -56,6 +288,7 @@ function App:init(o)
 
   -- Transport/Playback State
   self.playing = false
+  self.recording = false
   self.current_mode = 1
   self.current_track = 1
   
@@ -77,8 +310,7 @@ function App:init(o)
   end
 
   -- Timing parameters:
-  -- Set PPQN to 48 for a finer subdivision.
-  self.ppqn = 48
+  self.ppqn = 24
   self.swing = 0.5
   self.swing_div = 6 -- 1/16 note swing
 
@@ -95,7 +327,11 @@ function App:init(o)
     alt_enc1 = function(d) print('default alt enc 1 ' .. d) end,
     alt_enc2 = function(d) print('default alt enc 2 ' .. d) end,
     alt_enc3 = function(d) print('default alt enc 3 ' .. d) end,
-    long_fn_2 = function() print('Long 2') end,
+    long_fn_2 = function()
+      self.recording = not self.recording
+      print('Recording: ' .. tostring(self.recording))
+      self.screen_dirty = true
+    end,
     long_fn_3 = function() print('Long 3') end,
     alt_fn_2 = function() print('Alt 2') end,
     alt_fn_3 = function() print('Alt 3') end,
@@ -108,8 +344,44 @@ function App:init(o)
       end
     
     end,
-    press_fn_3 = function() print('press 3') end
-  
+    press_fn_3 = function() print('press 3') end,
+    screen = function()
+      draw_tempo()
+      
+      local track_name = params:get('track_' .. App.current_track .. '_name')
+      
+      if App.track[App.current_track].enabled then
+        screen.level(10)
+      else
+              screen.level(2)
+      end
+      
+      draw_chord(1, 80, 45)
+      draw_chord_small(2)
+      -- draw_intervals(1)
+
+      draw_status()
+
+      
+      
+
+      local out_ch = 'off'
+      if App.track[App.current_track].midi_out ~= 0 then
+        out_ch = App.track[App.current_track].midi_out
+      end
+      screen.move(15,30)
+      screen.text(App.track[App.current_track].output_device.abbr)
+
+      screen.move(50,30)
+      if App.track[App.current_track].midi_out ~= 0 then
+        screen.text('ch ' ..  App.track[App.current_track].midi_out)
+      else
+        screen.text('off')
+      end
+
+      screen.fill()
+    end
+    
   }
 
   -- For triggers, keys, and mode-specific contexts
@@ -138,18 +410,6 @@ function App:init(o)
 
   -- Crow Setup (e.g. for external CV/gate control)
   self.crow = self.device_manager.crow
-
-  ----------------------------------------------------------------------------
-  -- Buffer/Timing and Subtick Configuration (for microtiming)
-  ----------------------------------------------------------------------------
-  -- For now, the transport tick is driven by ppqn = 96.
-  -- In addition, we introduce a master subtick clock that emits events at a
-  -- finer subdivision level for microtiming. The subdivision factor here can be
-  -- adjusted (e.g., 2 means each tick is subdivided into 2 microticks).
-  self.subdivision = 2
-  -- seconds per tick is derived from current tempo using clock.get_beat_sec()
-  -- (we recalc this in the tick handler if necessary)
-  self.subtick_time = clock.get_beat_sec() / self.ppqn
 
   ----------------------------------------------------------------------------
   -- Buffer/Sequence State (for recording & playback)
@@ -198,11 +458,6 @@ function App:init(o)
 
   App:register_modes()
 
-  ----------------------------------------------------------------------------
-  -- Start Master Subtick Clock
-  ----------------------------------------------------------------------------
-  -- This coroutine will run continuously to emit 'subtick' events for fine microtiming.
-  self.subtick_clock = clock.run(function() self:run_subtick_clock() end)
 end
 
 --==============================================================================
@@ -229,7 +484,7 @@ function App:start(continue)
   end
 
   ----------------------------------------------------------------------------
-  -- Transport Tick Loop using 96 PPQN
+  -- Transport Tick Loop using PPQN
   ----------------------------------------------------------------------------
   if params:get('clock_source') == 1 then
     self.clock = clock.run(function()
@@ -277,40 +532,22 @@ end
 --==============================================================================
 -- Tick and Transport Handling
 --==============================================================================
--- Called from the main clock loop (using ppqn = 96)
 function App:send_tick()
   self:on_tick()
 end
 
--- The on_tick function updates the tick counter, recalculates subtick_time,
+-- The on_tick function updates the tick counter,
 -- and dispatches clock events to tracks.
 function App:on_tick()
   self.last_time = clock.get_beats()
   self.tick = self.tick + 1
   self.midi_out:clock()
 
-  -- Recalculate subtick_time based on current tempo:
-  self.subtick_time = clock.get_beat_sec() / self.ppqn
-  
   if params:get('clock_source') == 1 then
     -- Dispatch clock events to all tracks
     for i = 1, #self.track do
       self.track[i]:process_transport({ type = 'clock' })
     end
-  end
-end
-
-----------------------------------------------------------------------------
--- Master Subtick Clock
-----------------------------------------------------------------------------
--- This coroutine runs continuously and emits a "subtick" event at a finer subdivision
--- than the main tick. This can be used for microtiming adjustments and dynamic note offsets.
-function App:run_subtick_clock()
-  while true do
-    local beat_sec = clock.get_beat_sec()  -- seconds per beat at current tempo
-    local sleep_time = beat_sec / (self.ppqn * self.subdivision)
-    clock.sync(sleep_time)
-    self:emit('subtick', sleep_time)
   end
 end
 
@@ -482,6 +719,8 @@ function App:emit(event_name, ...)
     end
   end
 end
+
+
 
 --==============================================================================
 -- Drawing and User Interface Functions
@@ -709,22 +948,22 @@ function App:register_modes()
     display_end = {x = 4, y = 1},
     offset = {x = 4, y = 8},
     midi = App.midi_grid.device,
-    event = function(s, data)
+    event = function(self, data)
       if data.state then
-        s:reset()
+        
         local mode = App.mode[App.current_mode]
-        mode.arrow_pads:reset()
-        mode.alt_pad:reset()
-        mode.row_pads:reset()
-        App.current_mode = s:grid_to_index(data)
-        for i = 1, #App.mode do
-          if i ~= App.current_mode then
-            App.mode[i]:disable()
-          end
+        local selected = self:grid_to_index(data)
+
+        if App.current_mode == selected then
+          return
         end
-        App.mode[App.current_mode]:enable()
-        s.led[data.x][data.y] = 1
-        s:refresh()
+
+        self:reset()
+
+        App:set_mode(selected)
+
+        self.led[data.x][data.y] = 1
+        self:refresh()
       end
     end,
     active = true
@@ -736,12 +975,14 @@ function App:register_modes()
     mode.grid:process(msg)
   end
 
-  local SessionMode = require('Foobar/lib/modes/session')
+  local SessionModePreset = require('Foobar/lib/modes/session-preset')
+  local SessionModeNote = require('Foobar/lib/modes/session-note')
   local DrumsMode   = require('Foobar/lib/modes/drums')
   local KeysMode    = require('Foobar/lib/modes/keys')
   local UserMode    = require('Foobar/lib/modes/user')
   
-  self.mode[1] = SessionMode
+  self.mode[1] = SessionModePreset
+  self.mode[5] = SessionModeNote
   self.mode[2] = DrumsMode
   self.mode[3] = KeysMode
   self.mode[4] = UserMode
@@ -749,6 +990,13 @@ function App:register_modes()
   self.mode[1]:enable()
 end
 
+function App:set_mode(index)
+  self.mode[self.current_mode].track = App.current_track
+  self.mode[self.current_mode]:disable()
+  self.current_mode = index
+  self.mode[self.current_mode].track = App.current_track
+  self.mode[self.current_mode]:enable()
+end
 --==============================================================================
 -- Return the App Class
 --==============================================================================

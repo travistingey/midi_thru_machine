@@ -25,22 +25,18 @@ end
 function MuteGrid:enable_event()
     self.triggers = {}
     self.base = App.track[self.track]
-    
-   
     -- for each track find the triggers matching the base track
+    if(self.base.input_device) then
+        for i,track in ipairs(self.base.input_device.triggers) do
+            if track.midi_in == self.base.midi_in then
+                self.triggers[track.trigger] = track
 
-        
-        if(self.base.input_device) then
-            for i,track in ipairs(self.base.input_device.triggers) do
-                if track.midi_in == self.base.midi_in then
-                    self.triggers[track.trigger] = track
-
-                    table.insert(self.cleanup_functions, track:on('midi_trigger', function(data)
-                        self:midi_event(self.base.mute, data)
-                    end))
-                end
+                table.insert(self.cleanup_functions, track:on('midi_trigger', function(data)
+                    self:midi_event(self.base.mute, data)
+                end))
             end
-         end
+        end
+        end
 
 end
 

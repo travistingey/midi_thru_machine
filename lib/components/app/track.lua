@@ -63,7 +63,9 @@ function Track:set(o)
 	params:add_group('Track '.. self.id, 23)
 
 	params:add_text(track .. 'name', 'Name', 'Track ' .. o.id)
-
+	params:set_action(track .. 'name', function(d) 
+		self.name = d
+	end)
 
 	-- Input Devive Listeners
 	local function input_event(data)

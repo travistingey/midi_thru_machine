@@ -1,5 +1,3 @@
--- Note: This is highly customized to interface with the 1010music BitBox Mk II
-
 local path_name = 'Foobar/lib/'
 local ModeComponent = require('Foobar/lib/components/mode/modecomponent')
 local Grid = require(path_name .. 'grid')
@@ -11,18 +9,17 @@ PresetSeq.name = 'presetseq'
 function PresetSeq:set(o)
     self.__base.set(self, o)
     self.active = true
-    self.select = { type='preset', id = 1, component = 'track' }
+    self.select = { type='track', value = 1}
     self.index = nil
     self.component = 'auto'  -- Reference to the Auto component
 
-    self.lanes = { 'preset', 'cc' }  -- List of lanes
+    self.lanes = { 'track', 'scale', 'cc' }  -- List of lanes
     self.selected_lane_index = 1                -- Index of the selected lane
     self.selected_lane = self.lanes[self.selected_lane_index]
-    
-    self.preset_components = {'track', 'scale'}
-    self.selected_component_index = 1
-    self.selected_component = self.preset_components[self.selected_component_index]
+    self.step_length = o.step_length or 24
 
+    self.display_offset = o.display_offset or 0
+    
     self.grid = Grid:new({
         name = 'PresetSeq ' .. o.track,
         grid_start = {x=1,y=4},
@@ -81,37 +78,64 @@ function PresetSeq:set(o)
 end
 
 function PresetSeq:enable_event()
+    local auto = self:get_component()
+
+    local loop_start = auto.seq_start
+    local loop_end = auto.seq_start + auto.seq_length - 1
+
     self:on('preset_select', function(selection)
-        self.mode:reset_timeout()
-        if self.blink_mode then
+        self:set_select(selection.value)
+        if App.recording then
             local auto = self:get_component()
-
-            self:set_select(selection)
-
-            if type(self.last_step) == 'number' then
-                auto:set_action(self.last_step, self.select)
-            elseif type(self.last_step) == 'table' then 
-                for i= self.last_step[1], self.last_step[2] do
-                    auto:set_action(i, self.select)
-                end
-            end
+            local step = math.floor((auto.step + (self.step_length / 2) ) / self.step_length) + 1
+            self:set_step(step, selection)
         end
     end)
 end
 
 -- If no value is specified, it references the track's current_preset
-
 function PresetSeq:set_select(value)
     local track = self:get_component().track
 
     if value then
         self.select = { type = self.selected_lane, value = value }
-    elseif self.selected_lane == 'preset' then
-        self.select = { type='preset', value = track.current_preset }
-    elseif self.selected_lane == 'scale' then
-        self.select = { type='scale', value = track.current_preset }
+    elseif self.selected_lane == 'track' then
+        self.select = { type='track', value = track.current_preset }
+    elseif self.selected_lane == 'cc' then
+        self.select = { type='cc', value = track.current_preset }
     end
     
+end
+
+function PresetSeq:increase_step_length()
+    if self.step_length < 384 then
+        self.step_length = self.step_length * 2
+        self:set_grid(self:get_component())
+    end 
+end
+
+function PresetSeq:decrease_step_length()
+    if self.step_length > 3 then
+        self.step_length = self.step_length / 2
+        self:set_grid(self:get_component())
+    elseif self.step_length <= 3 then
+        self.step_length = 1
+        self:set_grid(self:get_component())
+    end
+end
+
+function PresetSeq:increase_display_offset()
+    if self.display_offset < 128 then
+        self.display_offset = self.display_offset + 1
+        self:set_grid(self:get_component())
+    end
+end
+
+function PresetSeq:decrease_display_offset()
+    if self.display_offset >= 0 then
+        self.display_offset = self.display_offset - 1
+        self:set_grid(self:get_component())
+    end
 end
 
 function PresetSeq:grid_event(component, data)
@@ -125,43 +149,92 @@ function PresetSeq:grid_event(component, data)
         local pad_2 = self.grid:grid_to_index(data.pad_down[1])
         local selection_start = math.min(pad_1,pad_2)
         local selection_end = math.max(pad_1,pad_2)
-        
-        if self.mode.alt then
-            auto:set_loop(selection_start, selection_end)
-        else
-            
-            self:start_blink()
-            self.mode:reset_timeout()
 
+        if self.mode.alt then
+            local loop_start = (selection_start - 1) * self.step_length
+            local loop_end = selection_end * self.step_length - 1
+            auto:set_loop(loop_start, loop_end)
+        else
             self.last_step = {selection_start, selection_end}
             for i = selection_start, selection_end do
-                auto:set_action(i, self.select)
+                local start_tick = (i - 1) * self.step_length
+                local end_tick = i * self.step_length - 1
+                for tick = start_tick, end_tick do
+                    auto:set_action(tick, self.select)
+                end
             end
-
         end
     elseif data.type == 'pad' and data.state and not self.mode.alt then
         local index = self.grid:grid_to_index(data)
-        local lane = self.selected_lane
+        local current = self:get_step(index, self.select)
 
-        self:start_blink()
-        self.mode:reset_timeout()
-        self.last_step = index
-        
-        -- Toggle action
-        auto:toggle_action(index,self.select)
-
-        self.index = index
-
-        self.mode:handle_context(self.context, self.screen, {
-            timeout = true,
-            callback = function()
-                self:end_blink()
-                self.index = nil
-                self:set_grid(auto)
-            end
-        })
+        if current ~= nil and current.value ~= self.select.value then
+            self:set_step(index, self.select)
+        else
+            self:toggle_step(index, self.select)
+        end
+       
+        self.index = (index - 1) * self.step_length
     end
     self:set_grid(auto)
+end
+
+-- Clear all actions within a step and set first tick to the action
+function PresetSeq:clear_step(step, action)
+    local auto = self:get_component()
+    local start_tick = (step - 1) * self.step_length
+    local end_tick = step * self.step_length - 1
+    local has_event = false
+
+    for tick = start_tick, end_tick do
+        auto:set_action(tick, action.type, nil)
+    end
+ 
+end
+
+-- If event exists within a step, it removes events. Otherwise we add first step
+function PresetSeq:toggle_step(step, action)
+    local auto = self:get_component()
+    local start_tick = (step - 1) * self.step_length
+    local end_tick = step * self.step_length - 1
+    local has_event = false
+    for tick = start_tick, end_tick do
+        if auto.seq[tick] and auto.seq[tick][action.type] then
+            has_event = true
+            break
+        end
+    end
+
+    if has_event then
+       self:clear_step(step, action)
+    else
+        auto:set_action(start_tick, action)
+    end
+
+    self.index = (step - 1) * self.step_length
+end
+
+function PresetSeq:get_step(step, action)
+    local auto = self:get_component()
+    local tick = (step - 1) * self.step_length
+    if type(action) == 'string' then
+        return auto:get_action(tick, action)
+    elseif type(action) == 'table' then
+        return auto:get_action(tick, action.type)
+    end
+end
+
+-- Clear all actions within a step and set first tick to the action
+function PresetSeq:set_step(step, action)
+    local auto = self:get_component()
+    local tick = (step - 1) * self.step_length
+    local has_event = false
+
+    self:clear_step(step, action)
+ 
+    auto:set_action(tick, action)
+
+    self.index = (step - 1) * self.step_length
 end
 
 function PresetSeq:set_grid(component)
@@ -171,10 +244,11 @@ function PresetSeq:set_grid(component)
 
     local BLINK = 1
     local VALUE = (1 << 1)
-    local INSIDE_LOOP = (1 << 2)
-    local LOOP_END = (1 << 3)
-    local STEP = (1 << 4)
-    local SELECTED = (1 << 5)
+    local LOOP_END = (1 << 2)
+    local STEP = (1 << 3)
+
+    -- Calculate the offset in steps. Each unit of display_offset shifts by 8 steps (8 * step_length ticks)
+    local offset_steps = self.display_offset * 8
 
     grid:for_each(function(s, x, y, i)
         local pad = 0
@@ -182,123 +256,97 @@ function PresetSeq:set_grid(component)
         if self.blink_state then
             pad = pad | BLINK
         end
-        
+
         local lane = self.selected_lane
+        
+        -- Determine the global step index for this LED pad based on the display offset
+        local global_step = i + offset_steps
+        local current_step = math.floor(auto.step / self.step_length) + 1
+        local seq_value
 
-        local seq_entry = auto.seq[i]
-        local seq_value = seq_entry and seq_entry[lane] and seq_entry[lane].value
-        if seq_value then pad = pad | VALUE end
-
-        if i >= auto.seq_start and i <= auto.seq_start + auto.seq_length - 1 and self.mode.alt then
-            pad = pad | INSIDE_LOOP
+        -- Iterate over the tick range corresponding to the global step
+        for j = (global_step - 1) * self.step_length, global_step * self.step_length - 1 do
+            if auto.seq[j] and auto.seq[j][lane] then
+                seq_value = auto.seq[j][lane].value
+                break
+            end
         end
-        if self.mode.alt and (i == auto.seq_start or i == auto.seq_start + auto.seq_length - 1) then
+        
+        if seq_value then
+            pad = pad | VALUE
+        end
+
+        local loop_start = auto.seq_start
+        local loop_end = auto.seq_start + auto.seq_length - 1
+        local loop_start_index = math.floor(loop_start / self.step_length) + 1
+        local loop_end_index = math.floor(loop_end / self.step_length) + 1
+
+        if global_step == loop_start_index or global_step == loop_end_index then
             pad = pad | LOOP_END
         end
-        if self.index == i and not self.mode.alt then
-            pad = pad | SELECTED
-        end
-        if auto.step == i and App.playing then
+
+        if current_step == global_step and App.playing then
             pad = pad | STEP
         end
 
-        local color
-        if pad & (BLINK | SELECTED | INSIDE_LOOP | VALUE) == (BLINK | SELECTED | INSIDE_LOOP | VALUE) then
-            if seq_value and type(seq_value) == "number" then
-                color = self.grid.rainbow_on[(seq_value - 1) % 16 + 1]
-            else
-                color = {5,5,5}
-            end
-        elseif pad & (SELECTED | VALUE | INSIDE_LOOP) == (SELECTED | VALUE | INSIDE_LOOP) then
-            if seq_value and type(seq_value) == "number" then
-                color = self.grid.rainbow_off[(seq_value - 1) % 16 + 1]
-            else
-                color = {5,5,5}
-            end
-        elseif pad & (BLINK | SELECTED | VALUE) == (BLINK | SELECTED | VALUE) then
-            if seq_value and type(seq_value) == "number" then
-                color = self.grid.rainbow_on[(seq_value - 1) % 16 + 1]
-            else
-                color = {5,5,5}
-            end
-        elseif pad & (BLINK | SELECTED) == (BLINK | SELECTED) then
-            color = {5,5,5}
-        elseif pad & (SELECTED | VALUE) == (SELECTED | VALUE) then
-            if seq_value and type(seq_value) == "number" then
-                color = self.grid.rainbow_off[(seq_value - 1) % 16 + 1]
-            else
-                color = {5,5,5}
-            end
-        elseif pad & (SELECTED) == (SELECTED) then
-            color = 0
-        elseif pad & (STEP | VALUE) == (STEP | VALUE) then
-            if seq_value and type(seq_value) == "number" then
-                color = self.grid.rainbow_on[(seq_value - 1) % 16 + 1]
-            else
-                color = 1
-            end
-        elseif pad & (STEP) == STEP then
-            color = 1
-        elseif pad & (BLINK | LOOP_END | VALUE) == (BLINK | LOOP_END | VALUE) then
-            if seq_value and type(seq_value) == "number" then
-                color = self.grid.rainbow_on[(seq_value - 1) % 16 + 1]
-            else
-                color = {5,5,5}
-            end
-        elseif pad & (BLINK | LOOP_END) == (BLINK | LOOP_END) then
-            color = {5,5,5}
-        elseif pad & (INSIDE_LOOP | VALUE) == (INSIDE_LOOP | VALUE) then
-            if seq_value and type(seq_value) == "number" then
-                color = self.grid.rainbow_off[(seq_value - 1) % 16 + 1]
-            else
-                color = 1
-            end
-        elseif pad & (VALUE) == (VALUE) then
-            if seq_value and type(seq_value) == "number" then
-                color = self.grid.rainbow_off[(seq_value - 1) % 16 + 1]
-            else
-                color = 1
-            end
-        else
-            color = 0
-        end
+        local color = 123
 
+        if pad & (BLINK | VALUE | STEP) == 0 or pad == BLINK then
+            -- empty
+            color = 0
+        elseif pad & STEP > 0 and pad & (BLINK | VALUE) == 0 or pad == (BLINK | STEP) then
+            -- LOW White
+            color = {5,5,5}
+        elseif pad & VALUE > 0 and pad & (BLINK | STEP) == 0 or pad == (BLINK | VALUE) then
+            -- LOW Color
+            color = grid.rainbow_off[(seq_value - 1) % 16 + 1]
+        elseif pad & (BLINK | STEP) > 0 and pad & VALUE == 0 then
+            -- HIGH White
+            color = 1
+        elseif pad & (VALUE | STEP) > 0 or pad & (BLINK | VALUE) > 0 and pad & STEP == 0 then
+            color = grid.rainbow_on[(seq_value - 1) % 16 + 1]
+        end
+   
         s.led[x][y] = color
     end)
     grid:refresh('PresetSeq:set_grid')
 end
 
-function PresetSeq:transport_event(component, data)
-    -- Update grid if necessary based on transport events
-    self:set_grid(component)
-end
-
-function PresetSeq:alt_event()
-    self.index = nil
-    self.mode:cancel_context()
-    self:start_blink()
-    local auto = self:get_component()
+function PresetSeq:transport_event(auto, data)
+    if App.recording then
+        if auto.step % self.step_length == 0 then
+            self:set_select()
+            self:set_step(math.floor(auto.step / self.step_length) + 1, self.select)
+        end
+    end
     self:set_grid(auto)
 end
 
-function PresetSeq:alt_reset_event()
-    print('never')
-    self:end_blink()
-    local auto = self:get_component()
-    self:set_grid(auto)
+function PresetSeq:alt_event(data)
+
+    if data.state and self.mode.alt then
+        self.index = nil
+        self.mode:cancel_context()
+        self:start_blink()
+        local auto = self:get_component()
+        self:set_grid(auto)
+        local cleanup = self:on('alt_reset', function()
+            self:end_blink()
+            local auto = self:get_component()
+            self:set_grid(auto)
+            cleanup()
+        end)
+    elseif data.state then
+        self:end_blink()
+        self.index = nil
+        local auto = self:get_component()
+        self:set_grid(auto)
+    end
 end
 
-function PresetSeq:row_event(data, skip_grid)
-    if data.state and App.track[data.row].enabled then
-      
-      App.current_track = data.row
-      self:set_track(App.current_track)
-      
-      self:end_blink()
-      self.skip_set_grid = true
-      self.mode:cancel_context()
-
-      App.screen_dirty = true
+function PresetSeq:row_event(data)
+    if data.state then
+      self.track = data.row
     end
 end
   

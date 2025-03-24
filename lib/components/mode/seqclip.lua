@@ -104,7 +104,7 @@ function SeqClip:grid_event (seq, data)
 				end
 			end
 
-			self.mode.alt_pad:reset()
+			self:emit('alt_reset')
 			
 			if seq.armed == 'cancel' then
 				seq.next_bank = 0

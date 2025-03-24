@@ -93,7 +93,7 @@ end
 
 
 
-Input.options = {'midi','arpeggio','random','bitwise','chord'}
+Input.options = {'midi','arpeggio','random','bitwise','chord','crow'}
 Input.params = {'midi_in','trigger','crow_in','note_range_upper','note_range_lower','arp','note_range','step','reset_step','chance','voice','step_length'} -- Update this list to dynamically show/hide Track params based on Input type
 
 Input.types = {}
@@ -131,23 +131,22 @@ end
 -- Crow Input
 -- crow.send('input[1].query()') will query and save values to App.crow_in[1].volts
 Input.types['crow'] = {
-    props = {'midi_in','trigger'},
+    props = {'trigger'},
     set_action = function(s, track)
         track:kill()
         Input.set_trigger(s,track)
     end,
     process = function(s, data)
-        crow.send('input['.. s.track.crow_in ..'].query()')
-        local note = math.floor(App.crow.input[ s.track.crow_in] * 12) + 60
+        App.crow:query(s.track.crow_in)
+        local note = math.floor(App.crow.input[s.track.crow_in] * 12) + s.track.note_range_lower
         local vel = 100
         return {type = 'note_on', note = note, vel = vel }
     end
 }
 
 -- Arpeggiator
-
 Input.types['arpeggio'] = {
-    props = {'midi_in','trigger','note_range_upper','note_range'},
+    props = {'trigger','note_range_lower','note_range'},
     set_action = function(s, track)
         Input.set_trigger(s,track)
         
@@ -237,7 +236,7 @@ Input.types['arpeggio'] = {
 }
 
 Input.types['chord'] = {
-    props = {'midi_in','trigger','note_range_upper','note_range'},
+    props = {'trigger','note_range_lower','note_range'},
     set_action = function(s, track)
         Input.set_trigger(s,track)     
     end
@@ -245,7 +244,7 @@ Input.types['chord'] = {
 
 -- Random Notes
 Input.types['random'] = {
-    props = {'midi_in','trigger','note_range_upper','note_range'},
+    props = {'trigger','note_range_lower','note_range'},
     set_action = function(s, track)
        Input.set_trigger(s,track)
     end,
@@ -256,9 +255,8 @@ Input.types['random'] = {
 }
 
 -- Bitwise Sequencer
-
 Input.types['bitwise'] = {
-    props = {'midi_in','trigger','note_range_upper','note_range'},
+    props = {'trigger','note_range_lower','note_range','chance','step_length'},
     set_action = function(s, track)
         Input.set_trigger(s,track)
         track.chance = params:get('track_' .. track.id .. '_chance')

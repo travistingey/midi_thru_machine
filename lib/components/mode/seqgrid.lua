@@ -71,7 +71,7 @@ function SeqGrid:grid_event (seq,data)
 		
 		 if self.mode.alt then
 	        seq.follow = not seq.follow
-	        self.mode.alt_pad:reset()
+	        self:emit('alt_reset')
 	    else
 		    self.page = self.page + 1
 		    print('page: ' .. self.page)
@@ -82,7 +82,7 @@ function SeqGrid:grid_event (seq,data)
 	if data.state and data.type == 'left' and self.page > 1 then
 		  if self.mode.alt then
 	        self.page = 1
-	        self.mode.alt_pad:reset()
+	        self:emit('alt_reset')
 	    else
 		    self.page = self.page - 1
 		  end

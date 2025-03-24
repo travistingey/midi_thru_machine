@@ -38,6 +38,8 @@ function Mode:set(o)
     self.event_listeners = {}
     self.cleanup_functions = {}
 
+    self.track = o.track
+    
     for binding, func in pairs(App.default) do
         if self.context[binding] then
             self.default[binding] = self.context[binding]
@@ -81,14 +83,7 @@ function Mode:set(o)
         grid_start = { x = 1, y = 9 },
         grid_end = { x = 4, y = 9 },
         event = function(s, data)
-            local mode = self
-
-            for i, component in ipairs(mode.components) do
-                component.grid:event(data)
-            end
-
-            self:emit('arrow', data)
-
+            self:emit('arrow', self, data)
         end
     })
 
@@ -97,7 +92,6 @@ function Mode:set(o)
         grid_start = { x = 9, y = 2 },
         grid_end = { x = 9, y = 8 },
         event = function(s, data)
-            tab.print(data)
             self:emit('row', self, data)
         end
     })
@@ -161,12 +155,18 @@ end
 
 function Mode:refresh()
     self:draw()
+    
+    for i, c in ipairs(self.components) do
+        if c.set_grid ~= nil then
+            c:set_grid()
+        end
+    end
     screen_dirty = true
 end
 
 function Mode:draw()
     for i, v in pairs(self.layer) do
-        self.layer[i]()
+        self.layer[i](self)
     end
 end
 
@@ -350,6 +350,8 @@ function Mode:enable()
         return -- Prevent re-enabling
     end
     
+    self.track = App.current_track
+
     for _, component in ipairs(self.components) do
         component.mode = self
         component:enable()
@@ -365,11 +367,9 @@ function Mode:enable()
 
     -- Listen for an 'alt_reset' event so that components can trigger a reset of the alt pad.
     self:on('alt_reset', function()
-        if self.alt_pad and self.alt_pad.reset then
         self.alt_pad:reset()
         self.alt = false
-        self.alt_pad:refresh('alt reset')
-        end
+        self.alt_pad:refresh()
     end)
     
     if self.load_event ~= nil then
@@ -380,6 +380,11 @@ function Mode:enable()
         self:on('row', self.row_event)
     end
 
+    if self.arrow_event ~= nil then
+        self:on('arrow', self.arrow_event)
+    end
+
+    self:emit('enable')
     screen_dirty = true
 end
 
@@ -390,8 +395,7 @@ function Mode:disable()
     self.enabled = false
     
     -- reset alt
-    self.alt_pad.toggled[1][9] = false
-    self.alt = false
+    self:emit('alt_reset')
 
     self.grid:disable()
 

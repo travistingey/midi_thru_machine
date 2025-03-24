@@ -9,7 +9,7 @@ PresetGrid.name = 'presetgrid'
 function PresetGrid:set(o)
     self.__base.set(self, o)
     self.select = o.select or 1
-    self.param_type = o.param_type      -- 'track' or 'scale'
+    self.param_type = o.param_type      -- eg. 'track', 'scale', 'cc'
     self.param_ids = o.param_ids        -- e.g., {1,2,3} or function returning ids
     self.param_list = o.param_list      -- Predefined list of parameter names
     self.id = o.id
@@ -29,6 +29,13 @@ function PresetGrid:set(o)
     self.alt_context = o.alt_context or {}
     self.alt_screen = o.alt_screen or function() end
     self.grid:refresh()
+end
+function PresetGrid:enable_event()
+    local auto = self:get_component()
+    table.insert(self.cleanup_functions, auto:on('preset_change', function(data)
+        self:set_grid(auto)
+    end))
+   
 end
 
 function PresetGrid:get_param_list()
@@ -79,7 +86,7 @@ function PresetGrid:load_preset(number)
     if self.component then
         local component = self:get_component()
         if component then
-            component.current_preset = number
+            component.track.current_preset = number
         end
     end
     local param_list = self:get_param_list()
@@ -87,21 +94,37 @@ function PresetGrid:load_preset(number)
     self.mode:toast('Loaded preset ' .. number)
 end
 
+-- If no value is specified, it references the track's current_preset
+function PresetGrid:set_select(value)
+    local track = self:get_component().track
+
+    if value then
+        self.select = { type = self.param_type, value = value }
+    elseif self.param_type == 'track' then
+        self.select = { type='track', value = track.current_preset }
+    elseif self.param_type == 'cc' then
+        self.select = { type='cc', value = track.current_preset }
+    end
+    
+end
+
 function PresetGrid:grid_event(component, data)
 
     local auto = self:get_component()
 
     if data.state and data.type == 'pad' then
-        self.select = self.grid:grid_to_index(data)
+        local selection = self.grid:grid_to_index(data)
+
         if self.mode.alt then
-            self:save_preset(self.select)
+            self:save_preset(selection)
             self:emit('alt_reset')
         else
+            self:set_select(selection)
             self:emit('preset_select', self.select)
-            self:load_preset(self.select)
+            self:load_preset(selection)
         end
         if component then
-            component.track.current_preset = self.select
+            component.track.current_preset = selection
         end
         self:set_grid(component)
     end
@@ -123,11 +146,8 @@ function PresetGrid:set_grid(component)
 end
 
 function PresetGrid:row_event(data)
-    if data.state and self.param_type then
-        App.current_track = data.row
-        self:set_track(App.current_track)
-        self:set_grid()
-        App.screen_dirty = true
+    if data.state then
+        self.track = data.row
     end
 end
 

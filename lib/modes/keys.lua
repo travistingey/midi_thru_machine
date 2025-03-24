@@ -28,14 +28,16 @@ local KeysMode = Mode:new({
     },
     on_load = function() App.screen_dirty = true end,
     row_event = function(s,data)
-        if data.row < 7 then
-            local scalegrid = s.components[math.ceil(data.row/2)]
-            scalegrid:row_event(data)
+        if data.state then
+            if data.row < 7 then
+                local scalegrid = s.components[math.ceil(data.row/2)]
+                scalegrid:row_event(data)
+            end
         end
     end,
     context = {
         enc1 = function(d)
-            params:set('scale_1_root',App.scale[1].root + d)
+            params:set('scale_1_root', App.scale[1].root + d)
             App.screen_dirty = true
         end,
         alt_enc1 = function(d)

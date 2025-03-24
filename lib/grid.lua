@@ -186,9 +186,6 @@ function Grid:disable()
 		end
 	end
 
-	if self.set_grid then
-		self:set_grid()
-	end
 end
 
 function Grid:process(d)
@@ -387,15 +384,6 @@ end
 
 function Grid:refresh(debug)
 	if self.active then
-		--[[ Use this to debug grid refreshes to make sure we're not needlessly iterating through grid tables.
-
-		if debug ~= nil then
-			print(self.name .. ' refresh from ' .. debug)
-		else
-			print(self.name .. ' refresh')
-		end
-
-		--]]
 
 		local message = {240, 0, 32, 41, 2, 13, 3}
 
@@ -432,6 +420,10 @@ function Grid:refresh(debug)
 
 		message = utilities.concat_table(message, {247})
 		self.midi:send(message)
+
+		for i = 1, #self.subgrids do
+			self.subgrids[i]:refresh()
+		end
 	end
 end
 
