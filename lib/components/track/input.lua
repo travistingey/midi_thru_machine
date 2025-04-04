@@ -9,7 +9,7 @@ local Input = {}
 Input.name = 'input'
 Input.__index = Input
 setmetatable(Input,{ __index = TrackComponent })
-
+print('!!!TODO: You just set velocity to data.vel in your Input class but it might break Transport triggering')
 function Input:new(o)
     o = o or {}
     setmetatable(o, self)
@@ -139,7 +139,7 @@ Input.types['crow'] = {
     process = function(s, data)
         App.crow:query(s.track.crow_in)
         local note = math.floor(App.crow.input[s.track.crow_in] * 12) + s.track.note_range_lower
-        local vel = 100
+        local vel = data.vel
         return {type = 'note_on', note = note, vel = vel }
     end
 }
@@ -230,7 +230,7 @@ Input.types['arpeggio'] = {
 
         end
         
-        return {type = 'note_on', note = note, vel = 100 }
+        return {type = 'note_on', note = note, vel = data.vel }
     end
 
 }
@@ -250,7 +250,7 @@ Input.types['random'] = {
     end,
     process = function (s, data)
         local note = math.random(s.track.note_range_lower, s.track.note_range_upper)
-        return {type = 'note_on', note = note, vel = 100 }
+        return {type = 'note_on', note = note, vel = data.vel }
     end
 }
 

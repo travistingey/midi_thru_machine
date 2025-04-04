@@ -2,6 +2,7 @@
 -- device_manager.lua
 local path_name = 'Foobar/lib/'
 local utilities = require(path_name .. 'utilities')
+local LaunchControl = require(path_name .. 'launchcontrol')
 
 local DeviceManager = {}
 DeviceManager.__index = DeviceManager
@@ -210,6 +211,11 @@ function CrowDevice:send(data)
 
 end
 
+local MixerDevice = {}
+setmetatable(MixerDevice, {__index = DeviceMethods})
+
+
+
 local VirtualDevice = {}
 setmetatable(VirtualDevice, {__index = DeviceMethods})
 
@@ -269,6 +275,12 @@ function DeviceManager:new()
 
     -- Register Virtual Device
     d:register_virtual_device()
+
+    -- Register Mixer
+    --d:register_mixer_device()
+    
+    -- Register Grid
+    --d:register_grid_device()
 
     d.none = d:add({id = 0})
     
@@ -389,8 +401,8 @@ function DeviceManager:register_midi_device(port)
                 self:emit(device.id, 'cc', event)
             else
 
-                device:process_midi(event)
-                
+            device:process_midi(event)
+
             end
         end
 

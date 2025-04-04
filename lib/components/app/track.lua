@@ -60,7 +60,7 @@ function Track:set(o)
 
 	local track = 'track_' .. self.id ..'_'
 
-	params:add_group('Track '.. self.id, 23)
+	params:add_group('Track '.. self.id, 24)
 
 	params:add_text(track .. 'name', 'Name', 'Track ' .. o.id)
 	params:set_action(track .. 'name', function(d) 
@@ -75,7 +75,10 @@ function Track:set(o)
 		elseif data.type == "note_off" then
 			self.note_on[data.note] = nil
 		elseif (data.type == "cc") then
-			self:process_cc(data)
+			if self.midi_in > 0 and data.ch == self.midi_in then
+				print('track ' .. self.id .. ' cc event')
+				self:emit('cc_event', data)
+			end
 		end
 	end
 
@@ -86,12 +89,10 @@ function Track:set(o)
 	params:set_action(track .. 'device_in',function(d)
 		-- Remove old input device listeners
 		if self.input_device then
-			self.input_device:off('event', input_event)
 			self:remove_trigger()
 		end
 
 		self.input_device = App.device_manager:get(d)
-		self.input_device:on('event', input_event)
 		self:add_trigger()
 		self:load_component(Input)
 		self:enable()
@@ -186,6 +187,13 @@ function Track:set(o)
 	params:set_action(track .. 'midi_thru',function(d)
 		self.midi_thru = (d>0)
 	end)
+
+	 -- Mixer Channel: 0 means no mixer CC listener; non-zero values (1-16) specify the mixer channel to listen on
+	 self.mixer_channel = o.mixer_channel or 0
+	 params:add_number(track .. 'mixer_channel', 'Mixer Channel', 0, 16, self.mixer_channel)
+	 params:set_action(track .. 'mixer_channel', function(d)
+		 self.mixer_channel = d
+	 end)
 
 	-- Arpeggio
 	local arp_options = {'up','down','up down', 'down up', 'converge', 'diverge'}

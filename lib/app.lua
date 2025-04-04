@@ -5,7 +5,11 @@
 -- transport, tracks, modes, and the user interface.
 
 --==============================================================================
-  
+-- TODO:
+-- Remove App.midi_out and move panic function to device mangement
+-- Integrate LaunchControl within DeviceManager?
+-- Maybe move LaunchPad within DeviceManager?
+
 --==============================================================================
 -- Dependencies and Global Variables
 --==============================================================================
@@ -18,7 +22,7 @@ local Output        = require('Foobar/lib/components/track/output')
 local Mode          = require('Foobar/lib/components/app/mode')
 local musicutil     = require(path_name .. 'musicutil-extended')
 local DeviceManager = require('Foobar/lib/components/app/devicemanager')
-local LaunchControl = require(path_name .. 'launchcontrol')
+LaunchControl = require(path_name .. 'launchcontrol')
 
 local LATCH_CC = 64
 
@@ -406,7 +410,6 @@ function App:init(o)
   self.midi_grid = {}  -- NOTE: must use Launch Pad Device 2
   self.launchcontrol = {}
   self.mixer     = {}
-  self.bluebox   = {}
 
   -- Crow Setup (e.g. for external CV/gate control)
   self.crow = self.device_manager.crow
@@ -451,7 +454,6 @@ function App:init(o)
   App:register_midi_grid(3)
   App:register_launchcontrol(9)
   App:register_mixer(4)
-  App:register_bluebox(5)
 
   print('params:default')
   params:default()
@@ -475,12 +477,10 @@ function App:start(continue)
     event = { type = 'continue' }
     self.midi_in:continue()
     self.midi_out:continue()
-    -- self.bluebox:continue()
   else
     event = { type = 'start' }
     self.midi_in:start()
     self.midi_out:start()
-    -- self.bluebox:start()
   end
 
   ----------------------------------------------------------------------------
@@ -510,7 +510,6 @@ function App:stop()
   if params:get('clock_source') > 1 then
     self.midi_in:stop()
     self.midi_out:stop()
-    -- self.bluebox:stop()
   end
 
   if params:get('clock_source') == 1 then
@@ -623,42 +622,10 @@ function App:crow_query(i)
   crow.send('input[' .. i .. '].query()')
 end
 
-function App:register_mixer(n)
-  self.mixer.event = nil
-  self.mixer = midi.connect(n)
-  
-  self.mixer.event = function(msg)
-    local data = midi.to_msg(msg)
-    
-    if data.type == 'cc' then
-      self.bluebox:send(data)
-    end
-
-    if data.type == 'note_on' then
-      local send = LaunchControl:handle_note(data)
-      if send then 
-        App.bluebox:send(send)
-      end
-      LaunchControl:set_led()
-    end
-  end
-
-  function LaunchControl:on_up(state)
-    App.send_in = state
-  end
-
-  function LaunchControl:on_down(state)
-    App.send_out = state
-  end
-end
-
 function App:register_launchcontrol(n)
+  print('Register Launch Control on port ' .. n)
   LaunchControl:register(n)
   LaunchControl:set_led()
-end
-
-function App:register_bluebox(n)
-  self.bluebox = midi.connect(n)
 end
 
 --==============================================================================
@@ -679,10 +646,12 @@ function App:register_midi_in(n)
 end
 
 function App:register_midi_out(n)
+  print('Register MIDI Out Device ' .. n)
   self.midi_out = self.device_manager:get(n)
 end
 
 function App:register_midi_grid(n)
+  print('Register Grid Device ' .. n)
   self.midi_grid = self.device_manager:get(n)
   self.midi_grid:send({240,0,32,41,2,13,0,127,247}) -- Set Launchpad to Programmer Mode
 end
@@ -799,8 +768,7 @@ function App:register_params()
   params:add_option("midi_out", "MIDI Out", midi_devices, 2)
   params:add_option("mixer", "Mixer", midi_devices, 4)
   params:add_option("midi_grid", "Grid", midi_devices, 3)
-  params:add_option("launchcontrol", "LaunchControl", midi_devices, 9)
-  params:add_option("bluebox", "BlueBox", midi_devices, 5)
+  params:add_option("launchcontrol", "LaunchControl", midi_devices, 4)
   
   params:add_trigger('panic', "Panic")
   params:set_action('panic', function() App:panic() end)
@@ -809,7 +777,6 @@ function App:register_params()
   params:set_action("midi_grid", function(x) App:register_midi_grid(x) end)
   params:set_action("mixer", function(x) App:register_mixer(x) end)
   params:set_action("launchcontrol", function(x) App:register_launchcontrol(x) end)
-  params:set_action("bluebox", function(x) App:register_bluebox(x) end)
   
   params:add_separator()
   App:register_song()
@@ -899,43 +866,44 @@ local function bezier_transform(input, P0, P1, P2, P3)
 end
 
 --==============================================================================
--- Register Mixer, LaunchControl, BlueBox, etc.
+-- Register Mixer, LaunchControl,
 --==============================================================================
 function App:register_mixer(n)
-  self.mixer.event = nil
+  print('Register Mixer (LaunchControl XL) on port ' .. n)
+  LaunchControl:register(n)
+  LaunchControl:set_led()
+
   self.mixer = midi.connect(n)
   
   self.mixer.event = function(msg)
+    
     local data = midi.to_msg(msg)
+    
     if data.type == 'cc' then
-      self.bluebox:send(data)
-    end
-    if data.type == 'note_on' then
+      local send = LaunchControl:handle_cc(data)
+      -- Route CC events to tracks that have a non-zero mixer_channel matching the event channel
+      if send then
+        for i, track in ipairs(self.track) do
+          if track.mixer_channel and track.mixer_channel > 0 and send.ch == track.mixer_channel then
+            track:emit('cc_event', send)
+          end
+        end
+      end
+    elseif data.type == 'note_on' or data.type == 'note_off' then
       local send = LaunchControl:handle_note(data)
       if send then 
-        App.bluebox:send(send)
+        -- Optionally, route note_on events to tracks that have matching mixer_channel
+        for i, track in ipairs(self.track) do
+          if track.mixer_channel and track.mixer_channel > 0 and send.ch == track.mixer_channel then
+            track:emit('cc_event', send)
+          end
+        end
       end
       LaunchControl:set_led()
     end
   end
-
-  function LaunchControl:on_up(state)
-    App.send_in = state
-  end
-
-  function LaunchControl:on_down(state)
-    App.send_out = state
-  end
 end
 
-function App:register_launchcontrol(n)
-  LaunchControl:register(n)
-  LaunchControl:set_led()
-end
-
-function App:register_bluebox(n)
-  self.bluebox = midi.connect(n)
-end
 
 --==============================================================================
 -- Modes and Grid Registration
