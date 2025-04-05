@@ -17,7 +17,9 @@ function Output:new(o)
 end
 
 function Output:set(o)
-	self.channel = o.channel or 0
+	for i, prop in ipairs(Output.params) do
+		self[prop] = o[prop]
+	end
 end
 
 Output.options = {'midi','crow'}
@@ -28,14 +30,14 @@ Output.types = {}
 Output.types['midi'] = {
 	props = {},
 	midi_event = function(s,data, track)
-		if data ~= nil and s.channel > 0 then
+		if data ~= nil and track.midi_out > 0 then
 			local send = {}
 
 			for i,v in pairs(data) do
 				send[i] = v
 			end
 			
-			send.ch = s.channel
+			send.ch = track.midi_out
 			track.output_device:send(send)
 
 			return data
@@ -50,7 +52,8 @@ Output.types['crow'] = {
 			local volts = (data.note - track.note_range_lower) / 12
 			local voct = 1
 			local gate = 2
-
+			print('TODO!!! This whole crow business is broken Line 56, Output.lua')
+			s.channel = 1
 			if s.channel == 1 then
 				voct = 1
 				gate = 2

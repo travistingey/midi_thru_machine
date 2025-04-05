@@ -37,6 +37,19 @@ function Track:new(o)
 
 	self.build_chain(o)
 	
+	o:on('cc_event',function(data)
+		if data.send_input and o.input_device then
+			data.ch = o.midi_in
+			o.input_device:send(data)
+		end
+
+		if data.send_output and o.output_device  then
+			data.ch = o.midi_out
+			o.output_device:send(data)
+		end
+
+	end)
+
 	return o
 end
 
@@ -45,8 +58,13 @@ end
 	Track properties must match parameter values 1 to 1 in order for update to manage values.
 ]]
 function Track:set(o)
-	
+	self.name = 'Track ' .. o.id
 	self.input_device = o.input_device or App.device_manager:get(1)
+	self.input_type = o.input_type or Input.options[1]
+	
+	self.output_device = o.output_device or App.device_manager:get(2)
+	self.output_type = o.output_type or Output.options[1]
+	
 	self.note_on = {}
 	
 	self.enabled = false
@@ -62,7 +80,8 @@ function Track:set(o)
 
 	params:add_group('Track '.. self.id, 24)
 
-	params:add_text(track .. 'name', 'Name', 'Track ' .. o.id)
+	
+	params:add_text(track .. 'name', 'Name', self.name)
 	params:set_action(track .. 'name', function(d) 
 		self.name = d
 	end)
@@ -76,7 +95,6 @@ function Track:set(o)
 			self.note_on[data.note] = nil
 		elseif (data.type == "cc") then
 			if self.midi_in > 0 and data.ch == self.midi_in then
-				print('track ' .. self.id .. ' cc event')
 				self:emit('cc_event', data)
 			end
 		end
@@ -101,10 +119,12 @@ function Track:set(o)
 	params:add_option(track .. "device_out", "Device Out",midi_devices,2)
 	params:set_action(track .. 'device_out',function(d)
 		self.output_device = App.device_manager:get(d)
+		self:load_component(Output)
+		self:enable()
 	end)
 
 	-- Input Type
-	self.input_type = o.input_type or Input.options[1]
+	
 	params:add_option(track .. 'input_type', 'Input Type', Input.options, 1)
 	params:set_action(track .. 'input_type',function(d)
 		self:kill()
@@ -126,13 +146,7 @@ function Track:set(o)
 	params:set_action(track .. 'output_type',function(d)
 		self:kill()
 		self.output_type = Output.options[d]
-		
-		if self.output_type == 'midi' and self.midi_out > 0 then
-			self.output = App.output[self.midi_out]
-		elseif self.output_type == 'crow' or self.output_type == 'chord' then
-			self.output = App.crow.output[self.crow_out]
-		end
-
+		self:load_component(Output)
 		self:enable()
 	end)
 
@@ -170,14 +184,8 @@ function Track:set(o)
 	params:set_action(track .. 'midi_out', function(d) 
 		self:kill()
 		self.midi_out = d
+		self:load_component(Output)
 		
-		if self.output_type == 'midi' then
-			
-			if self.midi_out > 0 then
-				self.output = App.output[d]
-			end
-
-		end
 		self:enable()
 	end)
 
@@ -193,6 +201,11 @@ function Track:set(o)
 	 params:add_number(track .. 'mixer_channel', 'Mixer Channel', 0, 16, self.mixer_channel)
 	 params:set_action(track .. 'mixer_channel', function(d)
 		 self.mixer_channel = d
+		 if d == 0 then
+			App.device_manager.mixer:remove_track(self)
+		 else
+		 	App.device_manager.mixer:add_track(self)
+		 end
 	 end)
 
 	-- Arpeggio
@@ -385,8 +398,7 @@ function Track:set(o)
 		if self.output_type == 'crow' then
 			self.output = App.crow.output[d]
 		end
-		
-		if not self.enabled then self:enable() end
+		 self:enable()
 	end)
 
 	-- Shoot program change events
@@ -503,6 +515,7 @@ end
 function Track:load_component(component)
     local option = self[component.name .. '_type']
     local type = nil
+
 
     if component.types ~= nil then
         type = component.types[option]

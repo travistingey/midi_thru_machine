@@ -22,7 +22,7 @@ local Output        = require('Foobar/lib/components/track/output')
 local Mode          = require('Foobar/lib/components/app/mode')
 local musicutil     = require(path_name .. 'musicutil-extended')
 local DeviceManager = require('Foobar/lib/components/app/devicemanager')
-LaunchControl = require(path_name .. 'launchcontrol')
+local LaunchControl = require(path_name .. 'launchcontrol')
 
 local LATCH_CC = 64
 
@@ -425,26 +425,20 @@ function App:init(o)
   ----------------------------------------------------------------------------
   -- Register Parameters, Tracks, Scales, Outputs, etc.
   ----------------------------------------------------------------------------
+ 
   App:register_params()
-
   -- Create the tracks
   params:add_separator('tracks','Tracks')
   for i = 1, 16 do
     self.track[i] = Track:new({id = i})
   end
-
+  print('faff')
   -- Create Shared Components (Scales, Outputs)
   params:add_separator('scales','Scales')
   for i = 0, 3 do
     self.scale[i] = Scale:new({id = i})
   end
-
-  for i = 1, 16 do
-    self.output[i] = Output:new({id = i, type = 'midi', channel = i})
-  end
-  for i = 1, 2 do
-    self.crow.output[i] = Output:new({id = i, type = 'crow', channel = i})
-  end
+ 
 
   ----------------------------------------------------------------------------
   -- Device & Mode Registration
@@ -507,10 +501,10 @@ function App:stop()
   print('App stop')
   self.playing = false
   
-  if params:get('clock_source') > 1 then
-    self.midi_in:stop()
-    self.midi_out:stop()
-  end
+  -- if params:get('clock_source') > 1 then
+  --   self.midi_in:stop()
+  --   -- self.midi_out:stop()
+  -- end
 
   if params:get('clock_source') == 1 then
     if self.clock then
@@ -564,7 +558,7 @@ function App:on_transport(data)
     elseif data.type == "clock" then
       self:on_tick()
     end
-
+   
     for i = 1, #self.track do
       self.track[i]:process_transport(data)
     end
@@ -579,41 +573,6 @@ function App:on_midi(data)
   end
 end
 
---==============================================================================
--- CC Event Handling
---==============================================================================
-function App:on_cc(data)
-  if self.cc_subscribers[data.cc] then
-    for _, func in ipairs(self.cc_subscribers[data.cc]) do
-      func(data)
-    end
-  end
-
-  -- Pass CC event to the current mode (if it defines an on_cc handler)
-  if self.mode[self.current_mode] then
-    self.mode[self.current_mode]:emit('cc', data)
-  end
-
-  self.midi_out:send(data)
-end
-
-function App:subscribe_cc(cc_number, func)
-  if not self.cc_subscribers[cc_number] then
-    self.cc_subscribers[cc_number] = {}
-  end
-  table.insert(self.cc_subscribers[cc_number], func)
-end
-
-function App:unsubscribe_cc(cc_number, func)
-  if self.cc_subscribers[cc_number] then
-    for i, subscriber in ipairs(self.cc_subscribers[cc_number]) do
-      if subscriber == func then
-        table.remove(self.cc_subscribers[cc_number], i)
-        break
-      end
-    end
-  end
-end
 
 --==============================================================================
 -- Crow & Mixer Query/Registration (Device Management)
@@ -642,7 +601,6 @@ function App:register_midi_in(n)
   print('Registering MIDI In Device ' .. n)
   
   table.insert(self.midi_in_cleanup, self.midi_in:on('transport_event', function(data) self:on_transport(data) end))
-  table.insert(self.midi_in_cleanup, self.midi_in:on('cc', function(data) self:on_cc(data) end))
 end
 
 function App:register_midi_out(n)
@@ -763,12 +721,12 @@ end
 --==============================================================================
 function App:register_params()
   local midi_devices = self.device_manager.midi_device_names
-  params:add_group('DEVICES', 8)
+  params:add_group('DEVICES', 5)
   params:add_option("midi_in", "MIDI In", midi_devices, 1)
   params:add_option("midi_out", "MIDI Out", midi_devices, 2)
   params:add_option("mixer", "Mixer", midi_devices, 4)
   params:add_option("midi_grid", "Grid", midi_devices, 3)
-  params:add_option("launchcontrol", "LaunchControl", midi_devices, 4)
+  params:add_option("launchcontrol", "LaunchControl", midi_devices, 9)
   
   params:add_trigger('panic', "Panic")
   params:set_action('panic', function() App:panic() end)
@@ -869,39 +827,7 @@ end
 -- Register Mixer, LaunchControl,
 --==============================================================================
 function App:register_mixer(n)
-  print('Register Mixer (LaunchControl XL) on port ' .. n)
-  LaunchControl:register(n)
-  LaunchControl:set_led()
-
-  self.mixer = midi.connect(n)
-  
-  self.mixer.event = function(msg)
-    
-    local data = midi.to_msg(msg)
-    
-    if data.type == 'cc' then
-      local send = LaunchControl:handle_cc(data)
-      -- Route CC events to tracks that have a non-zero mixer_channel matching the event channel
-      if send then
-        for i, track in ipairs(self.track) do
-          if track.mixer_channel and track.mixer_channel > 0 and send.ch == track.mixer_channel then
-            track:emit('cc_event', send)
-          end
-        end
-      end
-    elseif data.type == 'note_on' or data.type == 'note_off' then
-      local send = LaunchControl:handle_note(data)
-      if send then 
-        -- Optionally, route note_on events to tracks that have matching mixer_channel
-        for i, track in ipairs(self.track) do
-          if track.mixer_channel and track.mixer_channel > 0 and send.ch == track.mixer_channel then
-            track:emit('cc_event', send)
-          end
-        end
-      end
-      LaunchControl:set_led()
-    end
-  end
+  self.device_manager:register_mixer_device(n)
 end
 
 

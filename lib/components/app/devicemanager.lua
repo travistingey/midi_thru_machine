@@ -63,7 +63,6 @@ end
 
 -- Register track trigger on midi device
 function MIDIDevice:add_trigger(track)
-
     for i,t in ipairs(self.triggers) do
         if t.id == track.id then
             table.remove(self.triggers,i)
@@ -91,8 +90,8 @@ function MIDIDevice:send(data)
     if data.type then
         self.manager:emit(self.id, data.type, data)
         if data.type == 'note_on' then
-            -- Create one-time listener that waits for subsequent events on device
-            local note_handle_events = { 'note_on', 'note_off', 'stop', 'kill', 'interrupt' }
+            -- Create one-time listener for note events (excluding transport 'stop')
+            local note_handle_events = { 'note_on', 'note_off', 'kill', 'interrupt' }
             
             local off = {
                 type = 'note_off',
@@ -101,46 +100,42 @@ function MIDIDevice:send(data)
                 vel = data.vel,
                 ch = data.ch,
             }
-
+    
             if data.new_note then
                 off.note = data.new_note
             end
+    
+            local off_sent = false
+            local function last_note_on(next)
+                if off_sent then return end
 
-            -- One-time listener
-            local function last_note_on (next)
-                local remove_event = false
+                if not next then
+                    self.device:send(off)
+                    off_sent = true
 
-                if not next then -- no 'next' note data means kill triggered callback
-                    self.device:send(off)
-                    remove_event = true
-                elseif next.type == 'stop' then
-                    -- If stop is recieved, and a note_off wasn't processed (might cause double note_off events)
-                    print('stop recieved')
-                    self.device:send(off)
-                    remove_event = true
-                elseif next.ch == off.ch then
-                    -- This will trigger for all subsequent note events on the device's channel
-                    if next.note == off.note_id then
-                        self.device:send(off) -- If we recieve duplicate events
-                        remove_event = true
-                    elseif next.type == 'interrupt' and next.note_class == off.note_id % 12 then
+                elseif next.type == 'note_on' then
+                    if next.ch == off.ch and next.note == off.note_id then
                         self.device:send(off)
-                        remove_event = true
-
+                        off_sent = true
                     end
-                
+
+                elseif next.type == 'note_off' then
+                    if next.ch == off.ch and next.note == off.note_id then
+                        off_sent = true
+                    end
+
+                elseif next.type == 'interrupt' and next.ch == off.ch and next.note_class == off.note_id % 12 then
+                    self.device:send(off)
+                    off_sent = true
                 end
 
-                -- Remove listener
-                if remove_event then
-                    for i,event in ipairs(note_handle_events) do
+                if off_sent then
+                    for _, event in ipairs(note_handle_events) do
                         self.manager:off(self.id, event, last_note_on)
                     end
                 end
-            end -- End last_note_on
-            
-            -- Bind on-time listener
-            for i,event in ipairs(note_handle_events) do
+            end
+            for _, event in ipairs(note_handle_events) do
                 self.manager:on(self.id, event, last_note_on)
             end
         end
@@ -154,6 +149,12 @@ function MIDIDevice:send(data)
     if data.new_note then
         send.note = data.new_note
     end
+
+    if send.type == "cc" then
+        send.note = nil
+        send.vel = nil
+    end
+
 
     self.device:send(send)
 end
@@ -213,12 +214,88 @@ end
 
 local MixerDevice = {}
 setmetatable(MixerDevice, {__index = DeviceMethods})
+ 
+function MixerDevice:process_midi(event)
+  if event.type == 'cc' then
+    local send = LaunchControl:handle_cc(event)
+    if send then
+      for i, track in ipairs(self.tracks or {}) do
+        if track.mixer_channel and track.mixer_channel > 0 and send.ch == track.mixer_channel then
+          track:emit('cc_event', send)
+        end
+      end
+    end
+  elseif event.type == 'note_on' or event.type == 'note_off' then
+    local send = LaunchControl:handle_note(event)
+    if send then
+      for i, track in ipairs(self.tracks or {}) do
+        if track.mixer_channel and track.mixer_channel > 0 and send.ch == track.mixer_channel then
+          track:emit('cc_event', send)
+        end
+      end
+    end
+    LaunchControl:set_led()
+  end
+end
+
+function MixerDevice:add_track(track)
+
+    for i,t in ipairs(self.tracks) do
+        if t.id == track.id then
+            table.remove(self.tracks,i)
+        end
+    end
+
+    table.insert(self.tracks,track)
+end
+
+function MixerDevice:remove_track(track)
+    for i,t in ipairs(self.tracks) do
+        if t.id == track.id then
+            table.remove(self.tracks,i)
+        end
+    end
+end
 
 
 
 local VirtualDevice = {}
 setmetatable(VirtualDevice, {__index = DeviceMethods})
 
+
+
+function VirtualDevice:start() end
+
+function VirtualDevice:stop() end
+
+function VirtualDevice:continue() end
+
+function VirtualDevice:clock() end
+
+function VirtualDevice:program_change() end
+
+function VirtualDevice:send(data)
+    self.manager:emit(self.id, 'trigger', data)
+end
+
+-- Register track trigger on midi device
+function VirtualDevice:add_trigger(track)
+    for i,t in ipairs(self.triggers) do
+        if t.id == track.id then
+            table.remove(self.triggers,i)
+        end
+    end
+
+    table.insert(self.triggers, track)
+end
+
+function VirtualDevice:remove_trigger(track)
+    for i,t in ipairs(self.triggers) do
+        if t.id == track.id then
+            table.remove(self.triggers,i)
+        end
+    end
+end
 
 -- DeviceManager:add method to add any device type
 function DeviceManager:add(props, methods)
@@ -251,6 +328,37 @@ function DeviceManager:add(props, methods)
     return new_device
 end
 
+-- Register a Mixer Device
+function DeviceManager:register_mixer_device(port)
+  local mixer_device = midi.connect(port)
+  if not mixer_device or mixer_device.name == 'none' then
+    return -- Skip if no mixer device is connected
+  end
+
+  print("Mixer (LaunchControl XL) on port " .. port)
+  local trimmed_name = util.trim_string_to_width(mixer_device.name, 70)
+  local props = {
+    type = 'mixer',
+    name = mixer_device.name,
+    abbr = 'LCXL',
+    port = port,
+    device = mixer_device,
+    trimmed_name = trimmed_name,
+  }
+  local device = self:add(props, MixerDevice)
+  device.tracks = {}
+
+  mixer_device.event = function(msg)
+    local event = midi.to_msg(msg)
+    device:process_midi(event)
+  end
+
+  -- Store this device as the global mixer reference
+  self.mixer = device
+
+  return device
+end
+
 -- Device Manager:new method to initialize the DeviceManager
 function DeviceManager:new()
     local d = setmetatable({}, self)
@@ -270,15 +378,15 @@ function DeviceManager:new()
     end
 
     print('\n')
-    -- Register Crow device
-    d:register_crow_device()
 
     -- Register Virtual Device
     d:register_virtual_device()
-
-    -- Register Mixer
-    --d:register_mixer_device()
     
+    -- Register Crow device
+    d:register_crow_device()
+
+    
+
     -- Register Grid
     --d:register_grid_device()
 
@@ -371,6 +479,10 @@ function DeviceManager:register_midi_device(port)
 		  self.midi_device_names, -- table to insert to
 		  trimmed_name
 		)
+    table.insert( -- register its name:
+        self.device_names, -- table to insert to
+        trimmed_name
+    )
 
     local props = {
         type = 'midi',
@@ -417,20 +529,20 @@ function DeviceManager:register_virtual_device()
 
     local props = {
         type = 'virtual',
-        name = 'Virtual Device'
+        name = 'Virtual Device',
+        abbr = 'VIRTUAL',
+        trimmed_name = 'Virtual'
     }
 
-    local new_device = self:add(props, VirtualDevice)
-    
-    self.virtual = new_device
+    local device = self:add(props, VirtualDevice)
+    self.virtual = device
+    device.triggers = {} 
 
-    self:on(new_device.id, 'trigger', function(event)
-        print('Virtual Device Triggered: ' .. event.track.id)
-        
-        if event and event.callback then
-            event.callback(event.data)
-        end
-    end)
+    table.insert( -- register its name:
+        self.midi_device_names, -- table to insert to
+        props.trimmed_name
+    )
+
 end
 
 -- Register a Crow Device

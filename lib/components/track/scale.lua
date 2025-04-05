@@ -61,7 +61,7 @@ end
 
 function Scale:register_params()
 	local scale = 'scale_' .. self.id .. '_'
-	params:add_group('Scale ' .. self.id, 6 ) 
+	params:add_group('Scale ' .. self.id, 5 ) 
 
 	params:add_number(scale .. 'bits', 'Bits',0,4095,0)
 	params:set_action(scale .. 'bits',function(bits)
@@ -162,13 +162,6 @@ function Scale:register_params()
 		
 	end
 
-	params:add_number(scale .. 'lock_cc', 'Lock CC',0,127,64)
-	params:set_action(scale .. 'lock_cc', function(cc)
-		App:unsubscribe_cc(self.lock_cc, lock_event)
-		App:subscribe_cc(cc, lock_event)
-		self.lock_cc = cc
-		self:emit('scale_changed', 'lock_cc')
-	end)
 end
 
 

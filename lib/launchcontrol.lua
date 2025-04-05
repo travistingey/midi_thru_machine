@@ -60,7 +60,7 @@ CC_MAP['middle_encoders'] = {29,30,31,32,33,34,35,36}
 CC_MAP['bottom_encoders'] = {49,50,51,52,53,54,55,56}
 CC_MAP['faders'] = {77,78,79,80,81,82,83,84}
 
-CC_MAP[SEND] = {0,1,2,3,4,5,6,7}
+CC_MAP[SEND] = {1,2,3,4,5,6,7,8}
 CC_MAP[DEVICE] = {100,101,102,103,104,105,106,107}
 CC_MAP[SOLO] = {58,59,60,61,62,63,64,65}
 CC_MAP[MUTE] = {37,38,39,40,41,42,43,44}
@@ -108,7 +108,9 @@ function LaunchControl:handle_note(data)
                 local send = {
                     type = 'cc',
                     val = state and 127 or 0,
-                    ch = self.main_channel
+                    ch = self.main_channel,
+                    send_input = self.channel_sends[self.main_channel].input,
+                    send_output = self.channel_sends[self.main_channel].output
                 }
 
                 send.cc = self.cc_map[SEND][control.index]
@@ -126,16 +128,21 @@ function LaunchControl:handle_note(data)
 
                 local send = {
                     type = 'cc',
-                    val = state and 127 or 0,
+                    val = state and 127 or 0
                 }
                 
                 if self.state == DEVICE then
                     send.ch = self.channel
+                    send.send_input = self.channel_sends[self.channel].input
+                    send.send_output = self.channel_sends[self.channel].output
                 else
                     send.ch = self.main_channel
+                    send.send_input = self.channel_sends[self.main_channel].input
+                    send.send_output = self.channel_sends[self.main_channel].output
                 end
 
                 send.cc = self.cc_map[self.state][control.index]
+                
                 
                 return send
 
@@ -313,9 +320,7 @@ function LaunchControl:handle_cc(data)
     if target == nil or last == nil or data.val == target or last == target then
         self.channel_values[current_channel][data.cc] = data.val
         self:set_led()
-        if self.channel_sends[current_channel].output == true or self.channel_sends[current_channel].input == true then
-            return { type = 'cc', cc = data.cc, val = data.val, ch = self.channel, send_input = self.channel_sends[current_channel].input, send_output = self.channel_sends[current_channel].output}
-        end
+        return { type = 'cc', cc = data.cc, val = data.val, ch = self.channel, send_input = self.channel_sends[current_channel].input, send_output = self.channel_sends[current_channel].output}
     else
         self:set_led()
         return
