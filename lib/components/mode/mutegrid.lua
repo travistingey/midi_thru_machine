@@ -28,7 +28,7 @@ function MuteGrid:enable_event()
     -- for each track find the triggers matching the base track
     if(self.base.input_device) then
         for i,track in ipairs(self.base.input_device.triggers) do
-            if track.midi_in == self.base.midi_in then
+            if track.midi_in == self.base.midi_in and track.triggered then
                 self.triggers[track.trigger] = track
 
                 table.insert(self.cleanup_functions, track:on('midi_trigger', function(data)
@@ -47,6 +47,7 @@ end
 
 function MuteGrid:midi_event (mute, data)
     if data and data.note then
+        
         local note = data.note
         local grid = self.grid
         local target = grid:index_to_grid(note + 1)
@@ -82,11 +83,11 @@ end
 
 function MuteGrid:grid_event (mute, data)
   local grid = self.grid
+   
     if data.type == 'pad' and data.state then
 
         local note = grid:grid_to_index(data) - 1
         local isTrigger = false
-        
         -- Set Mute state
         if self.triggers[note] then
             isTrigger = true
@@ -109,7 +110,18 @@ function MuteGrid:grid_event (mute, data)
 
             if state then
                 grid.led[data.x][data.y] = Grid.rainbow_off[mute.track.id]
-                mute.track.input_device:emit('interrupt',{note = note, type='interrupt'})
+                
+                print('muted noted: ' .. note)
+
+                print('current triggers on track:')
+                tab.print(self.triggers)
+                
+                print('muting notes on track:')
+                tab.print(mute.track)
+
+                print('sending interrupt to output device:')
+                tab.print(mute.track.output_device)
+                mute.track.output_device:emit('interrupt', { note = note, ch = mute.track.midi_in, note_id = note, type = 'interrupt' })
             else
                 grid.led[data.x][data.y] = 0
             end

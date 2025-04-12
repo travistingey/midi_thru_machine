@@ -11,7 +11,7 @@ function PresetSeq:set(o)
     self.active = true
     self.select = { type='track', value = 1}
     self.index = nil
-    self.component = 'auto'  -- Reference to the Auto component
+    self.component = 'auto'
 
     self.lanes = { 'track', 'scale', 'cc' }  -- List of lanes
     self.selected_lane_index = 1                -- Index of the selected lane
@@ -240,8 +240,7 @@ end
 function PresetSeq:set_grid(component)
     if self.mode == nil then return end
     local grid = self.grid
-    local auto = component  -- 'component' is the Auto component
-
+    local auto = self:get_component()  -- 'component' is the Auto component
     local BLINK = 1
     local VALUE = (1 << 1)
     local LOOP_END = (1 << 2)

@@ -21,7 +21,7 @@ local YELLOW = 62
 local GREEN_LOW = 28
 local GREEN_HIGH = 60
 
-local TRACKCOUNT = 8
+local TRACKCOUNT = 16
 
 local NOTE_MAP = {}
 
@@ -55,16 +55,70 @@ NOTE_MAP[126] = {type='solo'}
 NOTE_MAP[127] = {type='arm'}
 
 local CC_MAP = {}
-CC_MAP['top_encoders'] = {13,14,15,16,17,18,19,20}
-CC_MAP['middle_encoders'] = {29,30,31,32,33,34,35,36}
-CC_MAP['bottom_encoders'] = {49,50,51,52,53,54,55,56}
-CC_MAP['faders'] = {77,78,79,80,81,82,83,84}
 
-CC_MAP[SEND] = {1,2,3,4,5,6,7,8}
-CC_MAP[DEVICE] = {100,101,102,103,104,105,106,107}
-CC_MAP[SOLO] = {58,59,60,61,62,63,64,65}
-CC_MAP[MUTE] = {37,38,39,40,41,42,43,44}
-CC_MAP[ARM] = {86,87,88,89,90,91,92,93}
+
+-- Main Channel CC (Fixed)
+CC_MAP[SEND] = {81,82,83,84,85,86,87,88}
+CC_MAP[SOLO] = {89,90,91,92,93,94,95,96}
+CC_MAP[MUTE] = {97,98,99,100,101,102,103,104}
+CC_MAP[ARM] = {105,106,107,108,109,110,111,112}
+
+-- Channel CC
+CC_MAP['top_encoders'] = {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16} 
+CC_MAP['middle_encoders'] = {17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32} 
+CC_MAP['bottom_encoders'] = {33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48} 
+CC_MAP['faders'] = {49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64}
+CC_MAP[DEVICE] = {65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80}
+
+local CONTROL_MAP = {
+    [13] = { index = 1, type = 'top_encoders'},
+    [14] = { index = 2, type = 'top_encoders'},
+    [15] = { index = 3, type = 'top_encoders'},
+    [16] = { index = 4, type = 'top_encoders'},
+    [17] = { index = 5, type = 'top_encoders'},
+    [18] = { index = 6, type = 'top_encoders'},
+    [19] = { index = 7, type = 'top_encoders'},
+    [20] = { index = 8, type = 'top_encoders'},
+    [29] = { index = 1, type = 'middle_encoders'},
+    [30] = { index = 2, type = 'middle_encoders'},
+    [31] = { index = 3, type = 'middle_encoders'},
+    [32] = { index = 4, type = 'middle_encoders'},
+    [33] = { index = 5, type = 'middle_encoders'},
+    [34] = { index = 6, type = 'middle_encoders'},
+    [35] = { index = 7, type = 'middle_encoders'},
+    [36] = { index = 8, type = 'middle_encoders'}, 
+    [49] = { index = 1, type = 'bottom_encoders'},
+    [50] = { index = 2, type = 'bottom_encoders'},
+    [51] = { index = 3, type = 'bottom_encoders'},
+    [52] = { index = 4, type = 'bottom_encoders'},
+    [53] = { index = 5, type = 'bottom_encoders'},
+    [54] = { index = 6, type = 'bottom_encoders'},
+    [55] = { index = 7, type = 'bottom_encoders'},
+    [56] = { index = 8, type = 'bottom_encoders'},
+    [77] = { index = 1, type = 'faders'},
+    [78] = { index = 2, type = 'faders'},
+    [79] = { index = 3, type = 'faders'},
+    [80] = { index = 4, type = 'faders'},
+    [81] = { index = 5, type = 'faders'},
+    [82] = { index = 6, type = 'faders'},
+    [83] = { index = 7, type = 'faders'},
+    [84] = { index = 8, type = 'faders'}
+}
+
+local REVERSE_CONTROL_MAP = {}
+
+-- Build the reverse lookup for each group in CONTROL_MAP
+for physical_cc, info in pairs(CONTROL_MAP) do
+  local group = info.type
+  local base_index = info.index
+  -- For both track_select 1 (offset 0) and 2 (offset 8)
+  for offset = 0, 8, 8 do
+    local mapped_cc = CC_MAP[group][base_index + offset]
+    if mapped_cc then
+        REVERSE_CONTROL_MAP[mapped_cc] = physical_cc
+    end
+  end
+end
 
 local LaunchControl = {
     device = {},
@@ -75,6 +129,8 @@ local LaunchControl = {
     channel_values = {},
     channel_sends = {},
     cc_map = CC_MAP,
+    control_map = CONTROL_MAP,
+    track_select = 1,
     note_map = NOTE_MAP,
     main_channel = 1,
     channel = 1,
@@ -88,7 +144,6 @@ end
 
 for ch = 1, TRACKCOUNT do
     LaunchControl.channel_values[ch] = {}
-    LaunchControl.channel_sends[ch] = {output = true, input = false }
 end 
 
 
@@ -98,9 +153,11 @@ function LaunchControl:handle_note(data)
     if self.note_map[data.note] then
         
         local control = self.note_map[data.note]
+        local track_offset = (self.track_select - 1) * 8
         
         if data.type == 'note_on' then
             self.down[control.type] = true
+
             if control.type == 'top_channel' then
                 local state = not self.track[control.index][SEND]
                 self.track[control.index][SEND] = state
@@ -109,8 +166,6 @@ function LaunchControl:handle_note(data)
                     type = 'cc',
                     val = state and 127 or 0,
                     ch = self.main_channel,
-                    send_input = self.channel_sends[self.main_channel].input,
-                    send_output = self.channel_sends[self.main_channel].output
                 }
 
                 send.cc = self.cc_map[SEND][control.index]
@@ -119,31 +174,28 @@ function LaunchControl:handle_note(data)
 
             elseif control.type == 'bottom_channel' then
                 if self.down['device'] then
-                    self:set_channel(control.index)
+                    self:set_channel(control.index + track_offset)
                     return
                 end
 
-                local state = not self.track[control.index][self.state]
-                self.track[control.index][self.state] = state
-
                 local send = {
-                    type = 'cc',
-                    val = state and 127 or 0
+                    type = 'cc'
                 }
                 
                 if self.state == DEVICE then
+                    local state = not self.track[control.index + track_offset][self.state]
+                    self.track[control.index  + track_offset][self.state] = state
                     send.ch = self.channel
-                    send.send_input = self.channel_sends[self.channel].input
-                    send.send_output = self.channel_sends[self.channel].output
+                    send.cc = self.cc_map[DEVICE][control.index  + track_offset]
+                    send.val =  state and 127 or 0
                 else
+                    local state = not self.track[control.index][self.state]
+                    self.track[control.index][self.state] = state
                     send.ch = self.main_channel
-                    send.send_input = self.channel_sends[self.main_channel].input
-                    send.send_output = self.channel_sends[self.main_channel].output
+                    send.cc = self.cc_map[self.state][control.index]
+                    send.val =  state and 127 or 0
                 end
 
-                send.cc = self.cc_map[self.state][control.index]
-                
-                
                 return send
 
             elseif control.type == 'device' then 
@@ -154,16 +206,16 @@ function LaunchControl:handle_note(data)
                 self.state = SOLO
             elseif control.type == 'arm' then
                 self.state = ARM
+            elseif control.type == 'left' then
+                self:set_channel(1)
+                self:set_track(1)
+            elseif control.type == 'right' then
+                self:set_channel(2)
+                self:set_track(1)
             elseif control.type == 'up' then
-                local state = self.channel_sends[self.channel].output
-                self.channel_sends[self.channel].output = not state
+                self:set_track(1)
             elseif control.type == 'down' then
-                local state = self.channel_sends[self.channel].input
-                self.channel_sends[self.channel].input = not state
-            elseif control.type == 'left' and self.channel > 1 then
-                self:set_channel(self.channel - 1)
-            elseif control.type == 'right' and self.channel < TRACKCOUNT then
-                self:set_channel(self.channel + 1)
+                self:set_track(2)
             end
         else
             self.down[control.type] = false
@@ -174,9 +226,11 @@ end
 function LaunchControl:set_led()
     local t = self.track
     local s = self.state
-    local HIGH = YELLOW
-    local LOW = YELLOW
+    local HIGH = RED_LOW
+    local LOW = RED_LOW
     
+    local track_offset = (self.track_select - 1) * 8
+
     if s == MUTE then
         HIGH = 0
     end
@@ -187,37 +241,53 @@ function LaunchControl:set_led()
         HIGH = RED_HIGH
     end
 
-    
-
     -- Compute LED states for encoders and faders based on soft takeover
     local top_encoder_leds = {}
-    for i, cc in ipairs(self.cc_map.top_encoders) do
-        if self.last_values[cc] == nil or self.channel_values[self.channel][cc] == nil then
+    for i = 1, 8 do
+        local cc = self.cc_map.top_encoders[i + track_offset]
+        local orig_cc = REVERSE_CONTROL_MAP[cc] or cc
+        local last = self.last_values[orig_cc]
+        local target = self.channel_values[self.channel][cc]
+        if last == nil or target == nil then
             top_encoder_leds[i] = 0
-        elseif self.last_values[cc] ~= self.channel_values[self.channel][cc] then
-            top_encoder_leds[i] = AMBER_HIGH
+        elseif last ~= target then
+            top_encoder_leds[i] = RED_LOW
+        elseif last > target then
+            top_encoder_leds[i] = AMBER_LOW
         else
             top_encoder_leds[i] = GREEN_HIGH
         end
     end
 
     local middle_encoder_leds = {}
-    for i, cc in ipairs(self.cc_map.middle_encoders) do
-        if self.last_values[cc] == nil or self.channel_values[self.channel][cc] == nil then
+    for i = 1, 8 do
+        local cc = self.cc_map.middle_encoders[i + track_offset]
+        local orig_cc = REVERSE_CONTROL_MAP[cc] or cc
+        local last = self.last_values[orig_cc]
+        local target = self.channel_values[self.channel][cc]
+        if last == nil or target == nil then
             middle_encoder_leds[i] = 0
-        elseif self.last_values[cc] ~= self.channel_values[self.channel][cc] then
-            middle_encoder_leds[i] = AMBER_HIGH
+        elseif last < target then
+            middle_encoder_leds[i] = RED_LOW
+        elseif last > target then
+            middle_encoder_leds[i] = AMBER_LOW
         else
             middle_encoder_leds[i] = GREEN_HIGH
         end
     end
 
     local bottom_encoder_leds = {}
-    for i, cc in ipairs(self.cc_map.bottom_encoders) do
-        if self.last_values[cc] == nil or self.channel_values[self.channel][cc] == nil then
+    for i = 1, 8 do
+        local cc = self.cc_map.bottom_encoders[i + track_offset]
+        local orig_cc = REVERSE_CONTROL_MAP[cc] or cc
+        local last = self.last_values[orig_cc]
+        local target = self.channel_values[self.channel][cc]
+        if last == nil or target == nil then
             bottom_encoder_leds[i] = 0
-        elseif self.last_values[cc] ~= self.channel_values[self.channel][cc] then
-            bottom_encoder_leds[i] = AMBER_HIGH
+        elseif last < target then
+            bottom_encoder_leds[i] = RED_LOW
+        elseif last > target then
+            bottom_encoder_leds[i] = AMBER_LOW
         else
             bottom_encoder_leds[i] = GREEN_HIGH
         end
@@ -225,9 +295,14 @@ function LaunchControl:set_led()
 
     -- For faders, if soft takeover is active, show RED_HIGH; otherwise, normal (GREEN_HIGH)
     local top_channel_leds = {}
-    for i, cc in ipairs(self.cc_map.faders) do
-        if self.last_values[cc] ~= nil and self.channel_values[self.channel][cc] ~= nil and self.last_values[cc] < self.channel_values[self.channel][cc] then
-            top_channel_leds[i] = AMBER_HIGH
+    for i = 1, 8 do
+        local cc = self.cc_map.faders[i + track_offset]
+        local orig_cc = REVERSE_CONTROL_MAP[cc] or cc
+        local last = self.last_values[orig_cc]
+
+        
+        if last ~= nil and self.channel_values[self.channel][cc] ~= nil and last < self.channel_values[self.channel][cc] then
+            top_channel_leds[i] = t[i][SEND] and AMBER_HIGH or AMBER_LOW
         else
             top_channel_leds[i] = (t[i][SEND] and GREEN_HIGH or 0)
         end
@@ -236,27 +311,29 @@ function LaunchControl:set_led()
     -- LED feedback for bottom channel buttons (unchanged from before)
     local bottom_channel_leds = {}
     for i = 1, 8 do
+        local track_index = i + track_offset
+        local cc = CC_MAP['faders'][track_index]
+        local orig_cc = REVERSE_CONTROL_MAP[cc] or cc
+        local last = self.last_values[orig_cc]
 
-        
-        local cc = CC_MAP['faders'][i]
         if self.down['device'] then
             bottom_channel_leds[i] = 0
-
             if self.channel == i then
                 bottom_channel_leds[i] = RED_HIGH
             end
-        elseif self.last_values[cc] == nil or self.channel_values[self.channel][cc] == nil then
+        elseif last == nil or self.channel_values[self.channel][cc] == nil then
             bottom_channel_leds[i] = 0
-        elseif self.last_values[cc] > self.channel_values[self.channel][cc] then
-            bottom_channel_leds[i] = AMBER_HIGH
-        elseif t[i][SOLO] then 
-            bottom_channel_leds[i] = GREEN_HIGH
-        elseif t[i][MUTE] then
+        elseif last > self.channel_values[self.channel][cc] then
+            local state = t[track_index][SOLO] or not t[track_index][MUTE] or t[track_index][DEVICE] or t[track_index][ARM]
+            bottom_channel_leds[i] = state and AMBER_HIGH or AMBER_LOW
+        elseif t[track_index][SOLO] then 
+            bottom_channel_leds[i] = t[track_index][ARM] and RED_HIGH or GREEN_HIGH
+        elseif t[track_index][MUTE] then
             bottom_channel_leds[i] = 0
-        elseif t[i][DEVICE] then
+        elseif t[track_index][DEVICE] then
             bottom_channel_leds[i] = YELLOW
-        elseif t[i][ARM] then
-            bottom_channel_leds[i] = RED_HIGH
+        elseif t[track_index][ARM] then
+            bottom_channel_leds[i] = RED_LOW
         else
             bottom_channel_leds[i] = GREEN_LOW
         end
@@ -274,10 +351,10 @@ function LaunchControl:set_led()
         -- Bottom row: bottom_encoders
         16, bottom_encoder_leds[1], 17, bottom_encoder_leds[2], 18, bottom_encoder_leds[3], 19, bottom_encoder_leds[4],
         20, bottom_encoder_leds[5], 21, bottom_encoder_leds[6], 22, bottom_encoder_leds[7], 23, bottom_encoder_leds[8],
-        -- Top channel buttons now used for fader LED feedback
+        -- Top channel buttons  used for fader LED feedback
         24, top_channel_leds[1], 25, top_channel_leds[2], 26, top_channel_leds[3], 27, top_channel_leds[4],
         28, top_channel_leds[5], 29, top_channel_leds[6], 30, top_channel_leds[7], 31, top_channel_leds[8],
-        -- Bottom channel buttons (unchanged)
+        -- Bottom channel buttons 
         32, bottom_channel_leds[1], 33, bottom_channel_leds[2], 34, bottom_channel_leds[3], 35, bottom_channel_leds[4],
         36, bottom_channel_leds[5], 37, bottom_channel_leds[6], 38, bottom_channel_leds[7], 39, bottom_channel_leds[8],
         -- Device and other buttons
@@ -285,13 +362,12 @@ function LaunchControl:set_led()
         41, (self.state == MUTE and GREEN_HIGH or 0),
         42, (self.state == SOLO and GREEN_HIGH or 0),
         43, (self.state == ARM and GREEN_HIGH or 0),
-        44, (self.channel_sends[self.channel].output and RED_HIGH or 0),
-        45, (self.channel_sends[self.channel].input and RED_HIGH or 0),
-        46, (self.channel > 1 and RED_HIGH or 0),
-        47, (self.channel < TRACKCOUNT and RED_HIGH or 0),
+        44, (self.track_select == 1  and RED_HIGH or 0),
+        45, (self.track_select == 2  and RED_HIGH or 0),
+        46, (self.channel == 1 and RED_HIGH or 0),
+        47, (self.channel == 2 and RED_HIGH or 0),
         247
     }
-
     self.device:send(sysex_message)
 end
 
@@ -306,6 +382,11 @@ function LaunchControl:set_channel(new_channel)
     self:set_led()  -- update LED feedback after channel change
 end
 
+function LaunchControl:set_track(track)
+    self.track_select = track
+    self:set_led()  -- update LED feedback after channel change
+end
+
 -- Handle incoming CC messages with soft takeover logic
 -- Updates the last_values table with the physical control's value
 -- Compares against the stored target in channel_values for the active channel
@@ -313,14 +394,18 @@ end
 function LaunchControl:handle_cc(data)
     
     local current_channel = self.channel
-    local target = self.channel_values[current_channel][data.cc]
+    local control = CONTROL_MAP[data.cc]
+    local offset = (self.track_select - 1) * 8
+    local cc = CC_MAP[control.type][control.index + offset]
+
+    local target = self.channel_values[current_channel][cc]
     local last = self.last_values[data.cc]  
     self.last_values[data.cc] = data.val
     
     if target == nil or last == nil or data.val == target or last == target then
-        self.channel_values[current_channel][data.cc] = data.val
+        self.channel_values[current_channel][cc] = data.val
         self:set_led()
-        return { type = 'cc', cc = data.cc, val = data.val, ch = self.channel, send_input = self.channel_sends[current_channel].input, send_output = self.channel_sends[current_channel].output}
+        return { type = 'cc', cc = cc, val = data.val, ch = self.channel}
     else
         self:set_led()
         return

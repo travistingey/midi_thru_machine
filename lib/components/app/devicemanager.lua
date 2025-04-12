@@ -124,7 +124,11 @@ function MIDIDevice:send(data)
                         off_sent = true
                     end
 
-                elseif next.type == 'interrupt' and next.ch == off.ch and next.note_class == off.note_id % 12 then
+                elseif next.type == 'kill' then
+                    self.device:send(off)
+                    off_sent = true
+
+                elseif next.type == 'interrupt' and next.ch == off.ch and ((next.note_id and next.note_id == off.note_id) or (not next.note_id and next.note_class and next.note_class == off.note_id % 12)) then
                     self.device:send(off)
                     off_sent = true
                 end
@@ -393,6 +397,19 @@ function DeviceManager:new()
     d.none = d:add({id = 0})
     
     return d
+end
+
+function DeviceManager:reportEvents(device_id)
+    local report = {}
+    local deviceEvents = self.event_listeners and self.event_listeners[device_id]
+    if deviceEvents then
+        for event_name, listeners in pairs(deviceEvents) do
+            report[event_name] = #listeners
+        end
+    end
+    for event_name, count in pairs(report) do
+        print("Event '" .. event_name .. "' has " .. count .. " listener(s) queued.")
+    end
 end
 
 -- Event Management Methods

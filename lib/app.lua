@@ -432,7 +432,7 @@ function App:init(o)
   for i = 1, 16 do
     self.track[i] = Track:new({id = i})
   end
-  print('faff')
+
   -- Create Shared Components (Scales, Outputs)
   params:add_separator('scales','Scales')
   for i = 0, 3 do

@@ -120,7 +120,7 @@ function ModeComponent:disable()
 
     if self.component and self.track then
         local component = self:get_component()
-        print('removed old on_ methods modecomponent L:123')
+        -- print('removed old on_ methods modecomponent L:123')
         -- component.on_midi = nil
         -- component.on_transport = nil
 

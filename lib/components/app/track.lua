@@ -38,16 +38,14 @@ function Track:new(o)
 	self.build_chain(o)
 	
 	o:on('cc_event',function(data)
-		if data.send_input and o.input_device then
-			data.ch = o.midi_in
-			o.input_device:send(data)
+		if o.output_device  then
+			local send = {}
+			for key,prop in pairs(data) do
+				send[key]= prop
+			end
+			send.ch = o.midi_out
+			o.output_device:send(send)
 		end
-
-		if data.send_output and o.output_device  then
-			data.ch = o.midi_out
-			o.output_device:send(data)
-		end
-
 	end)
 
 	return o

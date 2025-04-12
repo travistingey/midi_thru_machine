@@ -40,12 +40,12 @@ function Mute:set(o)
 end
 
 function Mute:midi_event(data)
-    
+   
     if data.note ~= nil then
         local grid = self.grid      
         local note = data.note
         local state = self.state[note] 
-        
+
         if self.track.triggered then
            state = self.active
         end
