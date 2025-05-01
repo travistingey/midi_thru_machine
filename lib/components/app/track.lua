@@ -39,12 +39,7 @@ function Track:new(o)
 	
 	o:on('cc_event',function(data)
 		if o.output_device  then
-			local send = {}
-			for key,prop in pairs(data) do
-				send[key]= prop
-			end
-			send.ch = o.midi_out
-			o.output_device:send(send)
+			o.output_device:send(data)
 		end
 	end)
 
@@ -194,11 +189,8 @@ function Track:set(o)
 		self.midi_thru = (d>0)
 	end)
 
-	 -- Mixer Channel: 0 means no mixer CC listener; non-zero values (1-16) specify the mixer channel to listen on
-	 self.mixer_channel = o.mixer_channel or 0
-	 params:add_number(track .. 'mixer_channel', 'Mixer Channel', 0, 16, self.mixer_channel)
-	 params:set_action(track .. 'mixer_channel', function(d)
-		 self.mixer_channel = d
+	 params:add_binary(track .. 'mixer', 'Mixer', 'toggle', 0)
+	 params:set_action(track .. 'mixer', function(d)
 		 if d == 0 then
 			App.device_manager.mixer:remove_track(self)
 		 else
@@ -290,25 +282,31 @@ function Track:set(o)
 	end)
 	
 
-	local interrupt_notes = function(note)
-		self.output_device:emit('interrupt', {type='interrupt', note_class=note, ch=self.midi_out})
+	self.scale_interrupt = function()
+		self.output_device:emit('interrupt', {type='interrupt_scale', scale=self.scale, ch=self.midi_out})
 	end
 
 	params:set_action(track .. 'scale_select', function(d) 
 		App.settings[track .. 'scale_select'] = d
+
 		self:kill()
+
 		local last = self.scale_select
 		
-		if self.scale_select ~= 0 then
-			self.scale:off('interrupt', interrupt_notes)
+		if self.scale then
+			self.scale:off('interrupt', self.scale_interrupt)
+			self.scale:off('scale_changed', self.scale_interrupt)
 		end
 
 		self.scale = App.scale[d]
 		self.scale_select = d 
-		
-		if self.scale_select ~= 0 then
-			self.scale:on('interrupt', interrupt_notes)
+
+		self.scale_interrupt = function()
+			self.output_device:emit('interrupt', {type='interrupt_scale', scale=self.scale, ch=self.midi_out})
 		end
+
+		self.scale:on('interrupt', self.scale_interrupt)
+		self.scale:on('scale_changed', self.scale_interrupt)
 
 		self:build_chain()
 	end)
@@ -564,8 +562,8 @@ end
 
 -- Builds multiple component chains in single call.
 function Track:build_chain()
-	local chain = {self.auto, self.input, self.scale, self.seq, self.mute, self.output} 
-	local send_input = {self.seq, self.scale, self.mute, self.output} 
+	local chain = {self.auto, self.input, self.scale, self.mute, self.output} 
+	local send_input = {self.scale, self.mute, self.output} 
 	local pre_scale = {self.scale, self.mute, self.output} 
 	local send =  {self.mute, self.output}
 
@@ -581,7 +579,7 @@ end
 -----------
 function Track:kill()
 	if self.output_device then
-		self.output_device:emit('kill')
+		self.output_device:emit('kill',{type='kill'})
 	end
 	self.note_on = {}
 end

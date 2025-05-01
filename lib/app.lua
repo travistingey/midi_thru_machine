@@ -406,10 +406,9 @@ function App:init(o)
   -- Instantiate Device-Related Modules (MIDI, Grid, etc.)
   ----------------------------------------------------------------------------
   self.midi_in   = {}
-  self.midi_out  = {}
   self.midi_grid = {}  -- NOTE: must use Launch Pad Device 2
   self.launchcontrol = {}
-  self.mixer     = {}
+  self.mixer = {}
 
   -- Crow Setup (e.g. for external CV/gate control)
   self.crow = self.device_manager.crow
@@ -444,7 +443,6 @@ function App:init(o)
   -- Device & Mode Registration
   ----------------------------------------------------------------------------
   App:register_midi_in(1)
-  App:register_midi_out(2)
   App:register_midi_grid(3)
   App:register_launchcontrol(9)
   App:register_mixer(4)
@@ -466,15 +464,12 @@ function App:start(continue)
   self.start_time = clock.get_beats()
   self.last_time  = clock.get_beats()
 
-  local event
-  if continue then
-    event = { type = 'continue' }
-    self.midi_in:continue()
-    self.midi_out:continue()
-  else
-    event = { type = 'start' }
-    self.midi_in:start()
-    self.midi_out:start()
+  for i = 1, #self.track do
+    if continue then
+      self.track[i].output_device:start()
+    else
+      self.track[i].output_device:continue()
+    end
   end
 
   ----------------------------------------------------------------------------
@@ -488,30 +483,20 @@ function App:start(continue)
         App.screen_dirty = true
       end
     end)
-    
-    for i = 1, #self.track do
-      self.track[i]:process_transport(event)
-    end
-  else
-    self.midi_out:clock()
   end
 end
 
 function App:stop()
   print('App stop')
   self.playing = false
-  
-  -- if params:get('clock_source') > 1 then
-  --   self.midi_in:stop()
-  --   -- self.midi_out:stop()
-  -- end
+
+  for i = 1, #self.track do
+    self.track[i].output_device:stop()
+  end
 
   if params:get('clock_source') == 1 then
     if self.clock then
       clock.cancel(self.clock)
-    end
-    for i = 1, #self.track do
-      self.track[i]:process_transport({ type = 'stop' })
     end
   end
 end
@@ -534,14 +519,6 @@ end
 function App:on_tick()
   self.last_time = clock.get_beats()
   self.tick = self.tick + 1
-  self.midi_out:clock()
-
-  if params:get('clock_source') == 1 then
-    -- Dispatch clock events to all tracks
-    for i = 1, #self.track do
-      self.track[i]:process_transport({ type = 'clock' })
-    end
-  end
 end
 
 --==============================================================================
@@ -577,9 +554,6 @@ end
 --==============================================================================
 -- Crow & Mixer Query/Registration (Device Management)
 --==============================================================================
-function App:crow_query(i)
-  crow.send('input[' .. i .. '].query()')
-end
 
 function App:register_launchcontrol(n)
   print('Register Launch Control on port ' .. n)
@@ -601,11 +575,6 @@ function App:register_midi_in(n)
   print('Registering MIDI In Device ' .. n)
   
   table.insert(self.midi_in_cleanup, self.midi_in:on('transport_event', function(data) self:on_transport(data) end))
-end
-
-function App:register_midi_out(n)
-  print('Register MIDI Out Device ' .. n)
-  self.midi_out = self.device_manager:get(n)
 end
 
 function App:register_midi_grid(n)
@@ -701,29 +670,13 @@ function App:handle_key(k, z)
   end
 end
 
-function App:panic()
-  for i = 1, 4 do
-    crow.output[i].volts = 0
-  end
-  clock.run(function()
-    for c = 1, 16 do
-      for i = 0, 127 do
-        local off = { note = i, type = 'note_off', ch = c, vel = 0 }
-        App.midi_out:send(off)
-        clock.sleep(.01)
-      end
-    end
-  end)
-end
-
 --==============================================================================
 -- Parameter Registration and Song Settings
 --==============================================================================
 function App:register_params()
   local midi_devices = self.device_manager.midi_device_names
   params:add_group('DEVICES', 5)
-  params:add_option("midi_in", "MIDI In", midi_devices, 1)
-  params:add_option("midi_out", "MIDI Out", midi_devices, 2)
+  params:add_option("midi_in", "Clock Input", midi_devices, 1)
   params:add_option("mixer", "Mixer", midi_devices, 4)
   params:add_option("midi_grid", "Grid", midi_devices, 3)
   params:add_option("launchcontrol", "LaunchControl", midi_devices, 9)
@@ -731,7 +684,6 @@ function App:register_params()
   params:add_trigger('panic', "Panic")
   params:set_action('panic', function() App:panic() end)
   params:set_action("midi_in", function(x) App:register_midi_in(x) end)
-  params:set_action("midi_out", function(x) App:register_midi_out(x) end)
   params:set_action("midi_grid", function(x) App:register_midi_grid(x) end)
   params:set_action("mixer", function(x) App:register_mixer(x) end)
   params:set_action("launchcontrol", function(x) App:register_launchcontrol(x) end)

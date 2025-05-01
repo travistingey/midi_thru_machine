@@ -42,6 +42,11 @@ Output.types['midi'] = {
 
 			return data
 		end
+	end,
+	transport_event = function(s,data,track)
+		if track.output_device ~= App.midi_in then
+			track.output_device:send(data)
+		end
 	end
 }
 
@@ -49,10 +54,15 @@ Output.types['crow'] = {
 	props = {},
 	midi_event = function(s,data, track)
 		if data ~= nil and data.note ~= nil then
+			
+			if data.new_note and data.type == 'note_on' then
+				data.note = data.new_note
+			end
+
 			local volts = (data.note - track.note_range_lower) / 12
 			local voct = 1
 			local gate = 2
-			print('TODO!!! This whole crow business is broken Line 56, Output.lua')
+			
 			s.channel = 1
 			if s.channel == 1 then
 				voct = 1
@@ -64,14 +74,10 @@ Output.types['crow'] = {
 
 			local action = '{to(dyn{note = '.. volts .. '},dyn{slew = ' .. track.slew .. '})}'
 			local dyn = {note = volts}
-			App.crow:send({action = action, dyn = dyn, ch = voct})
 
-			if data.index then
-				local step = 5/11
-				App.crow:send({volts = (data.index-1) * step + step / 2, ch = 3})
-			end
 
 			if data.type == 'note_on' then
+				App.crow:send({action = action, dyn = dyn, ch = voct})
 				App.crow:send({volts = 5, ch = gate})
 			elseif data.type == 'note_off' then
 				App.crow:send({volts = 0, ch = gate})

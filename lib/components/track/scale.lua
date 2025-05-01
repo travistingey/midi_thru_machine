@@ -79,7 +79,6 @@ function Scale:register_params()
 		App.settings[scale .. 'root'] = root
 		self.root = root
 
-		
 		for i = 1, 3 do 
 			App.scale[i]:follow_scale()
 		end
@@ -174,10 +173,12 @@ function Scale:set_scale(bits)
     local changed_bits = old_bits ~ new_bits
 	local changed_notes = musicutil.bits_to_intervals(changed_bits)
 
-	-- Send interrupt request to stop changed notes
-	for i=1,#changed_notes do
-		self:emit('interrupt', changed_notes[i])
-	end
+	-- for i, note in ipairs(changed_notes) do
+	-- 	changed_notes[i] = (note + self.root) % 12
+	-- end
+
+	
+	
 
 	self.bits = bits
 	self.intervals = musicutil.bits_to_intervals(bits)
@@ -196,6 +197,9 @@ function Scale:set_scale(bits)
 	if #self.intervals > 2 then
 		self.chord = self:chord_id()
 	end
+
+	-- Send interrupt request to stop changed notes
+	self:emit('interrupt', changed_notes)
 end
 
 function Scale:shift_scale_to_note(n)
@@ -343,6 +347,21 @@ function Scale:transport_event(data,track)
 	return data
 end
 
+function Scale:quantize_note(data)
+
+
+	if self.bits == 0 then
+		data.new_note = data.note + self.root
+		return data
+	elseif #self.notes > 0 then
+		data.new_note = musicutil.snap_note_to_array(data.note, self.notes) + self.root
+		return data
+	else
+		print(#self.notes)
+		print(self.bits)
+	end
+end
+
 function Scale:midi_event(data, track)    
 	if data.note then
 
@@ -422,13 +441,7 @@ function Scale:midi_event(data, track)
 			return data
 
 		else
-			if self.bits == 0 then
-				data.new_note = data.note + self.root
-				return data
-			else
-				data.new_note = musicutil.snap_note_to_array(data.note, self.notes) + self.root
-				return data
-			end
+			return self:quantize_note(data)
 		end
 		
   	else

@@ -40,19 +40,19 @@ function ScaleGrid:set(o)
 	}
   
 	self.note_map = {
-		[0] = { index = 9, name = 'C' },
-		[1] = { index = 2, name = 'C#' },
-		[2] = { index = 10, name = 'D' },
-		[3] = { index = 3, name = 'D#' },
-		[4] = { index = 11, name = 'E' },
-		[5] = { index = 12, name = 'F' },
-		[6] = { index = 5, name = 'F#' },
-		[7] = { index = 13, name = 'G' },
-		[8] = { index = 6, name = 'G#' },
-		[9] = { index = 14, name = 'A' },
-		[10] = { index = 7, name = 'A#' },
-		[11] = { index = 15, name = 'B' },
-		[12] = { index = 16, name = 'C' }
+		[0] = { index = 1, name = 'C' },
+		[1] = { index = 10, name = 'C#' },
+		[2] = { index = 2, name = 'D' },
+		[3] = { index = 11, name = 'D#' },
+		[4] = { index = 3, name = 'E' },
+		[5] = { index = 4, name = 'F' },
+		[6] = { index = 13, name = 'F#' },
+		[7] = { index = 5, name = 'G' },
+		[8] = { index = 14, name = 'G#' },
+		[9] = { index = 6, name = 'A' },
+		[10] = { index = 15, name = 'A#' },
+		[11] = { index = 7, name = 'B' },
+		[12] = { index = 8, name = 'C' }
 	}
 
 end
@@ -105,8 +105,10 @@ function ScaleGrid:grid_event (scale, data)
 				scale:shift_scale_to_note(d.note)
 				self:emit('alt_reset')
 			else
+				
 				local bit_flag = (1 << ((24 + d.note - scale.root) % 12) ) -- bit representation for note
-				scale:set_scale(scale.bits ~ bit_flag )
+				print('Apply scale from grid: ', scale.bits, bit_flag)
+				scale:set_scale(scale.bits ~ bit_flag)
 			end
 
 			for i = 1, 3 do
@@ -138,14 +140,14 @@ function ScaleGrid:set_grid(scale)
 				grid.led[l.x][l.y] = Grid.rainbow_on[ (scale.id - 1) % #Grid.rainbow_on + 1]
 				
 				if n == 0 then
-					l = grid:index_to_grid(16)
+					l = grid:index_to_grid(8)
 					grid.led[l.x][l.y] = Grid.rainbow_on[ (scale.id - 1) % #Grid.rainbow_on + 1]
 				end
 			else
 				grid.led[l.x][l.y] = Grid.rainbow_off[ (scale.id - 1) % #Grid.rainbow_off + 1]
 				
 				if n == 0 then
-					l = grid:index_to_grid(16)
+					l = grid:index_to_grid(8)
 					grid.led[l.x][l.y] = Grid.rainbow_off[ (scale.id - 1) % #Grid.rainbow_off + 1]
 				end
 			end

@@ -9,7 +9,7 @@ local Input = {}
 Input.name = 'input'
 Input.__index = Input
 setmetatable(Input,{ __index = TrackComponent })
-print('!!!TODO: You just set velocity to data.vel in your Input class but it might break Transport triggering')
+
 function Input:new(o)
     o = o or {}
     setmetatable(o, self)
@@ -229,7 +229,6 @@ Input.types['arpeggio'] = {
             note = root + intervals[(index - 1) % #intervals + 1] + octave
 
         end
-        
         return {type = 'note_on', note = note, vel = data.vel }
     end
 

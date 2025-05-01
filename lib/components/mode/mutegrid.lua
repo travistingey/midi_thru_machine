@@ -110,18 +110,7 @@ function MuteGrid:grid_event (mute, data)
 
             if state then
                 grid.led[data.x][data.y] = Grid.rainbow_off[mute.track.id]
-                
-                print('muted noted: ' .. note)
-
-                print('current triggers on track:')
-                tab.print(self.triggers)
-                
-                print('muting notes on track:')
-                tab.print(mute.track)
-
-                print('sending interrupt to output device:')
-                tab.print(mute.track.output_device)
-                mute.track.output_device:emit('interrupt', { note = note, ch = mute.track.midi_in, note_id = note, type = 'interrupt' })
+                mute.track.output_device:emit('interrupt', { note = note, ch = mute.track.midi_in, note_id = note, type = 'interrupt_note' })
             else
                 grid.led[data.x][data.y] = 0
             end

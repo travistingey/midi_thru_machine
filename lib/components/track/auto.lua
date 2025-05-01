@@ -238,7 +238,7 @@ function Auto:update_cc()
                 ch = automation.midi_channel
             }
             -- Send the CC message
-            App.midi_out:send(cc_message)
+            self.track.midi_out:send(cc_message)
         else
             -- Automation completed
             self.active_ccs[cc_number] = nil

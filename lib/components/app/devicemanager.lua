@@ -90,12 +90,13 @@ function MIDIDevice:send(data)
     if data.type then
         self.manager:emit(self.id, data.type, data)
         if data.type == 'note_on' then
+            
             -- Create one-time listener for note events (excluding transport 'stop')
             local note_handle_events = { 'note_on', 'note_off', 'kill', 'interrupt' }
             
             local off = {
                 type = 'note_off',
-                note_id = data.note,
+                note_id = data.note_id or data.note,
                 note = data.note,
                 vel = data.vel,
                 ch = data.ch,
@@ -114,13 +115,13 @@ function MIDIDevice:send(data)
                     off_sent = true
 
                 elseif next.type == 'note_on' then
-                    if next.ch == off.ch and next.note == off.note_id then
+                    if next.ch == off.ch and (next.note == off.note_id or next.note_id and next.note_id == off.note_id) then
                         self.device:send(off)
                         off_sent = true
                     end
 
                 elseif next.type == 'note_off' then
-                    if next.ch == off.ch and next.note == off.note_id then
+                    if next.ch == off.ch and (next.note == off.note_id or next.note_id and next.note_id == off.note_id) then
                         off_sent = true
                     end
 
@@ -128,9 +129,20 @@ function MIDIDevice:send(data)
                     self.device:send(off)
                     off_sent = true
 
-                elseif next.type == 'interrupt' and next.ch == off.ch and ((next.note_id and next.note_id == off.note_id) or (not next.note_id and next.note_class and next.note_class == off.note_id % 12)) then
+                elseif next.type == 'interrupt_note' and next.ch == off.ch and next.note and next.note == off.note then
                     self.device:send(off)
                     off_sent = true
+
+                elseif next.type == 'interrupt_scale' and next.ch == off.ch then
+
+                    local foobar = next.scale:quantize_note(off)
+                   
+                    if off.note % 12 ~= foobar.new_note % 12 then
+                        self.device:send(off)
+                        off_sent = true
+                    end
+                    
+                    self.manager:reportEvents(self.id)
                 end
 
                 if off_sent then
@@ -139,6 +151,7 @@ function MIDIDevice:send(data)
                     end
                 end
             end
+
             for _, event in ipairs(note_handle_events) do
                 self.manager:on(self.id, event, last_note_on)
             end
@@ -224,19 +237,25 @@ function MixerDevice:process_midi(event)
     local send = LaunchControl:handle_cc(event)
     if send then
       for i, track in ipairs(self.tracks or {}) do
-        if track.mixer_channel and track.mixer_channel > 0 and send.ch == track.mixer_channel then
-          track:emit('cc_event', send)
-        end
+        track:emit('cc_event', send)
       end
     end
   elseif event.type == 'note_on' or event.type == 'note_off' then
     local send = LaunchControl:handle_note(event)
     if send then
-      for i, track in ipairs(self.tracks or {}) do
-        if track.mixer_channel and track.mixer_channel > 0 and send.ch == track.mixer_channel then
-          track:emit('cc_event', send)
+        -- If we have a channel present, then we assume its a single send event, otherwise its a table of values to send
+        if send.ch then
+            for i, track in ipairs(self.tracks or {}) do
+                track:emit('cc_event', send)
+            end
+        else
+            for i, s in ipairs(send) do
+                for i, track in ipairs(self.tracks or {}) do
+                    track:emit('cc_event', s)
+                end
+            end
+
         end
-      end
     end
     LaunchControl:set_led()
   end

@@ -134,7 +134,10 @@ local LaunchControl = {
     note_map = NOTE_MAP,
     main_channel = 1,
     channel = 1,
-    cleanup_functions = {}
+    cleanup_functions = {},
+    send_active = false,
+    last_led_time = 0,
+    led_interval = 0.05,
 }
 
 -- Initialize tables
@@ -155,22 +158,87 @@ function LaunchControl:handle_note(data)
         local control = self.note_map[data.note]
         local track_offset = (self.track_select - 1) * 8
         
+        
         if data.type == 'note_on' then
             self.down[control.type] = true
 
             if control.type == 'top_channel' then
-                local state = not self.track[control.index][SEND]
-                self.track[control.index][SEND] = state
+                local new_state = not self.track[control.index][SEND]
+                self.track[control.index][SEND] = new_state
+                local fader_cc = self.cc_map.faders[control.index]
+                local send_cc = self.cc_map[SEND][control.index]
+                local current_channel = self.channel
 
-                local send = {
-                    type = 'cc',
-                    val = state and 127 or 0,
-                    ch = self.main_channel,
-                }
+                if new_state then
+                    local fader_value = self.channel_values[current_channel][fader_cc]
+                    -- When toggling ON
+                    local main_fader = {
+                        type = 'cc',
+                        val = 0,
+                        ch = current_channel,
+                        cc = fader_cc
+                    }
 
-                send.cc = self.cc_map[SEND][control.index]
-                
-                return send
+                    local send_fader = {
+                        type = 'cc',
+                        val = fader_value,
+                        ch = current_channel,
+                        cc = send_cc
+                    }
+
+                    -- Then send the toggle message 
+                    self.send_active = true
+                    local toggle_msg = {
+                        type = 'cc',
+                        ch = current_channel,
+                        cc = 127,
+                        val = 127
+                    }
+
+                    self.channel_values[current_channel][send_cc] = fader_value
+                    self.channel_values[current_channel][fader_cc] = 0
+                    
+                    return { main_fader, send_fader, toggle_msg }
+                else
+                    local fader_value = self.channel_values[current_channel][send_cc]
+                   
+                    -- When toggling OFF
+                    local send_fader = {
+                        type = 'cc',
+                        val = 0,
+                        ch = current_channel,
+                        cc = send_cc
+                    }
+                    
+
+                    local main_fader = {
+                        type = 'cc',
+                        val = fader_value,
+                        ch = current_channel,
+                        cc = fader_cc
+                    }
+                    
+                    self.channel_values[current_channel][fader_cc] = fader_value
+                    self.channel_values[current_channel][send_cc] = 0
+
+                    local toggle_msg = {
+                        type = 'cc',
+                        ch = current_channel,
+                        cc = 127,
+                        val = 0
+                    }
+
+                    for i,track in ipairs(self.track) do
+                        if track[SEND] then
+                            toggle_msg.val = 127
+                            break
+                        elseif i == TRACKCOUNT then
+                            self.send_active = false
+                        end
+                    end
+                    
+                    return { send_fader, main_fader, toggle_msg }
+                end
 
             elseif control.type == 'bottom_channel' then
                 if self.down['device'] then
@@ -224,6 +292,11 @@ function LaunchControl:handle_note(data)
 end
 
 function LaunchControl:set_led()
+    local now = os.clock()
+    if now - self.last_led_time < self.led_interval then
+        return
+    end
+    self.last_led_time = now
     local t = self.track
     local s = self.state
     local HIGH = RED_LOW
@@ -396,7 +469,17 @@ function LaunchControl:handle_cc(data)
     local current_channel = self.channel
     local control = CONTROL_MAP[data.cc]
     local offset = (self.track_select - 1) * 8
-    local cc = CC_MAP[control.type][control.index + offset]
+    local cc = nil
+    if control.type == 'faders' then
+        local track_index = control.index + offset
+        if self.track[track_index] and self.track[track_index][SEND] then
+            cc = self.cc_map[SEND][control.index + offset]
+        else
+            cc = self.cc_map.faders[control.index + offset]
+        end
+    else
+        cc = self.cc_map[control.type][control.index + offset]
+    end
 
     local target = self.channel_values[current_channel][cc]
     local last = self.last_values[data.cc]  

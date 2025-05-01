@@ -297,7 +297,7 @@ function NoteGrid:handle_send(event, send_type)
     local track = App.track[self.track]
     track.input_device:process_midi(event)
   elseif send_type == SEND_OUT then
-    App.midi_out:send(event)
+    track.output_device:process_midi(event)
   end
   
 end
