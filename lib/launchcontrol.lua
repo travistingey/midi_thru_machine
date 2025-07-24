@@ -137,7 +137,7 @@ local LaunchControl = {
     cleanup_functions = {},
     send_active = false,
     last_led_time = 0,
-    led_interval = 0.05,
+    led_interval = 0.02,
 }
 
 -- Initialize tables
@@ -197,7 +197,7 @@ function LaunchControl:handle_note(data)
 
                     self.channel_values[current_channel][send_cc] = fader_value
                     self.channel_values[current_channel][fader_cc] = 0
-                    
+                    self:set_led(true)
                     return { main_fader, send_fader, toggle_msg }
                 else
                     local fader_value = self.channel_values[current_channel][send_cc]
@@ -209,7 +209,7 @@ function LaunchControl:handle_note(data)
                         ch = current_channel,
                         cc = send_cc
                     }
-                    
+
 
                     local main_fader = {
                         type = 'cc',
@@ -237,6 +237,7 @@ function LaunchControl:handle_note(data)
                         end
                     end
                     
+                    self:set_led(true)
                     return { send_fader, main_fader, toggle_msg }
                 end
 
@@ -263,7 +264,8 @@ function LaunchControl:handle_note(data)
                     send.cc = self.cc_map[self.state][control.index]
                     send.val =  state and 127 or 0
                 end
-
+                
+                self:set_led(true)
                 return send
 
             elseif control.type == 'device' then 
@@ -285,15 +287,22 @@ function LaunchControl:handle_note(data)
             elseif control.type == 'down' then
                 self:set_track(2)
             end
+
+            self:set_led(true)
         else
             self.down[control.type] = false
+            if control.type == 'device' then
+                self:set_led(true)
+            end
         end
     end
 end
 
-function LaunchControl:set_led()
+function LaunchControl:set_led(force)
+    
     local now = os.clock()
-    if now - self.last_led_time < self.led_interval then
+    if not force and now - self.last_led_time < self.led_interval then
+        print('blocked set', now - self.last_led_time)
         return
     end
     self.last_led_time = now
@@ -446,7 +455,7 @@ end
 
 function LaunchControl:register(n)
     self.device = midi.connect(n)
-    self:set_led()
+    self:set_led(true)
 end
 
 -- Set the active channel (for soft takeover and routing)
@@ -470,7 +479,7 @@ function LaunchControl:handle_cc(data)
     local control = CONTROL_MAP[data.cc]
     local offset = (self.track_select - 1) * 8
     local cc = nil
-    if control.type == 'faders' then
+    if control and control.type == 'faders' then
         local track_index = control.index + offset
         if self.track[track_index] and self.track[track_index][SEND] then
             cc = self.cc_map[SEND][control.index + offset]

@@ -119,6 +119,17 @@ function Mode:set(o)
 
 end
 
+function Mode:update_grid(device)
+    -- Update the main mode grid
+    self.grid:update_midi(device)
+    -- Also update each component’s grid to the new device
+    for _, component in ipairs(self.components) do
+        if component.grid and component.grid.update_midi then
+            component.grid:update_midi(device)
+        end
+    end
+end
+
 -- Mode event listeners
 function Mode:on(event_name, listener)
     if not self.event_listeners[event_name] then

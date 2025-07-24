@@ -37,17 +37,20 @@ Output.types['midi'] = {
 				send[i] = v
 			end
 			
-			send.ch = track.midi_out
+			if not (track.midi_out == 17 and send.ch) then
+				send.ch = track.midi_out
+			end
+
 			track.output_device:send(send)
 
 			return data
 		end
 	end,
-	transport_event = function(s,data,track)
-		if track.output_device ~= App.midi_in then
-			track.output_device:send(data)
-		end
-	end
+	-- transport_event = function(s,data,track)
+	-- 	if track.output_device ~= App.midi_in then
+	-- 		track.output_device:send(data)
+	-- 	end
+	-- end
 }
 
 Output.types['crow'] = {

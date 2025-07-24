@@ -32,7 +32,7 @@ function Input:transport_event(data)
 end
 
 function Input:midi_trigger(data)
-    if self.track.step == 0 and data.ch == self.track.midi_in and data.note == self.track.trigger then
+    if (self.track.midi_in == 17 or data.ch == self.track.midi_in) and self.track.step == 0 and data.note == self.track.trigger then
         if data.type == 'note_on' then
             local event = {}
             self.track.step_count = self.track.step_count + 1

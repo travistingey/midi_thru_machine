@@ -46,7 +46,7 @@ end
 
 
 
-local function set_font(n)
+function App:set_font(n)
   local fonts = {
     {name = '04B_03', face = 1, size = 8},
     {name = 'ALEPH', face = 2, size = 8},
@@ -110,7 +110,7 @@ local function draw_tempo()
   screen.fill()
 
   screen.move(102, 28)
-  set_font(34)
+  App:set_font(34)
   screen.level(0)
   screen.text_center(math.floor(clock.get_tempo() + 0.5))
   screen.fill()
@@ -119,16 +119,16 @@ local function draw_tempo()
   screen.level(0)
   
   if App.playing then
-    set_font(5)
+    App:set_font(5)
     screen.move(79, 7)
     screen.text('\u{25b8}')
   else
-    set_font(1)
+    App:set_font(1)
     screen.move(79, 7)
     screen.text('||')
   end
   
-  set_font(1)
+  App:set_font(1)
   screen.move(124, 7)
   local quarter = math.floor(App.tick / (App.ppqn) ) + 1
   local measure = math.floor(quarter / 4) + 1
@@ -139,7 +139,7 @@ local function draw_tempo()
 
   if App.recording  then
     screen.level(0)
-    set_font(1)
+    App:set_font(1)
     screen.move(85, 7)
     screen.text('REC')
     screen.fill()
@@ -157,11 +157,11 @@ local function draw_chord(select, x, y)
       local bass = scale.root
       
       screen.level(15)
-      set_font(37)
+      App:set_font(37)
       screen.move(x, y + 12)
       screen.text(musicutil.note_num_to_name(root))
       local name_offset = screen.text_extents(musicutil.note_num_to_name(root)) + x
-      set_font(9)
+      App:set_font(9)
       
       screen.move(name_offset, y)
       screen.text(name)
@@ -185,7 +185,7 @@ local function draw_chord_small(select, x, y)
       local bass = scale.root
       
       screen.level(15)
-      set_font(1)
+      App:set_font(1)
       screen.move(x, y)
       screen.text(musicutil.note_num_to_name(root) .. name)
       screen.fill()
@@ -199,7 +199,7 @@ function draw_intervals(select, x, y)
 
   local interval_names = {'R', 'b2', '2', 'b3', '3', '4', 'b5', '5', 'b6', '6', 'b7', '7'}
 
-  set_font(1)
+  App:set_font(1)
   for i = 1, #interval_names do
       if App.scale[1].bits & (1 << (i - 1)) > 0 then
               screen.level(15)
@@ -228,17 +228,17 @@ function draw_tag(label, value, x, y)
   screen.text(label)
   
   screen.move(x + 16, y + 27)
-  set_font(34)
+  App:set_font(34)
   screen.text_center(value)
   
-  set_font(1)
+  App:set_font(1)
   screen.move(x + 16, y + 17)
   screen.text_center('shit')
   screen.fill()
 end
 
 local function draw_status()
-  set_font(1)
+  App:set_font(1)
   screen.level(15)
   screen.rect(0, 0, 10, 9)
   screen.fill()
@@ -251,28 +251,47 @@ local function draw_status()
   screen.move(15,7)
   screen.text(App.track[App.current_track].name )
   
-  set_font(5)
+  App:set_font(5)
   screen.move(0,20)
   screen.text('\u{25b8}')
   screen.move(0,30)
   screen.text('\u{25c2}')
 
-  set_font(1)
-  screen.move(6,20)
-  screen.text('I')
-  screen.move(6,30)
-  screen.text('O')
+  App:set_font(1)
 
-  screen.move(15,20)
-  screen.text(App.track[App.current_track].input_device.abbr)
 
+  local in_ch = 'off'
+    if App.track[App.current_track].midi_in == 17 then
+        in_ch = 'all'
+    elseif App.track[App.current_track].midi_in ~= 0 then
+      in_ch = App.track[App.current_track].midi_in
+    end
+    screen.move(6,20)
+    screen.text(App.track[App.current_track].input_device.abbr)
+
+    screen.move(70,20)
+    screen.text_right(in_ch)
+
+    screen.fill()
   
-  screen.move(50,20)
-  if App.track[App.current_track].midi_in ~= 0 then
-    screen.text('ch ' ..  App.track[App.current_track].midi_in)
-  else
-    screen.text('off')
-  end
+  local out_ch = 'off'
+    if App.track[App.current_track].midi_out == 17 then
+        out_ch = 'all'
+    elseif App.track[App.current_track].midi_out ~= 0 then
+      out_ch = App.track[App.current_track].midi_out
+    end
+
+    screen.move(6,30)
+    screen.text(App.track[App.current_track].output_device.abbr)
+
+    screen.move(70,30)
+    screen.text_right(out_ch)
+
+    screen.fill()
+  
+
+
+  screen.move(6,20)
 end
 
 
@@ -365,27 +384,7 @@ function App:init(o)
       -- draw_intervals(1)
 
       draw_status()
-
-      
-      
-
-      local out_ch = 'off'
-      if App.track[App.current_track].midi_out ~= 0 then
-        out_ch = App.track[App.current_track].midi_out
-      end
-      screen.move(15,30)
-      screen.text(App.track[App.current_track].output_device.abbr)
-
-      screen.move(50,30)
-      if App.track[App.current_track].midi_out ~= 0 then
-        screen.text('ch ' ..  App.track[App.current_track].midi_out)
-      else
-        screen.text('off')
-      end
-
-      screen.fill()
     end
-    
   }
 
   -- For triggers, keys, and mode-specific contexts
@@ -425,7 +424,7 @@ function App:init(o)
   -- Register Parameters, Tracks, Scales, Outputs, etc.
   ----------------------------------------------------------------------------
  
-  App:register_params()
+  self.device_manager:register_params()
   -- Create the tracks
   params:add_separator('tracks','Tracks')
   for i = 1, 16 do
@@ -443,14 +442,14 @@ function App:init(o)
   -- Device & Mode Registration
   ----------------------------------------------------------------------------
   App:register_midi_in(1)
-  App:register_midi_grid(3)
-  App:register_launchcontrol(9)
-  App:register_mixer(4)
+  -- App:register_midi_grid(3)
+
+  -- App:register_mixer(6)
+  -- App:register_launchcontrol(8)
 
   print('params:default')
   params:default()
 
-  App:register_modes()
 
 end
 
@@ -550,17 +549,6 @@ function App:on_midi(data)
   end
 end
 
-
---==============================================================================
--- Crow & Mixer Query/Registration (Device Management)
---==============================================================================
-
-function App:register_launchcontrol(n)
-  print('Register Launch Control on port ' .. n)
-  LaunchControl:register(n)
-  LaunchControl:set_led()
-end
-
 --==============================================================================
 -- MIDI In/Out and Grid Registration
 --==============================================================================
@@ -572,7 +560,7 @@ function App:register_midi_in(n)
   end
   self.midi_in_cleanup = {}
   self.midi_in = self.device_manager:get(n)
-  print('Registering MIDI In Device ' .. n)
+  print('Registering MIDI In Device from port ' .. n)
   
   table.insert(self.midi_in_cleanup, self.midi_in:on('transport_event', function(data) self:on_transport(data) end))
 end
@@ -625,7 +613,9 @@ function App:draw()
   screen.ping()
   screen.clear()         -- Clear screen space
   screen.aa(1)           -- Enable anti-aliasing
-  self.mode[self.current_mode]:draw()
+  if self.mode[self.current_mode] then
+    self.mode[self.current_mode]:draw()
+  end
   screen.update()
 end
 
@@ -673,24 +663,24 @@ end
 --==============================================================================
 -- Parameter Registration and Song Settings
 --==============================================================================
-function App:register_params()
-  local midi_devices = self.device_manager.midi_device_names
-  params:add_group('DEVICES', 5)
-  params:add_option("midi_in", "Clock Input", midi_devices, 1)
-  params:add_option("mixer", "Mixer", midi_devices, 4)
-  params:add_option("midi_grid", "Grid", midi_devices, 3)
-  params:add_option("launchcontrol", "LaunchControl", midi_devices, 9)
+-- function App:register_params()
+--   local midi_devices = self.device_manager.midi_device_names
+--   params:add_group('DEVICES', 5)
+--   params:add_option("midi_in", "Clock Input", midi_devices, 1)
+--   params:add_option("mixer", "Mixer", midi_devices, 4)
+--   params:add_option("midi_grid", "Grid", midi_devices, 3)
+--   params:add_option("launchcontrol", "LaunchControl", midi_devices, 9)
   
-  params:add_trigger('panic', "Panic")
-  params:set_action('panic', function() App:panic() end)
-  params:set_action("midi_in", function(x) App:register_midi_in(x) end)
-  params:set_action("midi_grid", function(x) App:register_midi_grid(x) end)
-  params:set_action("mixer", function(x) App:register_mixer(x) end)
-  params:set_action("launchcontrol", function(x) App:register_launchcontrol(x) end)
+--   params:add_trigger('panic', "Panic")
+--   params:set_action('panic', function() App:panic() end)
+--   params:set_action("midi_in", function(x) App:register_midi_in(x) end)
+--   params:set_action("midi_grid", function(x) App:register_midi_grid(x) end)
+--   params:set_action("mixer", function(x) App:register_mixer(x) end)
+--   params:set_action("launchcontrol", function(x) App:register_launchcontrol(x) end)
   
-  params:add_separator()
-  App:register_song()
-end
+--   params:add_separator()
+--   App:register_song()
+-- end
 
 function App:save_preset(d, param)
   if self.preset[d] == nil then self.preset[d] = {} end
@@ -742,14 +732,6 @@ function App:load_preset(d, param, force)
   end
 end
 
-function App:register_song()
-  local swing_spec = controlspec.UNIPOLAR:copy()
-  swing_spec.default = 0.5
-  self.swing = 0.5
-  params:add_control('swing', 'Swing', swing_spec)
-  params:set_action('swing', function(d) self.swing = d end)
-end
-
 --==============================================================================
 -- Bezier Curve Mapping (for CC, etc.)
 --==============================================================================
@@ -775,18 +757,12 @@ local function bezier_transform(input, P0, P1, P2, P3)
   return output
 end
 
---==============================================================================
--- Register Mixer, LaunchControl,
---==============================================================================
-function App:register_mixer(n)
-  self.device_manager:register_mixer_device(n)
-end
-
 
 --==============================================================================
 -- Modes and Grid Registration
 --==============================================================================
 function App:register_modes()
+  self.modes = {}
   self.grid = Grid:new({
     grid_start = {x = 1, y = 1},
     grid_end = {x = 4, y = 1},

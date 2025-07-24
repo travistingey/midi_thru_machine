@@ -37,7 +37,17 @@ function Track:new(o)
 
 	self.build_chain(o)
 	
+	o:on('mixer_event',function(data)
+		print(o.id .. ' MIXER -------')
+		tab.print(data)
+		if o.output_device  then
+			o.output_device:send(data)
+		end
+	end)
+
 	o:on('cc_event',function(data)
+		print(o.id .. ' -------')
+		tab.print(data)
 		if o.output_device  then
 			o.output_device:send(data)
 		end
@@ -71,7 +81,7 @@ function Track:set(o)
 
 	local track = 'track_' .. self.id ..'_'
 
-	params:add_group('Track '.. self.id, 24)
+	params:add_group('Track '.. self.id, 23)
 
 	
 	params:add_text(track .. 'name', 'Name', self.name)
@@ -87,17 +97,24 @@ function Track:set(o)
 		elseif data.type == "note_off" then
 			self.note_on[data.note] = nil
 		elseif (data.type == "cc") then
-			if self.midi_in > 0 and data.ch == self.midi_in then
-				self:emit('cc_event', data)
-			end
+			print('track ' .. self.id .. ' input event')
+			tab.print(data)
+			-- if self.midi_in > 0 and data.ch == self.midi_in then
+			-- 	self:emit('cc_event', data)
+			-- end
 		end
 	end
 
 	-- Device In/Out
 	local midi_devices =  App.device_manager.midi_device_names
+
+	self.device_in = 1
 	params:add_option(track .. "device_in", "Device In", midi_devices)
 	
 	params:set_action(track .. 'device_in',function(d)
+
+		self.device_in = d
+
 		-- Remove old input device listeners
 		if self.input_device then
 			self:remove_trigger()
@@ -108,9 +125,11 @@ function Track:set(o)
 		self:load_component(Input)
 		self:enable()
 	end)
-
+	
+	self.device_out = d
 	params:add_option(track .. "device_out", "Device Out",midi_devices,2)
 	params:set_action(track .. 'device_out',function(d)
+		self.device_out = d
 		self.output_device = App.device_manager:get(d)
 		self:load_component(Output)
 		self:enable()
@@ -145,12 +164,14 @@ function Track:set(o)
 
 	-- MIDI In
 	self.midi_in = o.midi_in or 0
-	params:add_number(track .. 'midi_in', 'MIDI In', 0, 16, 0, function(param)
+	params:add_number(track .. 'midi_in', 'MIDI In', 0, 17, 0, function(param)
 		local ch = param:get()
 		if ch == 0 then 
-		   return 'off'
+			return 'off'
+		elseif ch == 17 then
+			return 'all'
 		else
-		   return ch
+			return ch
 		end
 	end)
 	
@@ -165,12 +186,14 @@ function Track:set(o)
 
 	-- MIDI Out
 	self.midi_out = o.midi_out or 0
-	params:add_number(track .. 'midi_out', 'MIDI Out', 0, 16, 0, function(param)
+	params:add_number(track .. 'midi_out', 'MIDI Out', 0, 17, 0, function(param)
 		local ch = param:get()
 		if ch == 0 then 
-		   return 'off'
+			return 'off'
+		elseif ch == 17 then
+			return 'all'
 		else
-		   return ch
+			return ch
 		end
 	end)
 
@@ -182,12 +205,12 @@ function Track:set(o)
 		self:enable()
 	end)
 
-	-- MIDI Thru
-	self.midi_thru = o.midi_thru or false
-	params:add_binary(track .. 'midi_thru','MIDI Thru','toggle', 0)
-	params:set_action(track .. 'midi_thru',function(d)
-		self.midi_thru = (d>0)
-	end)
+	-- -- MIDI Thru
+	-- self.midi_thru = o.midi_thru or false
+	-- params:add_binary(track .. 'midi_thru','MIDI Thru','toggle', 0)
+	-- params:set_action(track .. 'midi_thru',function(d)
+	-- 	self.midi_thru = (d>0)
+	-- end)
 
 	 params:add_binary(track .. 'mixer', 'Mixer', 'toggle', 0)
 	 params:set_action(track .. 'mixer', function(d)

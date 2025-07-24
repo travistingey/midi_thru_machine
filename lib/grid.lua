@@ -55,6 +55,15 @@ function Grid:new (o)
 	return o
 end
 
+function Grid:update_midi(device)
+    -- Update this grid’s MIDI device
+    self.midi = device
+    -- Recursively update all subgrids without replacing their event callbacks
+    for _, subgrid in ipairs(self.subgrids) do
+        subgrid:update_midi(device)
+    end
+end
+
 function Grid:update_bounds()
 
 	self.bounds = {

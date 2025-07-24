@@ -12,16 +12,16 @@ local presetseq = PresetSeq:new({track=1})
 local mutegrid = MuteGrid:new({track=1})
 local presetgrid = PresetGrid:new({track=1, param_type='track'})
 
-
 local SessionMode = Mode:new({
     id = 1,
     track = 1,
+    cursor = 1,
     components = {
         presetseq,
         mutegrid,
         presetgrid
     },
-   load_event = function(self,data)
+    load_event = function(self,data)
         presetseq.track = App.current_track 
         presetgrid.track = App.current_track
 
@@ -46,7 +46,6 @@ local SessionMode = Mode:new({
         end
     end,
     row_event = function(self,data)
-        
         if data.state then
             self.row_pads:reset()
 
@@ -69,7 +68,42 @@ local SessionMode = Mode:new({
                 self:enable()
             end
         end
-    end
+    end,
+    context = {
+        enc1 = function(d)
+            local mode = App.mode[1]
+            mode.cursor = util.clamp (mode.cursor + d, 1, 2)
+            App.screen_dirty = true
+        end,
+        enc2 = function(d)
+            local mode = App.mode[1]
+            
+            if mode.cursor == 1 then
+                params:set('track_' .. App.current_track .. '_device_in', App.track[App.current_track].device_in + d)
+            elseif mode.cursor == 2 then
+                params:set('track_' .. App.current_track .. '_device_out', App.track[App.current_track].device_out + d)
+            end
+            App.screen_dirty = true
+        end,
+        enc3 = function(d)
+            local mode = App.mode[1]
+            
+            if mode.cursor == 1 then
+                params:set('track_' .. App.current_track .. '_midi_in', App.track[App.current_track].midi_in + d)
+            elseif mode.cursor == 2 then
+                params:set('track_' .. App.current_track .. '_midi_out', App.track[App.current_track].midi_out + d)
+            end
+            App.screen_dirty = true
+        end
+    },
+    layer = {[2] = function()
+            screen.level(15)
+            App:set_font(1)
+            screen.move(0, App.mode[1].cursor * 10 + 12)
+            screen.text('_')
+            screen.fill()
+        end
+    }
 })
 
 

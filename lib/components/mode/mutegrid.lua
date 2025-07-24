@@ -9,9 +9,9 @@ MuteGrid.name = 'Mute Grid'
 function MuteGrid:set(o)
 	self.__base.set(self, o) -- call the base set method first   
     self.triggers = {}
-   o.component = 'mute'
+    self.component = 'mute'
 
-    o.grid = Grid:new({
+    self.grid = Grid:new({
         name = 'Mute',
         grid_start = {x=1,y=1},
         grid_end = {x=4,y=32},

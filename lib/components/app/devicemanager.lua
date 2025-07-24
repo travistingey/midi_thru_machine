@@ -185,7 +185,7 @@ function MIDIDevice:process_midi(event)
     local midi_tracks = {}
 
     for i, track in ipairs(self.triggers) do
-        if track.midi_in == event.ch then
+        if track.midi_in == 17 or track.midi_in == event.ch then
             if track.input_type ~= 'midi' and event.note == track.trigger then
                 if track.step == 0 then 
                     track:emit('midi_trigger', event) 
@@ -237,7 +237,7 @@ function MixerDevice:process_midi(event)
     local send = LaunchControl:handle_cc(event)
     if send then
       for i, track in ipairs(self.tracks or {}) do
-        track:emit('cc_event', send)
+        track:emit('mixer_event', send)
       end
     end
   elseif event.type == 'note_on' or event.type == 'note_off' then
@@ -246,18 +246,17 @@ function MixerDevice:process_midi(event)
         -- If we have a channel present, then we assume its a single send event, otherwise its a table of values to send
         if send.ch then
             for i, track in ipairs(self.tracks or {}) do
-                track:emit('cc_event', send)
+                track:emit('mixer_event', send)
             end
         else
             for i, s in ipairs(send) do
                 for i, track in ipairs(self.tracks or {}) do
-                    track:emit('cc_event', s)
+                    track:emit('mixer_event', s)
                 end
             end
 
         end
     end
-    LaunchControl:set_led()
   end
 end
 
@@ -353,12 +352,14 @@ end
 
 -- Register a Mixer Device
 function DeviceManager:register_mixer_device(port)
+  LaunchControl:register(port)
+
   local mixer_device = midi.connect(port)
   if not mixer_device or mixer_device.name == 'none' then
     return -- Skip if no mixer device is connected
   end
 
-  print("Mixer (LaunchControl XL) on port " .. port)
+  print("Mixer on port " .. port .. ": " .. mixer_device.name)
   local trimmed_name = util.trim_string_to_width(mixer_device.name, 70)
   local props = {
     type = 'mixer',
@@ -416,6 +417,44 @@ function DeviceManager:new()
     d.none = d:add({id = 0})
     
     return d
+end
+
+function DeviceManager:register_params()
+  local midi_devices = self.midi_device_names
+  params:add_group('DEVICES', 4)
+  params:add_option('clock_in', 'Clock Input', midi_devices)
+  params:add_option('mixer', 'Mixer', midi_devices)
+  params:add_option('midi_grid', 'Grid', midi_devices)
+  params:add_trigger('panic', 'Panic')
+  params:set_action('panic', function() App:panic() end)
+  params:set_action('clock_in', function(x)
+    self.clock_in_id = x
+  end)
+  params:set_action('mixer', function(x) self:register_mixer_device(x) end)
+  params:set_action('midi_grid', function(x)
+    print('LaunchPad Mini on port ' .. x .. ': ' .. midi_devices[x])
+    local midi_grid = self:get(x)
+    App.midi_grid.event = nil
+    App.midi_grid = midi_grid
+   
+    if #App.mode == 0 then
+        App:register_modes()
+    else
+        for i,mode in ipairs(App.mode) do
+           mode:update_grid(midi_grid.device)
+        end
+
+        midi_grid.event = function(msg)
+            local mode = App.mode[App.current_mode]
+            App.grid:process(msg)
+            mode.grid:process(msg)
+        end
+    end
+
+    App.mode[App.current_mode]:refresh()
+    App.midi_grid:send({240,0,32,41,2,13,0,127,247}) -- Set Launchpad to Programmer Mode
+  end)
+
 end
 
 function DeviceManager:reportEvents(device_id)
@@ -507,7 +546,7 @@ function DeviceManager:register_midi_device(port)
         return -- Skip if no MIDI device is connected
     end
 
-    print("MIDI " .. port .. "\t\t" .. midi_device.name)
+    print("PORT " .. port .. "\t\t" .. midi_device.name)
 
     local trimmed_name = util.trim_string_to_width(midi_device.name, 70)
 
@@ -537,16 +576,28 @@ function DeviceManager:register_midi_device(port)
     -- Setup MIDI event handler
     midi_device.event = function(msg)
         local event = midi.to_msg(msg)
-        
         if device.event then
-            device.event(msg) -- Call device's event method if it exists eg. Midi Grid
+            device.event(msg)
         else
             if event.type == 'start' or event.type == 'stop' or event.type == 'continue' or event.type == 'clock' then
-                self:emit(device.id, 'transport_event', event)
+                if device.id == self.clock_in_id then
+                    for _, dev in ipairs(self.midi) do
+                        if dev.id ~= self.clock_in_id then
+                            self:emit(dev.id, 'transport_event', event)
+                            dev:send(event)
+                        end
+                    end
+                end
             elseif event.type == 'program_change' then
                 self:emit(device.id, 'program_change', event)
             elseif event.type == 'cc' then
-                self:emit(device.id, 'cc', event)
+                print('device manager midi event')
+                event.processed = 'true'
+                
+                for i,track in ipairs(device.triggers) do
+                    print('hi ' .. device.name .. ' ' .. track.id)
+                    track:emit('cc_event', event)
+                end
             else
 
             device:process_midi(event)
