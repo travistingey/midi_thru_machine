@@ -1,6 +1,14 @@
 package.path = './?.lua;./lib/?.lua;.test/stubs/?.lua;' .. package.path
 require('norns')
 
+-- map Foobar paths used inside the codebase
+package.preload['Foobar/lib/utilities'] = function()
+  return require('lib/utilities')
+end
+package.preload['Foobar/lib/launchcontrol'] = function()
+  return require('lib/launchcontrol')
+end
+
 local DeviceManager = require('lib/components/app/devicemanager')
 
 describe('DeviceManager note handling', function()
