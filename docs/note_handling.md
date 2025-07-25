@@ -37,3 +37,12 @@ Incoming MIDI from a device is routed in `MIDIDevice:process_midi` which dispatc
 4. **Track → Device** later emits the matching `note_off`. If no interrupt occurred, the manager forwards it normally and clears the listener.
 
 The result is that every note_on has exactly one corresponding note_off regardless of intervening events or scale changes.
+
+## Sequencer integration
+
+The forthcoming `seq` component will emit note events into the same pipeline. It
+will record and play back note tables just like other inputs. When implemented it
+should rely on the existing event based handling so that recorded phrases respect
+scale interrupts and device‑level note management. Tests should verify that
+sequenced notes also receive matching `note_off` messages even when scales change
+mid phrase.

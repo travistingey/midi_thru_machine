@@ -50,8 +50,13 @@ util = {
 
 crow = {
   send = function() end,
-  input = { {}, {} },
-  output = { {}, {}, {}, {} }
+  input = {
+    {mode = function() end, stream = function() end},
+    {mode = function() end, stream = function() end}
+  },
+  output = {
+    {dyn = {}}, {dyn = {}}, {dyn = {}}, {dyn = {}}
+  }
 }
 
 return {
