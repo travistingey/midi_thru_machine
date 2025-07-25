@@ -136,12 +136,15 @@ function MIDIDevice:send(data)
                 elseif next.type == 'interrupt_scale' and next.ch == off.ch then
 
                     local foobar = next.scale:quantize_note(off)
-                   
-                    if off.note % 12 ~= foobar.new_note % 12 then
+
+                    -- send an off event any time the resulting note changes
+                    -- regardless of octave. comparing only pitch class left
+                    -- notes hanging when the scale root shifted by an octave.
+                    if off.note ~= foobar.new_note then
                         self.device:send(off)
                         off_sent = true
                     end
-                    
+
                     self.manager:reportEvents(self.id)
                 end
 
