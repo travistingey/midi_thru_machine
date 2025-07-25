@@ -1,4 +1,4 @@
-package.path = './?.lua;./lib/?.lua;.test/stubs/?.lua;' .. package.path
+package.path = './?.lua;./lib/?.lua;test/.test/stubs/?.lua;' .. package.path
 require('norns')
 
 describe('utilities', function()

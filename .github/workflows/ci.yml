@@ -5,18 +5,31 @@ on:
   pull_request:
 
 jobs:
-  build:
+  test:
+    strategy:
+      matrix:
+        lua-version: ['5.3', '5.4']
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
       - uses: leafo/gh-actions-lua@v8
         with:
-          lua-version: '5.3'
+          lua-version: ${{ matrix.lua-version }}
       - uses: leafo/gh-actions-luarocks@v4
       - name: Install dependencies
-        run: luarocks install busted && luarocks install luacheck
+        run: |
+          luarocks install busted
+          luarocks install luacheck
+          sudo apt-get update
+          sudo apt-get install -y sshpass
       - name: Lint
         run: make lint
         continue-on-error: true
-      - name: Test
+      - name: Run unit tests
         run: make test
+        env:
+          LUA_PATH: './?.lua;./lib/?.lua;.test/stubs/?.lua;spec/?.lua;;'
+      - name: Run E2E tests
+        run: make test-local
+        env:
+          LUA_PATH: './?.lua;./lib/?.lua;.test/stubs/?.lua;spec/?.lua;;'
