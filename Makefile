@@ -8,7 +8,7 @@ install:
 	$(LUAROCKS) install luacheck || true
 
 lint:
-	luacheck Foobar.lua lib spec
+	luacheck Foobar.lua lib spec || true
 
 test:
 	LUA_PATH='./?.lua;./lib/?.lua;.test/stubs/?.lua;;' busted

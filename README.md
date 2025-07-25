@@ -16,6 +16,7 @@ make install
 ```sh
 make lint
 ```
+Lint warnings are printed but do not fail the build.
 
 ## Test
 ```sh
