@@ -14,7 +14,7 @@ This document summarizes the major modules in the project and how they collabora
 - **lib/components/track/** – Track components. Each implements `transport_event` and/or `midi_event` used by the chain.
   - **auto.lua** – Parameter automation engine. Stores actions per step, drives CC curves and preset/scale changes.
   - **input.lua** – Generates or manipulates incoming MIDI (arpeggiators, random notes, bitwise sequencer, crow CV in, etc.).
-  - **seq.lua** – Sequencer that continuously records history, quantizes segments and plays back clips.
+  - **seq.lua** – (Not yet implemented) Sequencer that continuously records history, quantizes segments and plays back clips.
   - **scale.lua** – Harmony and quantization logic. Supports scale following modes, chord detection and note locking.
   - **mute.lua** – Conditional gating of events (not currently listed in track builder but exists in repo).
   - **output.lua** – Sends processed events to MIDI or Crow.
@@ -75,9 +75,8 @@ The only existing tests cover `utilities`. The sequencing and scale logic lack c
 Mock implementations of `clock`, `midi`, `screen` and `params` should be used to run these tests outside of Norns hardware. The existing `spec` folder can be expanded with Busted specs covering each module.
 
 ## Migration plan
-1. **Introduce abstraction layers** – create adapter modules for `clock`, `params`, and device I/O. Start replacing direct calls with calls through these adapters.
-2. **Write unit tests using adapters** – implement mocks for the adapters so tests can run in any Lua environment (CI or host machine).
-3. **Gradually refactor modules** – move UI drawing (`screen`) and Norns specifics out of core logic. Keep the existing Norns entry point as thin as possible.
-4. **Implement missing functionality** – notably `Track:handle_note` and more complex note-off handling across scale changes.
-5. **Expand documentation** – document each component's API and responsibilities to facilitate cross‑platform development.
+1. **Write unit tests using adapters** – implement mocks for the adapters so tests can run in any Lua environment (CI or host machine).
+2. **Expand documentation** – document each component's API and responsibilities to facilitate cross‑platform development.
+3. **Introduce abstraction layers** – create adapter modules for `clock`, `params`, and device I/O. Start replacing direct calls with calls through these adapters.
+4. **Gradually refactor modules** – move UI drawing (`screen`) and Norns specifics out of core logic. Keep the existing Norns entry point as thin as possible.
 

@@ -607,16 +607,4 @@ function Track:kill()
 	self.note_on = {}
 end
 
---[[
-	This will handle note_on management, with the ability to specify which chain should send OFF events for interrupts 
-	The chain parameter will allow from sending from different parts of the chain
-	Input would use, 'send_input', sequencer would 'send', and the any note_off to cancel an incoming 
-	note would use 'send_output'
-]]
-
-function Track:handle_note(data, chain, debug) -- 'send', 'send_input', 'send_output' etc
-	
-end
-
-
 return Track
