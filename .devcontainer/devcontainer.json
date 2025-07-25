@@ -1,0 +1,11 @@
+{
+  "name": "norns-dev",
+  "image": "debian:bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:2": {},
+    "ghcr.io/devcontainers/features/lua:1": {
+      "version": "5.3"
+    }
+  },
+  "postCreateCommand": "make install"
+}
