@@ -23,6 +23,15 @@ Lint warnings are printed but do not fail the build.
 make test
 ```
 
+## End-to-End Testing
+```sh
+# Run comprehensive E2E tests locally
+lua test_e2e.lua
+
+# Deploy and test on Norns device
+./deploy_simple.sh
+```
+
 ## Continuous Integration
 The included GitHub workflow runs `make lint` and `make test` on every push and pull request.
 
@@ -31,3 +40,6 @@ The included GitHub workflow runs `make lint` and `make test` on every push and 
 make deploy PI_HOST=user@ip-address
 ```
 This syncs the repo to `~/dust/code/Foobar` on the device.
+
+## Testing Guide
+For detailed testing instructions, see [TESTING.md](TESTING.md).

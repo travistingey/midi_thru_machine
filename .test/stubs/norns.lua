@@ -20,6 +20,7 @@ params = {
   add_control = function() end,
   add_separator = function() end,
   add_group = function() end,
+  add_text = function() end,
   hide = function() end,
   set = function(_, k, v) params._values[k] = v end,
   get = function(_, k) return params._values[k] end,
