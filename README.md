@@ -31,3 +31,10 @@ The included GitHub workflow runs `make lint` and `make test` on every push and 
 make deploy PI_HOST=user@ip-address
 ```
 This syncs the repo to `~/dust/code/Foobar` on the device.
+
+## Documentation
+
+Additional architecture notes and known issues live in the `docs/` folder. See
+[`docs/scale_note_off_issue.md`](docs/scale_note_off_issue.md) for a discussion
+of note-off handling when scales change and how mismatched note values can leave
+notes stuck.

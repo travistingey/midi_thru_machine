@@ -122,6 +122,9 @@ function MIDIDevice:send(data)
 
                 elseif next.type == 'note_off' then
                     if next.ch == off.ch and (next.note == off.note_id or next.note_id and next.note_id == off.note_id) then
+                        if next.note ~= off.note then
+                            self.device:send(off)
+                        end
                         off_sent = true
                     end
 
@@ -135,9 +138,9 @@ function MIDIDevice:send(data)
 
                 elseif next.type == 'interrupt_scale' and next.ch == off.ch then
 
-                    local foobar = next.scale:quantize_note(off)
-                   
-                    if off.note % 12 ~= foobar.new_note % 12 then
+                    local requantized = next.scale:quantize_note(off)
+
+                    if off.note % 12 ~= requantized.new_note % 12 then
                         self.device:send(off)
                         off_sent = true
                     end
