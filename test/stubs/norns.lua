@@ -60,6 +60,22 @@ crow = {
   }
 }
 
+-- Map Foobar/lib/bitwise to project path early so other modules can require it
+package.preload['Foobar/lib/bitwise'] = function()
+  return require('lib/bitwise')
+end
+
+-- Provide minimal stub for musicutil expected by musicutil-extended module
+package.preload['musicutil'] = function()
+  return {
+    scale_names = {},
+    scale_notes = function() return {} end,
+    snap_note_to_array = function(note, arr) return note end,
+    CHORDS = {},
+    SCALES = {}
+  }
+end
+
 return {
   screen = screen,
   engine = engine,

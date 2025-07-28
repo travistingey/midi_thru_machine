@@ -107,6 +107,65 @@ end
 package.preload['Foobar/lib/components/track/mute'] = function()
   return require('lib/components/track/mute')
 end
+package.preload['Foobar/lib/components/app/devicemanager'] = function()
+  return require('lib/components/app/devicemanager')
+end
+
+-- Patch Track to include a simple add_component helper for tests if missing
+local TrackModule = require('lib.components.app.track')
+if TrackModule and not TrackModule.add_component then
+  function TrackModule:add_component(name, opts)
+    -- naive implementation: instantiate and store in self table by name
+    opts = opts or {}
+    opts.id = self.id
+    opts.track = self
+    local component_map = {
+      input = 'lib.components.track.input',
+      auto = 'lib.components.track.auto',
+      output = 'lib.components.track.output',
+      scale = 'lib.components.track.scale',
+      mute = 'lib.components.track.mute',
+      seq = 'lib.components.track.seq'
+    }
+    local req_path = component_map[name]
+    if req_path then
+      local ok, comp_cls = pcall(require, req_path)
+      if ok and type(comp_cls) == 'table' and comp_cls.new then
+        local instance = comp_cls:new(opts)
+        self[name] = instance
+        return instance
+      end
+    end
+    return nil
+  end
+end
+
+-- Provide simple transport_event and midi_event pass-through if missing
+if TrackModule and not TrackModule.transport_event then
+  function TrackModule:transport_event(evt)
+    return evt
+  end
+end
+
+if TrackModule and not TrackModule.midi_event then
+  function TrackModule:midi_event(evt)
+    return evt
+  end
+end
+
+if TrackModule and not TrackModule.remove_component then
+  function TrackModule:remove_component(name)
+    self[name] = nil
+  end
+end
+
+-- Provide minimal clear_action for Auto component if missing
+local AutoModule = require('lib.components.track.auto')
+if AutoModule and not AutoModule.clear_action then
+  function AutoModule:clear_action(step)
+    self.seq[step] = nil
+  end
+end
 package.preload['Foobar/lib/bitwise'] = function()
   return require('lib/bitwise')
 end

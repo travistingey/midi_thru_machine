@@ -43,12 +43,26 @@ make test-norns
 ```
 
 ### Manual Testing on Norns
-1. **Via Maiden Web Interface**:
-   - Open `http://norns.local`
-   - Navigate to the Foobar script
-   - In the REPL, run: `dofile('test/run_norns_test.lua')`
+1. **Via Maiden Web Interface**  
+   – open `http://norns.local`, select the *Foobar* script, then run  
+   ```lua
+   dofile('test/run_norns_test.lua')
+   ```
 
-2. **Via SSH**:
+2. **Via SSH & matron (recommended for full API access)**  
+   ```bash
+   # from your workstation
+   make test-norns-shell        # opens SSH session
+
+   # inside the SSH session
+   matron                       # starts the Lua REPL
+   > dofile('~/dust/code/Foobar/test/run_norns_test.lua')
+   ```
+
+   The runner prints a plain-text summary and exits back to the REPL.
+
+3. **Fallback – run Busted directly over SSH**  
+   (requires `busted` already installed on the Norns)  
    ```bash
    ssh we@norns.local
    cd ~/dust/code/Foobar

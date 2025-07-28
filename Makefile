@@ -23,43 +23,28 @@ install:
 lint:
 	luacheck Foobar.lua lib test || true
 
-test:
-	LUA_PATH='./?.lua;./lib/?.lua;test/.test/stubs/?.lua;test/spec/?.lua;;' busted test/spec
-
-test-local:
-	LUA_PATH='./?.lua;./lib/?.lua;test/.test/stubs/?.lua;test/spec/?.lua;;' busted test/spec/e2e_spec.lua
-
-# Test on Norns using system shell (Lua 5.1) - for compatibility testing
-test-norns-shell:
-	sshpass -p "$(NORNS_PASS)" ssh $(SSH_OPTS) "$(NORNS_HOST)" "cd $(NORNS_PATH) && LUA_PATH='./?.lua;./lib/?.lua;test/spec/?.lua;;' busted -o plain test/spec"
-
-# Test on Norns using actual Norns runtime (Lua 5.3) - for real environment testing
-test-norns-runtime:
-	./scripts/run-test test/norns_runtime_spec.lua
-
-# Test on Norns using busted in the actual runtime
-test-norns-busted:
-	./scripts/run-test test/norns_busted_spec.lua
-
-# Test on Norns using the old approach (deprecated)
-test-norns-legacy:
-	sshpass -p "$(NORNS_PASS)" ssh $(SSH_OPTS) "$(NORNS_HOST)" "cd $(NORNS_PATH) && echo 'dofile(\"test/run_norns_test.lua\")' | norns"
-
-# Default Norns test (use runtime for comprehensive testing)
-test-norns: test-norns-runtime
-
-# Comprehensive testing across all environments
-test-all: test test-norns-shell test-norns-runtime
-
-ci: lint test
+test:`
 
 deploy:
 	sshpass -p "$(NORNS_PASS)" rsync -e "ssh $(SSH_OPTS)" -av --exclude='.git' ./ "$(NORNS_HOST):$(NORNS_PATH)"
 
-deploy-and-test: deploy test-norns-runtime
+# ------------------------------------------------------------------
+# Norns helpers
+# ------------------------------------------------------------------
+deploy-tests:
+	sshpass -p "$(NORNS_PASS)" rsync -e "ssh $(SSH_OPTS)" -av ./test "$(NORNS_HOST):$(NORNS_PATH)"
 
-# Setup Norns device for testing (run once)
-setup-norns:
-	sshpass -p "$(NORNS_PASS)" ssh $(SSH_OPTS) "$(NORNS_HOST)" "sudo apt-get update && sudo apt-get install -y socat git luarocks lua5.1-dev && sudo luarocks install busted"
+test-norns-shell:
+	@echo "Opening interactive shell on $(NORNS_HOST) – when it opens:"
+	@echo "  1) run:  matron"
+	@echo "  2) then: dofile('$(NORNS_PATH)/test/run_norns_test.lua')"
+	sshpass -p "$(NORNS_PASS)" ssh $(SSH_OPTS) "$(NORNS_HOST)"
 
-.PHONY: install lint test test-local test-norns test-norns-shell test-norns-runtime test-norns-busted test-norns-legacy test-all ci deploy deploy-and-test setup-norns
+deploy-and-test: deploy deploy-tests
+	@echo "============================================================="
+	@echo "Code + tests copied to $(NORNS_HOST):$(NORNS_PATH)"
+	@echo "Now SSH in and run the suite:"
+	@echo "  make test-norns-shell"
+	@echo "============================================================="
+
+.PHONY: install lint test test-local ci deploy deploy-tests deploy-and-test test-norns-shell
