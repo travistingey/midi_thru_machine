@@ -47,12 +47,12 @@ function Input:midi_trigger(data)
             end
 
             event = self:process(event)
-            
-            if self.last_note then
-                self.last_note = event
-            else
-                self.last_note = event
+
+            if event.new_note then
+                event.note = event.new_note
             end
+
+            self.last_note = event
             
             self.track:send_input(event)
         elseif data.type == 'note_off' then
@@ -79,6 +79,9 @@ function Input:clock_trigger(data,process)
     if self.track.step > 0 and App.tick % self.track.step == self.track.reset_tick then
         local event = self:process(data)
         if event then
+            if event.new_note then
+                event.note = event.new_note
+            end
             clock.run(function()
                 self.track:send_input(event)
 

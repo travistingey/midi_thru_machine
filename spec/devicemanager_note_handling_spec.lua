@@ -38,6 +38,17 @@ describe('DeviceManager note handling', function()
     assert.are.equal(60, stub_device.sent[2].note)
   end)
 
+  it('ignores scale interrupt when pitch class is unchanged', function()
+    local dev = dm:get(1)
+    dev:send{type='note_on', note=60, vel=64, ch=1}
+
+    local scale = { quantize_note=function(_, data) return {new_note=data.note+12} end }
+    dev:emit('interrupt', {type='interrupt_scale', scale=scale, ch=1})
+
+    assert.are.equal(1, #stub_device.sent)
+    assert.are.equal('note_on', stub_device.sent[1].type)
+  end)
+
   it('ends previous note_on when same note_on arrives', function()
     local dev = dm:get(1)
     dev:send{type='note_on', note=62, vel=80, ch=1}
