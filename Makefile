@@ -21,7 +21,7 @@ ci: lint test
 norns:
 	ssh -i $(SSH_KEY) $(PI_HOST)
 farts:
-	ssh -T -i $(SSH_KEY) $(PI_HOST) 'matron' <<'EOF'
+	ssh -T -i $(SSH_KEY) $(PI_HOST) 'maiden repl' <<'EOF'
 	print("hello from make")
 	norns.script.load(norns.state.script)
 	EOF
