@@ -1,0 +1,17 @@
+require('norns')
+local mu = require('lib/musicutil-extended')
+
+describe('musicutil extensions', function()
+  it('converts intervals to bits and back', function()
+    local bits = mu.intervals_to_bits({0,4,7})
+    assert.are.equal(1| (1<<4) | (1<<7), bits)
+    local ints = mu.bits_to_intervals(bits)
+    assert.are.same({0,4,7}, ints)
+  end)
+
+  it('shifts scales', function()
+    local s = mu.intervals_to_bits({0,2,4,5,7,9,11})
+    local shifted = mu.shift_scale(s,2)
+    assert.is_number(shifted)
+  end)
+end)
