@@ -13,6 +13,16 @@
 --
 local path_name = "Foobar/lib/"
 local utilities = require(path_name .. "utilities")
+
+-- Lightweight recursive table copy (avoids GC spikes vs. util.table_copy on huge buffers)
+local function deep_copy(t)
+  if type(t) ~= "table" then return t end
+  local c = {}
+  for k, v in pairs(t) do
+    c[k] = deep_copy(v)
+  end
+  return c
+end
 local Grid = require(path_name .. "grid")
 local TrackComponent = require("Foobar/lib/components/track/trackcomponent")
 
@@ -45,6 +55,9 @@ function Seq:set(o)
 	self.playback_start = o.playback_start or 0 -- start of clip in ticks
 	self.playback_end = o.playback_end or self.playback_length -- end of clip in ticks
 	self.playback_loop = o.playback_loop or true -- loop the clip
+
+  -- In‑memory clip library (saved buffers / presets)
+  self.clips = o.clips or {}
 
 	-- Recording/playback/arm state flags
 	self.playing = false
@@ -83,17 +96,82 @@ function Seq:record(data)
 	if App.playing then
 		local step = App.tick % self.buffer_length
 
-		local current_time = os.clock()
-		local time_diff = current_time - self.last_tick
-    print('recording time diff', time_diff)
-		print('average tick', clock.get_beat_sec())
+		local tick_len = clock.get_beat_sec() / App.ppqn 
+
+		local dt = os.clock() - self.last_tick 
+		local offset = (dt / tick_len) - 1 
+		offset = util.clamp(offset, -0.5, 0.5)
 
 		if not self.buffer[step] then
 			self.buffer[step] = {}
 		end
-		table.insert(self.buffer[step], data)
+		table.insert(self.buffer[step], {data = data, off = offset})
 	end
 end
+
+function Seq:run(step)
+  local events   = self.playback_buffer[step]
+  if not events then return end
+
+  local tick_len = clock.get_beat_sec() / App.ppqn
+  for _, ev in ipairs(events) do
+    if ev.off ~= 0 then
+      clock.run(function()
+        clock.sleep(ev.off * tick_len)
+        self.track:send(ev.data)
+      end)
+    else
+      self.track:send(ev.data)
+    end
+  end
+end
+
+
+-----------------------------------------------
+-- Clip / Preset Handling (non‑blocking)
+-----------------------------------------------
+-- Save a region of the circular history buffer into self.clips[name].
+-- Copy is chunked inside a clock coroutine so UI/audio never hitch.
+--  * name        : string key for the clip library
+--  * first_step  : starting tick index (defaults to 0)
+--  * length      : number of ticks to copy (defaults to full buffer_length)
+--  * chunk       : ticks copied before yielding (defaults to 128)
+function Seq:save_clip(name, first_step, length, chunk)
+  assert(name, "Seq:save_clip requires a name")
+  first_step = first_step or 0
+  length     = length     or self.buffer_length
+  chunk      = chunk      or 128
+
+  -- Reserve slot so callers can check existence while copy runs
+  self.clips[name] = {}
+  local dst = self.clips[name]
+
+  clock.run(function()
+    for i = 0, length - 1 do
+      local src = (first_step + i) % self.buffer_length
+      if self.buffer[src] then
+        dst[i + 1] = deep_copy(self.buffer[src])
+      end
+      if i % chunk == 0 then
+        clock.sleep(0)        -- yield to scheduler, avoids audio dropouts
+      end
+    end
+    -- Notify listeners when finished
+    self:emit("clip_saved", name, dst)
+  end)
+end
+
+-- Quickly load a saved clip into playback; cheap because we just re‑point.
+function Seq:load_clip(name)
+  local clip = self.clips and self.clips[name]
+  if not clip then return false end
+  self.playback_buffer = clip
+  self.playback_length = #clip
+  self.step = 0
+  self:emit("clip_loaded", name, clip)
+  return true
+end
+
 
 function Seq:set_loop(loop_start, loop_end)
 	self.playback_start = loop_start

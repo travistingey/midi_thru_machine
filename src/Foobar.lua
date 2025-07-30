@@ -100,5 +100,5 @@ function r()
 end
 
 function cleanup() --------------- cleanup() is automatically called on script close
-	clock.cancel(redraw_clock_id) -- melt our clock vie the id we noted
+	clock.cancel(redraw_clock_id) -- melt our clock via the id we noted
 end
