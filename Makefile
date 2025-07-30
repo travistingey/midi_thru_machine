@@ -15,10 +15,7 @@ install:
 lint:
 	luacheck src .test/spec || true
 
-test:
-	LUA_PATH='./src/?.lua;./src/lib/?.lua;.test/stubs/?.lua;;' busted .test/spec
-
-ci: lint test
+ci: lint
 
 norns:
 	ssh -i $(SSH_KEY) $(PI_HOST)

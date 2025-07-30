@@ -1,7 +1,7 @@
 files = {
   'Foobar.lua',
   'lib/**/*.lua',
-  '.test/spec/**/*.lua'
+  'test/spec/**/*.lua'
 }
 
 globals = {
