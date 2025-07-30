@@ -9,6 +9,7 @@ const ws = new WebSocket(`ws://${host}:${port}`, ['bus.sp.nanomsg.org']);
 
 let responseReceived = false;
 let outputLines = [];
+let lastMessageTime = Date.now();
 
 ws.on('open', () => {
     console.log(`Sending command: ${command}`);
@@ -17,14 +18,18 @@ ws.on('open', () => {
 
 ws.on('message', (data) => {
     const text = data.toString();
+    lastMessageTime = Date.now();
+    
     // Capture each line returned by the Norns REPL
     outputLines.push(text.trim());
-    console.log('Received:', text);
 
     // The Norns REPL sends "<ok>" when the command has finished processing
     if (text.includes('<ok>')) {
         responseReceived = true;
-        ws.close();
+        // Add a small delay to ensure we get any final output
+        setTimeout(() => {
+            ws.close();
+        }, 100);
     }
 });
 
@@ -39,19 +44,17 @@ ws.on('close', () => {
     } else {
         // Print full output without <ok> line
         const filtered = outputLines.filter(l => l && l !== '<ok>');
-        if (filtered.length > 1) {
-            console.log('\n--- Full Output ---');
-            filtered.forEach(line => console.log(line));
-            console.log('-------------------');
-        }
+        console.log('\n--- Full Output ---');
+        filtered.forEach(line => console.log(line));
+        console.log('-------------------');
     }
 });
 
-// Timeout after 5 seconds
+// Timeout after 15 seconds (increased from 10)
 setTimeout(() => {
     if (!responseReceived) {
         console.log('Timeout: No response received');
         ws.close();
         process.exit(1);
     }
-}, 5000);
+}, 15000);

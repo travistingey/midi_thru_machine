@@ -1,263 +1,334 @@
-# Norns Testing System
+# Testing Framework
 
-This document describes the on-device testing system for Norns scripts, which allows running unit tests directly on the Norns hardware without external dependencies.
+This project uses a custom test framework that runs directly on Norns hardware without external dependencies.
 
 ## Overview
 
-The testing system consists of:
-- **`test/FoobarTests.lua`** - A self-contained Norns script that runs unit tests
-- **Vendored dependencies** - Busted testing framework and its dependencies included in `test/vendor/`
-- **Node.js bridge** - `scripts/send-to-norns.js` for communication with Norns
-- **Makefile automation** - Commands for deploying and running tests
+The test framework is designed to work within the constraints of the Norns environment:
+- No external package managers (luarocks)
+- No network dependencies during execution
+- Self-contained test scripts
+- Custom output capture for REPL compatibility
 
-## Fresh Installation Steps
+## Test Structure
 
-### 1. Prerequisites
-
-Ensure you have:
-- Node.js installed
-- SSH access to your Norns device
-- SSH key configured for passwordless access
-
-### 2. Install Node.js Dependencies
-
-```bash
-npm install
-```
-
-This installs the `ws` (WebSocket) library required for communication with Norns.
-
-### 3. Configure SSH Access
-
-Ensure your SSH key is configured in the Makefile:
-
-```makefile
-SSH_KEY=~/.ssh/norns_key
-PI_HOST=we@norns.local
-```
-
-### 4. Vendor Testing Dependencies
-
-```bash
-make vendor-busted
-```
-
-This clones and sets up:
-- **Busted** - Lua unit testing framework
-- **Penlight** - Lua utility library (required by Busted)
-- **Luassert** - Lua assertion library
-- **Say** - String internationalization (required by Luassert)
-- **lua-term** - Terminal color utilities (optional)
-
-### 5. Deploy Test Script
-
-```bash
-make deploy-tests
-```
-
-This copies the test script and all vendored dependencies to the Norns device.
-
-## Running Tests
-
-### Basic Test Execution
-
-```bash
-make test-norns
-```
-
-This command:
-1. Deploys the test script (`make deploy-tests`)
-2. Runs the tests on Norns (`make run-tests`)
-
-### Individual Commands
-
-```bash
-# Deploy only
-make deploy-tests
-
-# Run tests only (assumes already deployed)
-make run-tests
-
-# Vendor dependencies only
-make vendor-busted
-```
-
-## Test Script Structure
-
-### `test/FoobarTests.lua`
+### Test Script (`test/FoobarTests.lua`)
 
 The main test script follows Norns conventions:
 
 ```lua
--- Script metadata
-script_name = 'FoobarTests'
+-- FoobarTests.lua - Simple test framework for Norns
+local script_dir = debug.getinfo(1).source:match("@?(.*/)") or ""
 
--- Path resolution for dependencies
-local info = debug.getinfo(1, 'S')
-local script_path = info.source:match('^@(.+)$')
-local script_dir = script_path and script_path:gsub('[^/]+$', '') or '/home/we/dust/code/FoobarTests/'
-
--- Configure package.path for vendored dependencies
-local paths = {
-  script_dir .. 'vendor/?.lua',
-  script_dir .. 'vendor/?/init.lua',
-  -- ... more paths
+-- Simple test framework
+local TestFramework = {
+  tests = {},
+  passed = 0,
+  failed = 0,
+  current_suite = nil
 }
-package.path = table.concat(paths, ';') .. ';' .. package.path
 
--- Output capture hook
-local function create_writer_hook()
-  -- Captures io.write calls and forwards to print()
+function TestFramework.describe(name, fn)
+  TestFramework.current_suite = name
+  print("📋 " .. name)
+  fn()
+  TestFramework.current_suite = nil
 end
-io.write = create_writer_hook()
 
--- Norns lifecycle function
+function TestFramework.it(name, fn)
+  local status, err = pcall(fn)
+  if status then
+    print("  ✅ " .. name)
+    TestFramework.passed = TestFramework.passed + 1
+  else
+    print("  ❌ " .. name .. " - " .. tostring(err))
+    TestFramework.failed = TestFramework.failed + 1
+  end
+end
+
+-- Simple assertion functions that match luassert API
+local assert = {
+  is_true = function(value, message)
+    if not value then
+      error(message or "expected true, got " .. tostring(value))
+    end
+  end,
+  
+  is_false = function(value, message)
+    if value then
+      error(message or "expected false, got " .. tostring(value))
+    end
+  end,
+  
+  are = {
+    equal = function(expected, actual, message)
+      if expected ~= actual then
+        error(message or ("expected " .. tostring(expected) .. ", got " .. tostring(actual)))
+      end
+    end,
+    
+    same = function(expected, actual, message)
+      -- Deep comparison for tables
+      if type(expected) ~= type(actual) then
+        error(message or "types don't match")
+      end
+      if type(expected) == "table" then
+        for k, v in pairs(expected) do
+          if actual[k] ~= v then
+            error(message or "tables don't match at key " .. tostring(k))
+          end
+        end
+        for k, v in pairs(actual) do
+          if expected[k] ~= v then
+            error(message or "tables don't match at key " .. tostring(k))
+          end
+        end
+      else
+        if expected ~= actual then
+          error(message or ("expected " .. tostring(expected) .. ", got " .. tostring(actual)))
+        end
+      end
+    end
+  },
+  
+  is_table = function(value, message)
+    if type(value) ~= "table" then
+      error(message or "expected table, got " .. type(value))
+    end
+  end,
+  
+  is_number = function(value, message)
+    if type(value) ~= "number" then
+      error(message or "expected number, got " .. type(value))
+    end
+  end,
+  
+  is_nil = function(value, message)
+    if value ~= nil then
+      error(message or "expected nil, got " .. tostring(value))
+    end
+  end
+}
+
+-- Make functions globally available
+_G.describe = TestFramework.describe
+_G.it = TestFramework.it
+_G.test_assert = assert  -- Use different name to avoid conflicts with Norns
+
 function init()
-  -- Test execution goes here
-  print('Running tests...')
-  -- ... test code ...
-  print('<ok>')
+  print("🧪 Running Foobar test-suite on Norns…")
+  print("Looking for tests in: " .. script_dir .. 'lib/spec/')
+  
+  -- Load and run all spec files
+  local specs = {
+    'minimal_spec',
+    'simple_spec',
+    'example_spec',
+    'app_spec',
+    'bitwise_spec',
+    'device_manager_spec',
+    'devicemanager_note_handling_spec',
+    'grid_spec',
+    'input_spec',
+    'launchcontrol_spec',
+    'mode_spec',
+    'musicutil_extended_spec',
+    'mute_spec',
+    'output_spec',
+    'seq_spec',
+    'trackcomponent_spec'
+  }
+  
+  for _, spec_name in ipairs(specs) do
+    local ok, err = pcall(function()
+      dofile(script_dir .. 'lib/spec/' .. spec_name .. '.lua')
+    end)
+    if not ok then
+      print("⚠️  Failed to load " .. spec_name .. ": " .. tostring(err))
+    end
+  end
+  
+  -- Print summary
+  print("")
+  print("📊 Test Results:")
+  print("  Passed: " .. TestFramework.passed)
+  print("  Failed: " .. TestFramework.failed)
+  print("  Total: " .. (TestFramework.passed + TestFramework.failed))
+  
+  if TestFramework.failed == 0 then
+    print("🎉 All tests completed successfully!")
+  else
+    print("💥 Some tests failed!")
+  end
+  
+  print("<ok>")
 end
 ```
 
-### Key Features
+### Test Specs (`test/lib/spec/`)
 
-1. **Self-contained** - No external dependencies required
-2. **Norns-compatible** - Uses `init()` function for proper lifecycle
-3. **Output capture** - Custom `io.write` hook ensures test output is visible
-4. **Path resolution** - Dynamically determines script location
-5. **Vendored dependencies** - All testing libraries included
-
-## Writing Tests
-
-### Basic Test Structure
-
-Create test files in `test/spec/`:
+Individual test files follow this pattern:
 
 ```lua
--- test/spec/example_spec.lua
-describe('Example Test Suite', function()
-  it('should pass basic assertions', function()
-    assert(true, 'Basic assertion')
-    assert(2 + 2 == 4, 'Math works')
+-- test/lib/spec/example_spec.lua
+require('norns')
+local SomeModule = require('lib/some_module')
+
+describe('SomeModule', function()
+  it('should do something', function()
+    local instance = SomeModule:new()
+    test_assert.is_table(instance)
+    test_assert.are.equal(expected, actual)
   end)
   
-  it('should test string operations', function()
-    local str = 'hello'
-    assert(str == 'hello', 'String comparison')
+  it('should handle errors', function()
+    test_assert.is_true(true)
+    test_assert.is_false(false)
   end)
 end)
 ```
 
-### Available Assertions
+## Available Assertions
 
-The vendored `luassert` library provides extended assertions:
+The test framework provides these assertion functions:
+
+### Basic Assertions
+- `test_assert.is_true(value, message)` - Asserts value is true
+- `test_assert.is_false(value, message)` - Asserts value is false
+- `test_assert.is_nil(value, message)` - Asserts value is nil
+
+### Type Assertions
+- `test_assert.is_table(value, message)` - Asserts value is a table
+- `test_assert.is_number(value, message)` - Asserts value is a number
+
+### Comparison Assertions
+- `test_assert.are.equal(expected, actual, message)` - Asserts equality
+- `test_assert.are.same(expected, actual, message)` - Deep comparison for tables
+
+## Running Tests
+
+### On Norns Hardware
+
+```bash
+# Deploy and run tests
+make test-norns
+
+# Deploy tests only
+make deploy-tests
+
+# Run tests only (if already deployed)
+make run-tests
+```
+
+### Test Output
+
+Tests provide clear, emoji-enhanced output:
+
+```
+🧪 Running Foobar test-suite on Norns…
+Looking for tests in: /home/we/dust/code/FoobarTests/lib/spec/
+📋 Minimal test
+  ✅ should pass
+📋 Simple test
+  ✅ should pass
+  ✅ should do basic math
+  ✅ should handle strings
+
+📊 Test Results:
+  Passed: 4
+  Failed: 0
+  Total: 4
+🎉 All tests completed successfully!
+```
+
+## Writing Tests
+
+### Test Structure
+
+1. **Require dependencies**: Start with `require('norns')` and any modules you're testing
+2. **Use describe blocks**: Group related tests with descriptive names
+3. **Write individual tests**: Use `it()` for specific test cases
+4. **Use test_assert**: All assertions use the `test_assert` prefix
+
+### Example Test
 
 ```lua
--- Basic assertions
-assert.is_true(value)
-assert.is_false(value)
-assert.is_nil(value)
-assert.is_not_nil(value)
+require('norns')
+local MyComponent = require('lib/components/my_component')
 
--- Comparison assertions
-assert.are.equal(expected, actual)
-assert.are_not.equal(expected, actual)
-assert.are.same(expected, actual)
-
--- Type assertions
-assert.is_string(value)
-assert.is_number(value)
-assert.is_table(value)
-assert.is_function(value)
+describe('MyComponent', function()
+  it('should initialize correctly', function()
+    local component = MyComponent:new{param=1}
+    test_assert.is_table(component)
+    test_assert.are.equal(1, component.param)
+  end)
+  
+  it('should handle errors gracefully', function()
+    local ok, err = pcall(function()
+      MyComponent:new{invalid_param=true}
+    end)
+    test_assert.is_false(ok)
+    test_assert.is_table(err)
+  end)
+end)
 ```
+
+## Key Features
+
+### 1. Norns Compatibility
+- Runs directly on Norns hardware
+- No external dependencies
+- Uses Norns script lifecycle (`init()` function)
+- Proper output capture for REPL
+
+### 2. Simple and Reliable
+- Custom test framework (no busted/luassert complexity)
+- Clear error messages
+- Fast execution
+- No circular dependency issues
+
+### 3. Familiar Syntax
+- `describe()` and `it()` functions like popular frameworks
+- Assertion API similar to luassert
+- Easy to understand and maintain
+
+### 4. Conflict Avoidance
+- Uses `test_assert` instead of `assert` to avoid conflicts with Norns internals
+- Doesn't interfere with Norns' global namespace
+- Safe to run alongside other Norns scripts
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **"module 'luassert' not found"**
-   - Ensure `make vendor-busted` has been run
-   - Check that `make deploy-tests` copied all vendor files
+1. **"attempt to index a nil value (field 'are')"**
+   - Make sure you're using `test_assert.are.equal()` not `assert.are.equal()`
 
-2. **No test output visible**
-   - Verify the `io.write` hook is working
-   - Check that tests are actually running in `init()`
+2. **Tests not loading**
+   - Check that spec files are in `test/lib/spec/`
+   - Verify file names match the list in `FoobarTests.lua`
 
-3. **SSH connection issues**
-   - Verify SSH key is configured correctly
-   - Check Norns IP address in Makefile
-
-4. **Tests not discovered**
-   - Ensure test files are in `test/spec/`
-   - Check `lfs.lua` stub returns correct file names
+3. **Module not found errors**
+   - Ensure modules are in the correct paths
+   - Check that `require('norns')` is at the top of test files
 
 ### Debugging
 
-Enable verbose output by modifying `test/FoobarTests.lua`:
+Add debug output to your tests:
 
 ```lua
-function init()
-  print('Debug: Starting test execution...')
-  -- Add debug prints throughout
-  print('Debug: Tests completed')
-  print('<ok>')
-end
+describe('Debug test', function()
+  it('should show debug info', function()
+    print("Debug: component = " .. tostring(component))
+    test_assert.is_table(component)
+  end)
+end)
 ```
 
-## Integration with Development Workflow
+## Best Practices
 
-### Watch Mode
-
-The `watch` command can be extended to run tests:
-
-```makefile
-watch: reload
-	@echo "Running tests..."
-	@make run-tests
-```
-
-### CI/CD Integration
-
-Tests can be integrated into CI/CD pipelines:
-
-```bash
-# Run tests and fail on any errors
-make test-norns || exit 1
-```
-
-## Architecture Notes
-
-### Why On-Device Testing?
-
-1. **Real Environment** - Tests run in actual Norns Lua environment
-2. **Hardware Integration** - Tests can access real MIDI, grid, encoders
-3. **No External Dependencies** - Self-contained testing environment
-4. **Immediate Feedback** - Tests run directly on target hardware
-
-### Communication Flow
-
-```
-Node.js Script → WebSocket → Norns REPL → Test Script → Output Capture → Node.js
-```
-
-1. `send-to-norns.js` sends Lua commands via WebSocket
-2. Norns REPL executes commands and returns output
-3. Test script runs with vendored dependencies
-4. Custom `io.write` hook captures all output
-5. Output is streamed back through WebSocket to Node.js
-
-### Dependency Management
-
-All testing dependencies are vendored to avoid:
-- External package managers (luarocks)
-- Network dependencies during test execution
-- Version conflicts between environments
-
-## Future Enhancements
-
-1. **Test Coverage** - Integrate coverage reporting
-2. **Parallel Testing** - Run multiple test suites simultaneously
-3. **Test Categories** - Unit, integration, and hardware tests
-4. **Continuous Testing** - Auto-run tests on file changes
-5. **Test Reporting** - Generate HTML/JSON test reports 
+1. **Keep tests focused**: Each test should verify one specific behavior
+2. **Use descriptive names**: Test names should clearly describe what they're testing
+3. **Test error conditions**: Don't just test happy paths
+4. **Mock external dependencies**: Use stubs for MIDI, grid, etc.
+5. **Group related tests**: Use `describe()` blocks to organize tests logically 

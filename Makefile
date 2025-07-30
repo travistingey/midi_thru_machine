@@ -13,7 +13,7 @@ install:
 	brew install fswatch || true
 
 lint:
-	luacheck src .test/spec || true
+	luacheck src test/lib/spec || true
 
 ci: lint
 
@@ -31,40 +31,7 @@ reload:
 TEST_SCRIPT_NAME=$(SCRIPT_NAME)Tests
 TEST_PATH=/home/we/dust/code/$(TEST_SCRIPT_NAME)/$(TEST_SCRIPT_NAME).lua
 
-vendor-busted:
-	@echo "Vendoring busted + dependencies into test/vendor…"
-	# Busted
-	@if [ ! -d test/vendor/busted ]; then \
-		git clone --depth 1 https://github.com/Olivine-Labs/busted.git test/vendor/busted; \
-	else \
-		cd test/vendor/busted && git pull --depth 1; \
-	fi
-	# Penlight (pl.*)
-	@if [ ! -d test/vendor/penlight ]; then \
-		git clone --depth 1 https://github.com/lunarmodules/Penlight.git test/vendor/penlight; \
-	else \
-		cd test/vendor/penlight && git pull --depth 1; \
-	fi
-	# Luassert
-	@if [ ! -d test/vendor/luassert ]; then \
-		git clone --depth 1 https://github.com/lunarmodules/luassert.git test/vendor/luassert; \
-	else \
-		cd test/vendor/luassert && git pull --depth 1; \
-	fi
-	# Say (string i18n util required by luassert)
-	@if [ ! -d test/vendor/say ]; then \
-		git clone --depth 1 https://github.com/Olivine-Labs/say.git test/vendor/say; \
-	else \
-		cd test/vendor/say && git pull --depth 1; \
-	fi
-	# lua-term (terminal colour utils) – optional but nice
-	@if [ ! -d test/vendor/lua-term ]; then \
-		git clone --depth 1 https://github.com/hoelzro/lua-term.git test/vendor/lua-term; \
-	else \
-		cd test/vendor/lua-term && git pull --depth 1; \
-	fi
-
-deploy-tests: vendor-busted
+deploy-tests:
 	rsync -av --delete -e "ssh -i $(SSH_KEY)" test/ $(PI_HOST):~/dust/code/$(TEST_SCRIPT_NAME)/
 
 run-tests:
@@ -78,4 +45,4 @@ watch:
 	@echo "Press Ctrl+C to stop"
 	fswatch -o src/ | xargs -n1 -I{} sh -c 'echo "Change detected at $$(date)"; make lint && make deploy && make reload'
 
-.PHONY: install lint test ci deploy reload vendor-busted deploy-tests run-tests test-norns watch
+.PHONY: install lint test ci deploy reload deploy-tests run-tests test-norns watch

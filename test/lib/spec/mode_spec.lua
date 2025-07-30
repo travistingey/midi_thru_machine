@@ -1,6 +1,6 @@
-require('norns')
-local Mode = require('lib/components/app/mode')
-local TrackComponent = require('lib/components/track/trackcomponent')
+local tf = require('FoobarTests/lib/test_framework')
+local Mode = require('Foobar/lib/components/app/mode')
+local TrackComponent = require('Foobar/lib/components/track/trackcomponent')
 
 App = {default={screen=function() end}, midi_grid={send=function() end}, screen_dirty=false}
 
@@ -10,12 +10,12 @@ local dummy_component = {
   disable=function() end
 }
 
-describe('Mode component', function()
-  it('enables and disables', function()
+tf.describe('Mode component', function()
+  tf.it('enables and disables', function()
     local m = Mode:new{id=1, components={dummy_component}}
     m:enable()
-    assert.is_true(m.enabled)
+    tf.assert.is_true(m.enabled)
     m:disable()
-    assert.is_false(m.enabled)
+    tf.assert.is_false(m.enabled)
   end)
 end)

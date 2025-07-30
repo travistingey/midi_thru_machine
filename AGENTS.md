@@ -63,9 +63,10 @@ lib/components/
 ### 1. On-Device Testing
 
 **Pattern**: Tests must run directly on Norns hardware:
-- Use vendored dependencies (no luarocks)
+- Use custom test framework (no external dependencies)
 - Self-contained test scripts
 - Custom output capture for REPL compatibility
+- Avoid conflicts with Norns internals (use `test_assert` instead of `assert`)
 
 **Requirement**: All tests must be executable on real hardware, not just in simulation.
 
@@ -94,16 +95,16 @@ end
 
 **Requirement**: Test scripts must use `init()` function and proper output capture.
 
-### 3. Dependency Vendoring
+### 3. Custom Test Framework
 
-**Pattern**: Vendor all testing dependencies:
+**Pattern**: Use custom test framework built for Norns:
 ```
-test/vendor/
-├── busted/       # Testing framework
-├── penlight/     # Lua utilities
-├── luassert/     # Assertion library
-├── say/          # String i18n
-└── lua-term/     # Terminal colors
+test/
+├── FoobarTests.lua    # Main test script
+├── lib/
+│   ├── spec/          # Test specifications
+│   └── stubs/         # Norns environment stubs
+└── scripts/           # Test utilities
 ```
 
 **Requirement**: No external package managers or network dependencies during test execution.
