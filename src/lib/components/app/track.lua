@@ -38,16 +38,13 @@ function Track:new(o)
 	self.build_chain(o)
 	
 	o:on('mixer_event',function(data)
-		print(o.id .. ' MIXER -------')
-		tab.print(data)
 		if o.output_device  then
 			o.output_device:send(data)
 		end
 	end)
 
 	o:on('cc_event',function(data)
-		print(o.id .. ' -------')
-		tab.print(data)
+
 		if o.output_device  then
 			o.output_device:send(data)
 		end
@@ -97,8 +94,6 @@ function Track:set(o)
 		elseif data.type == "note_off" then
 			self.note_on[data.note] = nil
 		elseif (data.type == "cc") then
-			print('track ' .. self.id .. ' input event')
-			tab.print(data)
 			-- if self.midi_in > 0 and data.ch == self.midi_in then
 			-- 	self:emit('cc_event', data)
 			-- end
@@ -585,9 +580,9 @@ end
 
 -- Builds multiple component chains in single call.
 function Track:build_chain()
-	local chain = {self.auto, self.input, self.scale, self.mute, self.output} 
+	
 	local send_input = {self.scale, self.mute, self.output} 
-	local pre_scale = {self.scale, self.mute, self.output} 
+	local chain = {self.auto, self.input, self.seq, self.scale, self.mute, self.output} 
 	local send =  {self.mute, self.output}
 
 	self.process_transport = self:chain_components(chain, 'process_transport')
@@ -596,7 +591,6 @@ function Track:build_chain()
 	self.send = self:chain_components(send, 'process_midi')
 	self.send_input = self:chain_components(send_input, 'process_midi')
 	self.send_output = self:chain_components({self.output}, 'process_midi')
-	self.send_event = self:chain_components(pre_scale, 'process_midi')
 end
 
 -----------

@@ -594,11 +594,9 @@ function DeviceManager:register_midi_device(port)
             elseif event.type == 'program_change' then
                 self:emit(device.id, 'program_change', event)
             elseif event.type == 'cc' then
-                print('device manager midi event')
                 event.processed = 'true'
                 
                 for i,track in ipairs(device.triggers) do
-                    print('hi ' .. device.name .. ' ' .. track.id)
                     track:emit('cc_event', event)
                 end
             else

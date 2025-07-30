@@ -40,7 +40,8 @@ Output.types['midi'] = {
 			if not (track.midi_out == 17 and send.ch) then
 				send.ch = track.midi_out
 			end
-
+			
+			track:emit('midi_send', send)
 			track.output_device:send(send)
 
 			return data

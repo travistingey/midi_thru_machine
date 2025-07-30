@@ -301,10 +301,11 @@ end
 function LaunchControl:set_led(force)
     
     local now = os.clock()
+    
     if not force and now - self.last_led_time < self.led_interval then
-        print('blocked set', now - self.last_led_time)
         return
     end
+
     self.last_led_time = now
     local t = self.track
     local s = self.state

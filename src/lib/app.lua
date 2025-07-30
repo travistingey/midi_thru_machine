@@ -130,7 +130,7 @@ local function draw_tempo()
   
   App:set_font(1)
   screen.move(124, 7)
-  local quarter = math.floor(App.tick / (App.ppqn) ) + 1
+  local quarter = math.floor(App.tick / (App.ppqn) )
   local measure = math.floor(quarter / 4) + 1
   local count = math.floor(quarter % 4) + 1
   screen.text_right( measure .. ':' .. count)
