@@ -437,15 +437,9 @@ function App:init(o)
     self.scale[i] = Scale:new({id = i})
   end
  
-
   ----------------------------------------------------------------------------
-  -- Device & Mode Registration
+  -- params:default() loads preset and triggeres all set_actions in params
   ----------------------------------------------------------------------------
-  App:register_midi_in(1)
-  -- App:register_midi_grid(3)
-
-  -- App:register_mixer(6)
-  -- App:register_launchcontrol(8)
 
   print('params:default')
   params:default()
@@ -453,46 +447,58 @@ function App:init(o)
 
 end
 
+
+--==============================================================================
+-- Transport Event Handling (MIDI In, Clock, etc.)
+--==============================================================================
+function App:on_transport(data)
+  
+  if data.type == "start" then
+    self:on_start()
+  elseif data.type == "continue" then
+    self:on_start(true)
+  elseif data.type == "stop" then
+    self:on_stop()
+  elseif data.type == "clock" then
+    self:on_tick()
+  end
+
+ self.screen_dirty = true
+
+end
+
 --==============================================================================
 -- Playback Control Functions (Start, Stop, etc.)
 --==============================================================================
-function App:start(continue)
+function App:on_start(continue)
   print('App start')
   self.playing = true
   self.tick = 0
   self.start_time = clock.get_beats()
   self.last_time  = clock.get_beats()
 
-  for i = 1, #self.track do
-    if continue then
-      self.track[i].output_device:start()
-    else
-      self.track[i].output_device:continue()
-    end
+  if continue then
+    self:emit('transport_event', {type = 'continue'})
+  else
+    self:emit('transport_event', {type = 'start'})
   end
 
-  ----------------------------------------------------------------------------
   -- Transport Tick Loop using PPQN
-  ----------------------------------------------------------------------------
   if params:get('clock_source') == 1 then
     self.clock = clock.run(function()
       while true do
         clock.sync(1 / self.ppqn)
-        App:send_tick()
+        App:on_tick()
         App.screen_dirty = true
       end
     end)
   end
 end
 
-function App:stop()
+function App:on_stop()
   print('App stop')
   self.playing = false
-
-  for i = 1, #self.track do
-    self.track[i].output_device:stop()
-  end
-
+  self:emit('transport_event', {type = 'stop'})
   if params:get('clock_source') == 1 then
     if self.clock then
       clock.cancel(self.clock)
@@ -500,54 +506,20 @@ function App:stop()
   end
 end
 
-function App.apply(settings)
-  for k, v in pairs(settings) do
-    params:set(k, v)
-  end
-end
-
 --==============================================================================
 -- Tick and Transport Handling
 --==============================================================================
-function App:send_tick()
-  self:on_tick()
-end
 
 -- The on_tick function updates the tick counter,
 -- and dispatches clock events to tracks.
 function App:on_tick()
   self.last_time = clock.get_beats()
   self.tick = self.tick + 1
+  self:emit('transport_event', {type = 'clock'})
 end
 
---==============================================================================
--- Transport Event Handling (MIDI In, Clock, etc.)
---==============================================================================
-function App:on_transport(data)
-  if params:get('clock_source') > 1 then
-    if data.type == "start" then
-      self:start()
-    elseif data.type == "continue" then
-      self:start(true)
-    elseif data.type == "stop" then
-      self:stop()
-    elseif data.type == "clock" then
-      self:on_tick()
-    end
-   
-    for i = 1, #self.track do
-      self.track[i]:process_transport(data)
-    end
 
-    self.screen_dirty = true
-  end
-end
 
-function App:on_midi(data)
-  if App.debug then
-    tab.print(data)
-  end
-end
 
 --==============================================================================
 -- MIDI In/Out and Grid Registration
@@ -819,6 +791,51 @@ function App:set_mode(index)
   self.mode[self.current_mode].track = App.current_track
   self.mode[self.current_mode]:enable()
 end
+--==============================================================================
+-- Feature Flags Management
+--==============================================================================
+function App:toggle_flag(flag_name)
+  local flags = require('Foobar/lib/utilities/feature_flags')
+  if flags[flag_name] ~= nil then
+    flags[flag_name] = not flags[flag_name]
+    print("Feature flag '" .. flag_name .. "' set to: " .. tostring(flags[flag_name]))
+    return flags[flag_name]
+  else
+    print("Unknown feature flag: " .. flag_name)
+    return nil
+  end
+end
+
+function App:set_flag(flag_name, value)
+  local flags = require('Foobar/lib/utilities/feature_flags')
+  if flags[flag_name] ~= nil then
+    flags[flag_name] = value
+    print("Feature flag '" .. flag_name .. "' set to: " .. tostring(flags[flag_name]))
+    return flags[flag_name]
+  else
+    print("Unknown feature flag: " .. flag_name)
+    return nil
+  end
+end
+
+function App:get_flag(flag_name)
+  local flags = require('Foobar/lib/utilities/feature_flags')
+  if flags[flag_name] ~= nil then
+    return flags[flag_name]
+  else
+    print("Unknown feature flag: " .. flag_name)
+    return nil
+  end
+end
+
+function App:list_flags()
+  local flags = require('Foobar/lib/utilities/feature_flags')
+  print("Available feature flags:")
+  for flag_name, value in pairs(flags) do
+    print("  " .. flag_name .. " = " .. tostring(value))
+  end
+end
+
 --==============================================================================
 -- Return the App Class
 --==============================================================================

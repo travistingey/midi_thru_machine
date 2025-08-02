@@ -27,6 +27,14 @@ reload:
 	@echo "Reloading script on Norns..."
 	node scripts/send-to-norns.js "for script,value in pairs(package.loaded) do if string.match(script, '$(SCRIPT_NAME)') then package.loaded[script] = nil end end; norns.script.load('$(SCRIPT_PATH)')"
 
+start:
+	make deploy
+	make reload
+
+test:
+	make deploy-tests
+	make run-tests
+
 # Deploy and run tests on Norns
 TEST_SCRIPT_NAME=$(SCRIPT_NAME)Tests
 TEST_PATH=/home/we/dust/code/$(TEST_SCRIPT_NAME)/$(TEST_SCRIPT_NAME).lua
@@ -37,8 +45,6 @@ deploy-tests:
 run-tests:
 	@echo "Running test suite on Norns..."
 	node scripts/send-to-norns.js "for script,value in pairs(package.loaded) do if string.match(script, '$(TEST_SCRIPT_NAME)') then package.loaded[script] = nil end end; norns.script.load('$(TEST_PATH)')"
-
-test-norns: deploy-tests run-tests
 
 watch:
 	@echo "Watching for changes in src/ and .test/..."

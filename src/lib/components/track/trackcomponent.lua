@@ -2,10 +2,13 @@
 local TrackComponent = {}
 TrackComponent.__index = TrackComponent
 
+local debug = require('Foobar/lib/utilities/diagnostics')
+
 function TrackComponent:new(o)
 	o = o or {}
 	setmetatable(o, self)
 	self:set(o)
+	debug.trace_load("TrackComponent", self.name)
 	return o
 end
 
@@ -40,26 +43,27 @@ function TrackComponent:set(o)
 	end
 end
 
-function TrackComponent:process_transport(data, track)
+function TrackComponent:process_transport(data)
+	self:log('process_transport', "type=%s", (data and data.type))
 	if data ~= nil then
 		local send = data
-
 		if self.transport_event ~= nil then
-			send = self:transport_event(data, track)
+			send = self:transport_event(data)
 		end
 
-		self:emit('transport_event', data, track)
+		self:emit('transport_event', data)
 		
 		return send
 	end
 end
 
-function TrackComponent:process_midi(data, track)
+function TrackComponent:process_midi(data)
+	self:log('process_midi', "type=%s", (data and data.type))
 	if data ~= nil then
 		local send
 
 		if self.midi_event ~= nil then
-			send = self:midi_event(data, track)
+			send = self:midi_event(data)
 		end
 
 		self:emit('midi_event', data, self)
@@ -100,6 +104,10 @@ function TrackComponent:emit(event_name, ...)
             listener(...)
         end
     end
+end
+
+function TrackComponent:log(fmt, ...)
+	debug.log(self, name, fmt, ...)
 end
 
 return TrackComponent

@@ -470,17 +470,22 @@ function Track:add_trigger()
 end
 
 function Track:enable()
+	
+
 	if self.output_type == 'midi' and self.midi_out > 0  or self.output_type == 'crow' then
 		self.enabled = true
 		self:build_chain()
+		self.transport_cleanup = App:on('transport_event', function(e) self:process_transport(e) end)
 	else
 		self:disable()
 	end
 end
 
-
 function Track:disable()
 	self.enabled = false
+	if self.transport_cleanup then
+		self.transport_cleanup()
+	end
 end
 
 -- Event listener management

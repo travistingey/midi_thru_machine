@@ -584,9 +584,9 @@ function DeviceManager:register_midi_device(port)
         else
             if event.type == 'start' or event.type == 'stop' or event.type == 'continue' or event.type == 'clock' then
                 if device.id == self.clock_in_id then
+                    App:on_transport(event)
                     for _, dev in ipairs(self.midi) do
                         if dev.id ~= self.clock_in_id then
-                            self:emit(dev.id, 'transport_event', event)
                             dev:send(event)
                         end
                     end
@@ -595,7 +595,6 @@ function DeviceManager:register_midi_device(port)
                 self:emit(device.id, 'program_change', event)
             elseif event.type == 'cc' then
                 event.processed = 'true'
-                
                 for i,track in ipairs(device.triggers) do
                     track:emit('cc_event', event)
                 end
