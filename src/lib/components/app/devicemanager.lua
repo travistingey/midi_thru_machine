@@ -425,15 +425,17 @@ end
 function DeviceManager:register_params()
   local midi_devices = self.midi_device_names
   params:add_group('DEVICES', 4)
+  
   params:add_option('clock_in', 'Clock Input', midi_devices)
-  params:add_option('mixer', 'Mixer', midi_devices)
-  params:add_option('midi_grid', 'Grid', midi_devices)
-  params:add_trigger('panic', 'Panic')
-  params:set_action('panic', function() App:panic() end)
   params:set_action('clock_in', function(x)
+     print('Clock in on port ' .. x .. ': ' .. midi_devices[x])
     self.clock_in_id = x
   end)
+
+  params:add_option('mixer', 'Mixer', midi_devices)
   params:set_action('mixer', function(x) self:register_mixer_device(x) end)
+
+  params:add_option('midi_grid', 'Grid', midi_devices)
   params:set_action('midi_grid', function(x)
     print('LaunchPad Mini on port ' .. x .. ': ' .. midi_devices[x])
     local midi_grid = self:get(x)
@@ -457,6 +459,11 @@ function DeviceManager:register_params()
     App.mode[App.current_mode]:refresh()
     App.midi_grid:send({240,0,32,41,2,13,0,127,247}) -- Set Launchpad to Programmer Mode
   end)
+
+  params:add_trigger('panic', 'Panic')
+  params:set_action('panic', function() App:panic() end)
+  
+  
 
 end
 
@@ -584,6 +591,7 @@ function DeviceManager:register_midi_device(port)
         else
             if event.type == 'start' or event.type == 'stop' or event.type == 'continue' or event.type == 'clock' then
                 if device.id == self.clock_in_id then
+                    print('DM Transport: ' .. event.type .. ' from device ' .. device.id)
                     App:on_transport(event)
                     for _, dev in ipairs(self.midi) do
                         if dev.id ~= self.clock_in_id then

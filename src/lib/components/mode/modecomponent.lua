@@ -96,7 +96,7 @@ function ModeComponent:enable()
 
 
     if mode_component.transport_event ~= nil then
-        table.insert(self.mode.cleanup_functions, track_component:on('transport_event', function(data)
+        table.insert(self.mode.cleanup_functions, App:on('transport_event', function(data)
             mode_component:transport_event(track_component, data)
         end))
     end
@@ -113,22 +113,13 @@ end
 
 function ModeComponent:disable()
 
-
     self.grid:disable()
     self.grid.event = nil
     self.grid.set_grid = nil
 
-    if self.component and self.track then
-        local component = self:get_component()
-        -- print('removed old on_ methods modecomponent L:123')
-        -- component.on_midi = nil
-        -- component.on_transport = nil
-
-        -- Removes event listeners from track components
-        for i,cleanup in ipairs(self.cleanup_functions)do
-            cleanup()
-        end
-
+     -- Removes event listeners from track components
+    for i,cleanup in ipairs(self.cleanup_functions)do
+        cleanup()
     end
 
 end

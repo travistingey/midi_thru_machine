@@ -13,7 +13,7 @@ install:
 	brew install fswatch || true
 
 lint:
-	luacheck src test/lib/spec || true
+	luacheck src || true 
 
 ci: lint
 
@@ -27,7 +27,7 @@ reload:
 	@echo "Reloading script on Norns..."
 	node scripts/send-to-norns.js "for script,value in pairs(package.loaded) do if string.match(script, '$(SCRIPT_NAME)') then package.loaded[script] = nil end end; norns.script.load('$(SCRIPT_PATH)')"
 
-start:
+push:
 	make deploy
 	make reload
 
@@ -49,6 +49,6 @@ run-tests:
 watch:
 	@echo "Watching for changes in src/ and .test/..."
 	@echo "Press Ctrl+C to stop"
-	fswatch -o src/ | xargs -n1 -I{} sh -c 'echo "Change detected at $$(date)"; make lint && make deploy && make reload'
+	fswatch -o src/ | xargs -n1 -I{} sh -c 'echo "Change detected at $$(date)"; make push'
 
 .PHONY: install lint test ci deploy reload deploy-tests run-tests test-norns watch

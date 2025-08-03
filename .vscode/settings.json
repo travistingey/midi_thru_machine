@@ -1,0 +1,8 @@
+{
+    "editor.formatOnSave": false,
+    "editor.formatOnType": true,
+    "editor.formatOnPaste": true,
+    "editor.minimap.autohide": true,
+    "editor.minimap.enabled": true,
+    "editor.inlineSuggest.showToolbar": "always"
+}

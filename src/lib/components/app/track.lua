@@ -1,3 +1,4 @@
+local debug = require('Foobar/lib/utilities/diagnostics')
 
 local Grid = require('Foobar/lib/grid')
 local utilities = require('Foobar/lib/utilities')
@@ -40,6 +41,12 @@ function Track:new(o)
 	o:on('mixer_event',function(data)
 		if o.output_device  then
 			o.output_device:send(data)
+		end
+	end)
+	
+	App:on('transport_event', function(data)
+		if o.process_transport and o.enabled then	
+			o.process_transport(o,data)
 		end
 	end)
 
@@ -471,11 +478,10 @@ end
 
 function Track:enable()
 	
-
 	if self.output_type == 'midi' and self.midi_out > 0  or self.output_type == 'crow' then
 		self.enabled = true
 		self:build_chain()
-		self.transport_cleanup = App:on('transport_event', function(e) self:process_transport(e) end)
+
 	else
 		self:disable()
 	end
@@ -483,9 +489,6 @@ end
 
 function Track:disable()
 	self.enabled = false
-	if self.transport_cleanup then
-		self.transport_cleanup()
-	end
 end
 
 -- Event listener management
@@ -563,11 +566,11 @@ function Track:chain_components(components, process_name)
 	local track = self
 	return function(s, input)
 		
-		if track.debug then
-			print(process_name .. ' on track ' .. track.id)
-		end
-
 		if track.enabled then
+			if App.flags.get('trace_track') == self.id then
+				debug.log('T%s: %s\t%s', self.id, process_name, debug.table_line(input) )
+			end
+
 			local output = input
 			for i, trackcomponent in ipairs(components) do
 				if trackcomponent[process_name] then

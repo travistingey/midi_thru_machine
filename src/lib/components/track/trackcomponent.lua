@@ -43,30 +43,37 @@ function TrackComponent:set(o)
 	end
 end
 
-function TrackComponent:process_transport(data)
-	self:log('process_transport', "type=%s", (data and data.type))
+function TrackComponent:process_transport(data, track) 
+	-- if trace_chain is false, TC:log will handle conditionals
+	if App.flags.get('trace_chain') == false or App.flags.get('trace_chain') == 'process_transport' then
+		self:log(track, 'process_transport\t%s', debug.table_line(data))
+	end
+
 	if data ~= nil then
 		local send = data
 		if self.transport_event ~= nil then
-			send = self:transport_event(data)
+			send = self:transport_event(data, track)
 		end
 
-		self:emit('transport_event', data)
+		self:emit('transport_event', data, track)
 		
 		return send
 	end
 end
 
-function TrackComponent:process_midi(data)
-	self:log('process_midi', "type=%s", (data and data.type))
+function TrackComponent:process_midi(data, track)
+	-- if trace_chain is false, TC:log will handle conditionals
+	if App.flags.get('trace_chain') == false or App.flags.get('trace_chain') == 'process_midi' then
+		self:log(track, 'process_midi\t%s', debug.table_line(data))
+	end
 	if data ~= nil then
 		local send
 
 		if self.midi_event ~= nil then
-			send = self:midi_event(data)
+			send = self:midi_event(data, track)
 		end
 
-		self:emit('midi_event', data, self)
+		self:emit('midi_event', data, track)
 
 		return send
 	end
@@ -106,8 +113,29 @@ function TrackComponent:emit(event_name, ...)
     end
 end
 
-function TrackComponent:log(fmt, ...)
-	debug.log(self, name, fmt, ...)
+function TrackComponent:log(track, fmt, ...)
+	if self.track then
+		track = self.track
+	end
+
+	if track then
+		fmt = string.format("[T%s:%s] %s", track.id, self.name, fmt)
+	end
+
+	-- Log conditions
+	-- 1. No track trace, but component trace is enabled
+	local cond_1 = not App.flags.get('trace_track') and App.flags.get('trace_component') == self.name
+	-- 2. Track trace is enabled, but component trace is disabled
+	local cond_2 = App.flags.get('trace_track') == track.id and not App.flags.get('trace_component')
+	-- 3. Track trace is enabled, and component trace is enabled
+	local cond_3 = App.flags.get('trace_track') == track.id and App.flags.get('trace_component') == self.name
+	-- 4. Verbose flag is enabled
+	local cond_4 = App.flags.get('verbose')
+	
+	if cond_1 or cond_2 or cond_3 or cond_4 or cond_5 then
+		debug.log(fmt, ...)
+	end
+
 end
 
 return TrackComponent
