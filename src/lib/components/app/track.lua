@@ -564,39 +564,40 @@ end
 
 -- Returns a function that takes an ordered component list and chains the output to input based on list order
 function Track:chain_components(components, process_name)
-	local track = self
-	return function(s, input)
-		
-		if track.enabled then
-			-- Create chain tracer
-			local event_type = process_name:match('process_(.+)') or process_name
-			local chain_tracer = Tracer.chain(self.id, event_type)
-			
-			-- Add correlation ID for flow tracking
-			input = Tracer.add_correlation_id(input)
-			
-			chain_tracer:log_flow('chain_start', input)
+    local track = self
+    return function(s, input)
+        if track.enabled then
+            -- Translate internal process names to user‑facing chain types so
+            -- cfg.chains can match { 'midi', 'transport', … }.
+            local chain_type
+            if process_name == 'process_midi' then
+                chain_type = 'midi'
+            elseif process_name == 'process_transport' then
+                chain_type = 'transport'
+            else
+                chain_type = process_name
+            end
+            local chain_tracer = Tracer.chain(self.id, chain_type)
+            -- Add correlation ID for flow tracking
+            input = Tracer.add_correlation_id(input)
+            chain_tracer:log_flow('chain_start', input)
 
-			local output = input
-			for i, trackcomponent in ipairs(components) do
-				if trackcomponent[process_name] then
-					local prev_output = output
-					output = trackcomponent[process_name](trackcomponent, output, track)
-					
-					chain_tracer:log_flow(trackcomponent.name, prev_output, output)
-					
-					if output == nil then 
-						chain_tracer:log_flow('chain_terminated', prev_output)
-						return 
-					end
-				end
-			end
-			
-			chain_tracer:log_flow('chain_complete', input, output)
-			return output
-		end
-
-	end
+            local output = input
+            for i, trackcomponent in ipairs(components) do
+                if trackcomponent[process_name] then
+                    local prev_output = output
+                    output = trackcomponent[process_name](trackcomponent, output, track)
+                    chain_tracer:log_flow(trackcomponent.name, prev_output, output)
+                    if output == nil then 
+                        chain_tracer:log_flow('chain_terminated', prev_output)
+                        return 
+                    end
+                end
+            end
+            chain_tracer:log_flow('chain_complete', input, output)
+            return output
+        end
+    end
 end
 
 -- Builds multiple component chains in single call.

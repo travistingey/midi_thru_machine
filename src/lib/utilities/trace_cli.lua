@@ -1,5 +1,6 @@
 -- trace_cli.lua - Command line interface for tracing system
 local Tracer = require('Foobar/lib/utilities/tracer')
+local feature_flags = require('Foobar/lib/utilities/feature_flags')
 
 -- Global CLI functions for easy access from Norns REPL
 
@@ -20,7 +21,7 @@ function trace_verbose(level)
     Tracer.verbose_level(level)
 end
 
-function trace_flows(enabled)
+function trace_flow(enabled)
     Tracer.trace_flows(enabled)
 end
 
@@ -30,10 +31,6 @@ end
 
 function trace_params(enabled)
     Tracer.trace_params(enabled)
-end
-
-function trace_load_order(enabled)
-    Tracer.trace_load_order(enabled)
 end
 
 function trace_help()

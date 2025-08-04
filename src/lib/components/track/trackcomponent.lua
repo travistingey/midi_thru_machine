@@ -50,7 +50,7 @@ end
 
 function TrackComponent:process_transport(data, track) 
 	-- Create tracer for this component (handles shared vs owned)
-	local tracer = Tracer.for_track_component(self, track, 'transport')
+	local tracer = Tracer.component(self, track, 'transport')
 	
 	-- Add correlation ID if flow tracing is enabled
 	data = Tracer.add_correlation_id(data)
@@ -61,7 +61,6 @@ function TrackComponent:process_transport(data, track)
 		local send = data
 		if self.transport_event ~= nil then
 			send = self:transport_event(data, track)
-			tracer:log_flow('transport_event', data, send)
 		end
 
 		self:emit('transport_event', data, track)
@@ -72,18 +71,17 @@ end
 
 function TrackComponent:process_midi(data, track)
 	-- Create tracer for this component (handles shared vs owned)
-	local tracer = Tracer.for_track_component(self, track, 'midi')
+	local tracer = Tracer.component(self, track, 'midi')
 	
 	-- Add correlation ID if flow tracing is enabled
 	data = Tracer.add_correlation_id(data)
 	
 	if data ~= nil then
-		tracer:log_flow('process_midi', data)
+
 		
 		local send
 		if self.midi_event ~= nil then
 			send = self:midi_event(data, track)
-			tracer:log_flow('midi_event', data, send)
 		end
 
 		self:emit('midi_event', data, track)

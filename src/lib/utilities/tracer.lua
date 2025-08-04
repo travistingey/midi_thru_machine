@@ -2,8 +2,9 @@
 -- Supports Device Manager → Tracks → Track Components → Output flow
 -- Handles shared components, events, params, and modes
 
-local diagnostics = require('Foobar/lib/utilities/diagnostics')
-local feature_flags = require('Foobar/lib/utilities/feature_flags')
+local diagnostics    = require('Foobar/lib/utilities/diagnostics')
+local feature_flags  = require('Foobar/lib/utilities/feature_flags')
+local cfg            = feature_flags.flags 
 
 local Tracer = {}
 Tracer.__index = Tracer
@@ -26,27 +27,6 @@ local EVENT_TYPES = {
     CC = 'cc', 
     TRANSPORT = 'transport',
     MIXER = 'mixer'
-}
-
--- Global trace configuration - single source of truth
-local trace_config = {
-    -- Hierarchical filters
-    devices = {}, -- device IDs to trace
-    tracks = {}, -- track IDs to trace (1-16) - EMPTY means NO tracing by default
-    components = {}, -- component names to trace ('seq', 'scale', etc.)
-    chains = {}, -- chain types to trace ('midi', 'cc', 'transport')
-    
-    -- Feature filters
-    events = false, -- trace event system
-    params = false, -- trace param changes
-    modes = false, -- trace mode/screen interactions
-    load_order = false, -- trace load order
-    
-    -- Output options
-    correlate_flows = false, -- add correlation IDs for flow tracking
-    show_timestamps = false, -- add timestamps to logs
-    max_data_length = 100, -- truncate long data strings
-    verbose_level = 1 -- 1=minimal, 2=detailed, 3=full
 }
 
 -- Performance cache for trace decisions
@@ -74,6 +54,7 @@ function Tracer:new(context)
 end
 
 function Tracer:should_trace()
+    
     -- Check cache first for performance
     local cache_key = self:build_cache_key()
     local now = util.time()
@@ -91,57 +72,32 @@ function Tracer:should_trace()
         trace_cache.cache_expires = now + trace_cache.cache_duration
     end
     trace_cache.cache[cache_key] = should_trace
-    
     return should_trace
 end
 
+-----------------------------------------------------------------
+-- Tracer:evaluate_trace_conditions()
+-----------------------------------------------------------------
 function Tracer:evaluate_trace_conditions()
     local ctx = self.context
+
+    -- 1. honour global hammer
+    if cfg.verbose then return true end
+
+    -- 2. using the feature flags
+    local hit = false
     
-    -- Always trace if verbose mode is on
-    if feature_flags.get('verbose') then
-        return true
-    end
-    
-    -- Default is OFF - only trace if explicitly enabled
-    local should_trace = false
-    
-    -- Check if this context matches any enabled filters
-    
-    -- 1. Track level filtering - most common
-    if ctx.track_id and #trace_config.tracks > 0 then
-        should_trace = self:contains(trace_config.tracks, ctx.track_id)
-    end
-    
-    -- 2. Device level filtering  
-    if ctx.device_id and #trace_config.devices > 0 then
-        should_trace = should_trace or self:contains(trace_config.devices, ctx.device_id)
-    end
-    
-    -- 3. Component level filtering
-    if ctx.component_name and #trace_config.components > 0 then
-        should_trace = should_trace or self:contains(trace_config.components, ctx.component_name)
-    end
-    
-    -- 4. Chain/Event type filtering
-    if ctx.event_type and #trace_config.chains > 0 then
-        should_trace = should_trace or self:contains(trace_config.chains, ctx.event_type)
-    end
-    
-    -- 5. Feature-specific filtering
-    if ctx.context_type then
-        if ctx.context_type == 'load' and trace_config.load_order then
-            should_trace = true
-        elseif ctx.context_type == 'event' and trace_config.events then
-            should_trace = true
-        elseif ctx.context_type == 'param' and trace_config.params then
-            should_trace = true
-        elseif ctx.context_type == 'mode' and trace_config.modes then
-            should_trace = true
-        end
-    end
-    
-    return should_trace
+    if ctx.track_id   and #cfg.tracks      > 0 then hit = self:contains(cfg.tracks, ctx.track_id)   end
+    if ctx.device_id  and #cfg.devices     > 0 then hit = hit or self:contains(cfg.devices, ctx.device_id) end
+    if ctx.component_name and #cfg.components > 0 then hit = hit or self:contains(cfg.components, ctx.component_name) end
+    if ctx.event_type and #cfg.chains      > 0 then hit = hit or self:contains(cfg.chains, ctx.event_type) end
+
+    if ctx.context_type == 'load'  and cfg.load_trace then hit = true end
+    if ctx.context_type == 'event' and cfg.events     then hit = true end
+    if ctx.context_type == 'param' and cfg.params     then hit = true end
+    if ctx.context_type == 'mode'  and cfg.modes      then hit = true end
+
+    return hit
 end
 
 function Tracer:contains(table, value)
@@ -168,7 +124,6 @@ end
 
 function Tracer:log(level, fmt, ...)
     if not self.enabled then return end
-    
     local message = self:format_message(level, fmt, ...)
     diagnostics.log(message, ...)
 end
@@ -179,7 +134,7 @@ function Tracer:log_flow(step, data, output)
     -- Extract correlation ID from the data itself
     local flow_id = ""
     
-    if trace_config.correlate_flows then
+    if cfg.correlate_flows then
         if type(data) == "table" and data.correlation_id then
             flow_id = data.correlation_id:sub(-4) -- Just show last 4 chars
         elseif type(output) == "table" and output.correlation_id then
@@ -223,7 +178,7 @@ function Tracer:log_flow(step, data, output)
     end
     
     -- Apply verbose level filtering
-    local verbose_level = trace_config.verbose_level or 1
+    local verbose_level = cfg.verbose_level or 1
     
     if step == "chain_start" then
         local event_info = ctx.event_type and (ctx.event_type .. ":\t") or ""
@@ -324,7 +279,7 @@ end
 
 function Tracer:log_load(component_name, load_id)
     -- Minimal implementation for now
-    if not self.enabled then return end
+    if not cfg.load_trace then return end
     diagnostics.log("LOAD: %s", component_name)
 end
 
@@ -352,7 +307,14 @@ function Tracer.track(track_id, event_type)
     })
 end
 
-function Tracer.component(component_name, track_id, event_type)
+function Tracer.component(component, track, event_type)
+    local track_id = nil
+    local component_name = component.name
+    if component.track then
+        track_id = component.track.id
+    elseif track then
+        track_id = track.id
+    end
     return Tracer:new({
         context_type = CONTEXT_TYPES.COMPONENT,
         component_name = component_name,
@@ -397,7 +359,7 @@ function Tracer.for_track_component(component, track, event_type)
 end
 
 function Tracer.add_correlation_id(data)
-    if not trace_config.correlate_flows then
+    if not cfg.correlate_flows then
         return data
     end
     
@@ -424,11 +386,12 @@ function Tracer.add_correlation_id(data)
     return data_with_id
 end
 
--- CLI Functions - directly modify the main trace_config
+-- CLI Functions - directly modify the feature flags
 function Tracer.trace_tracks(...)
-    trace_config.tracks = {...}
-    if next(trace_config.tracks) then
-        print("Tracing tracks: " .. table.concat(trace_config.tracks, ", "))
+
+    feature_flags.set('tracks', {...})
+    if next(cfg.tracks) then
+        print("Tracing tracks: " .. table.concat(cfg.tracks, ", "))
     else
         print("Tracing tracks: NONE")
     end
@@ -436,63 +399,63 @@ function Tracer.trace_tracks(...)
 end
 
 function Tracer.trace_clear()
-    trace_config.tracks = {}
-    trace_config.devices = {}
-    trace_config.components = {}
-    trace_config.chains = {}
-    trace_config.verbose_level = 1
-    trace_config.correlate_flows = false
-    trace_config.events = false
-    trace_config.params = false
-    trace_config.modes = false
-    trace_config.load_order = false
+    feature_flags.set('tracks', {})
+    feature_flags.set('devices', {})
+    feature_flags.set('components', {})
+    feature_flags.set('chains', {})
+    feature_flags.set('verbose_level', 1)
+    feature_flags.set('correlate_flows', false)
+    feature_flags.set('events', false)
+    feature_flags.set('params', false)
+    feature_flags.set('modes', false)
+    feature_flags.set('load_trace', false)
     Tracer.clear_cache()
     print("All tracing cleared")
 end
 
 function Tracer.trace_show()
     print("=== Trace Configuration ===")
-    print("Tracks: " .. (next(trace_config.tracks) and 
-        table.concat(trace_config.tracks, ", ") or "NONE"))
-    print("Verbose Level: " .. trace_config.verbose_level)
-    print("Flow Correlation: " .. (trace_config.correlate_flows and "ON" or "OFF"))
-    print("Events: " .. (trace_config.events and "ON" or "OFF"))
-    print("Params: " .. (trace_config.params and "ON" or "OFF"))
-    print("Load Order: " .. (trace_config.load_order and "ON" or "OFF"))
+    print("Tracks: " .. (next(cfg.tracks) and 
+        table.concat(cfg.tracks, ", ") or "NONE"))
+    print("Verbose Level: " .. cfg.verbose_level)
+    print("Flow Correlation: " .. (cfg.correlate_flows and "ON" or "OFF"))
+    print("Events: " .. (cfg.events and "ON" or "OFF"))
+    print("Params: " .. (cfg.params and "ON" or "OFF"))
+    print("Load Order: " .. (cfg.load_trace and "ON" or "OFF"))
 end
 
 function Tracer.verbose_level(level)
     if level then
-        trace_config.verbose_level = level
+        feature_flags.set('verbose_level', level)
         local level_names = {"minimal", "detailed", "full"}
         print("Verbose level: " .. level .. " (" .. (level_names[level] or "unknown") .. ")")
     else
-        print("Current verbose level: " .. trace_config.verbose_level)
+        print("Current verbose level: " .. cfg.verbose_level)
         print("Levels: 1=minimal, 2=detailed, 3=full")
     end
 end
 
 function Tracer.trace_flows(enabled)
     if enabled == nil then enabled = true end
-    trace_config.correlate_flows = enabled
+    feature_flags.set('correlate_flows', enabled)
     print("Flow correlation: " .. (enabled and "ON" or "OFF"))
 end
 
 function Tracer.trace_events(enabled)
     if enabled == nil then enabled = true end
-    trace_config.events = enabled
+    feature_flags.set('events', enabled)
     print("Event tracing: " .. (enabled and "ON" or "OFF"))
 end
 
 function Tracer.trace_params(enabled)
     if enabled == nil then enabled = true end
-    trace_config.params = enabled
+    feature_flags.set('params', enabled)
     print("Parameter tracing: " .. (enabled and "ON" or "OFF"))
 end
 
-function Tracer.trace_load_order(enabled)
+function Tracer.trace_load_trace(enabled)
     if enabled == nil then enabled = true end
-    trace_config.load_order = enabled
+    feature_flags.set('load_trace', enabled)
     print("Load order tracing: " .. (enabled and "ON" or "OFF"))
 end
 
@@ -516,7 +479,7 @@ function Tracer.trace_help()
     print("Features:")
     print("  trace_events(true)       -- trace event system")
     print("  trace_params(true)       -- trace parameter changes")
-    print("  trace_load_order(true)   -- trace component loading")
+    print("  trace_load_trace(true)   -- trace component loading")
     print("")
     print("Utility:")
     print("  trace_help()             -- show this help")

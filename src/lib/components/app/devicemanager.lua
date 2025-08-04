@@ -3,6 +3,7 @@
 local path_name = 'Foobar/lib/'
 local utilities = require(path_name .. 'utilities')
 local LaunchControl = require(path_name .. 'launchcontrol')
+local Tracer       = require('Foobar/lib/utilities/tracer')
 
 local DeviceManager = {}
 DeviceManager.__index = DeviceManager
@@ -518,6 +519,9 @@ function DeviceManager:off(device_id, event_name, listener)
 end
 
 function DeviceManager:emit(device_id, event_name, data)
+    if data == nil then data = {} end
+    -- Add / keep a correlation‑ID so every downstream listener shares the same flow tag
+    data = Tracer.add_correlation_id(data)
     -- Emit device event to subscribers
     if self.event_listeners
        and self.event_listeners[device_id]
