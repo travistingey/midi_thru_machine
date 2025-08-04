@@ -12,7 +12,7 @@
 local boolean_flags = {
 	unit_test = false, -- runs unit tests in scripts
 	verbose = false, -- flip this inside a script for extra prints
-	load_trace = false, -- trace the load order of scripts
+	load_trace = true, -- trace the load order of scripts
 }
 local trace_flags = {
   trace_device = false, -- trace events propegating through devices in devicemanager

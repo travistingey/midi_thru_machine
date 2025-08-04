@@ -591,7 +591,8 @@ function DeviceManager:register_midi_device(port)
         else
             if event.type == 'start' or event.type == 'stop' or event.type == 'continue' or event.type == 'clock' then
                 if device.id == self.clock_in_id then
-                    print('DM Transport: ' .. event.type .. ' from device ' .. device.id)
+                    local tracer = require('Foobar/lib/utilities/tracer').device(device.id, 'transport')
+                    tracer:log('debug', 'Transport: %s from device %s', event.type, device.id)
                     App:on_transport(event)
                     for _, dev in ipairs(self.midi) do
                         if dev.id ~= self.clock_in_id then

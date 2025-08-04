@@ -24,6 +24,7 @@ local musicutil = require(path_name .. "musicutil-extended")
 local DeviceManager = require("Foobar/lib/components/app/devicemanager")
 local LaunchControl = require(path_name .. "launchcontrol")
 local feature_flags = require(path_name .. "utilities/feature_flags")
+local trace = require(path_name .. "utilities/trace_cli")
 local LATCH_CC = 64
 
 --==============================================================================
@@ -479,7 +480,8 @@ end
 -- Playback Control Functions (Start, Stop, etc.)
 --==============================================================================
 function App:on_start(continue)
-	print("App start")
+	local tracer = require('Foobar/lib/utilities/tracer').device(0, 'transport')
+	tracer:log('info', 'App start')
 	self.playing = true
 	self.tick = 0
 	self.start_time = clock.get_beats()
@@ -504,7 +506,8 @@ function App:on_start(continue)
 end
 
 function App:on_stop()
-	print("App stop")
+	local tracer = require('Foobar/lib/utilities/tracer').device(0, 'transport')
+	tracer:log('info', 'App stop')
 	self.playing = false
 	self:emit("transport_event", { type = "stop" })
 	if params:get("clock_source") == 1 then

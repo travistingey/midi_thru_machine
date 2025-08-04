@@ -3,12 +3,17 @@ local TrackComponent = {}
 TrackComponent.__index = TrackComponent
 
 local debug = require('Foobar/lib/utilities/diagnostics')
+local Tracer = require('Foobar/lib/utilities/tracer')
 
 function TrackComponent:new(o)
 	o = o or {}
 	setmetatable(o, self)
 	self:set(o)
-	debug.trace_load("TrackComponent", self.name)
+	
+	-- Load order tracing
+	local load_tracer = Tracer.load()
+	load_tracer:log_load(self.name, debug.next_load_id())
+	
 	return o
 end
 
@@ -44,15 +49,19 @@ function TrackComponent:set(o)
 end
 
 function TrackComponent:process_transport(data, track) 
-	-- if trace_chain is false, TC:log will handle conditionals
-	if App.flags.get('trace_chain') == false or App.flags.get('trace_chain') == 'process_transport' then
-		self:log(track, 'process_transport\t%s', debug.table_line(data))
-	end
-
+	-- Create tracer for this component (handles shared vs owned)
+	local tracer = Tracer.for_track_component(self, track, 'transport')
+	
+	-- Add correlation ID if flow tracing is enabled
+	data = Tracer.add_correlation_id(data)
+	
 	if data ~= nil then
+		tracer:log_flow('process_transport', data)
+		
 		local send = data
 		if self.transport_event ~= nil then
 			send = self:transport_event(data, track)
+			tracer:log_flow('transport_event', data, send)
 		end
 
 		self:emit('transport_event', data, track)
@@ -62,15 +71,19 @@ function TrackComponent:process_transport(data, track)
 end
 
 function TrackComponent:process_midi(data, track)
-	-- if trace_chain is false, TC:log will handle conditionals
-	if App.flags.get('trace_chain') == false or App.flags.get('trace_chain') == 'process_midi' then
-		self:log(track, 'process_midi\t%s', debug.table_line(data))
-	end
+	-- Create tracer for this component (handles shared vs owned)
+	local tracer = Tracer.for_track_component(self, track, 'midi')
+	
+	-- Add correlation ID if flow tracing is enabled
+	data = Tracer.add_correlation_id(data)
+	
 	if data ~= nil then
+		tracer:log_flow('process_midi', data)
+		
 		local send
-
 		if self.midi_event ~= nil then
 			send = self:midi_event(data, track)
+			tracer:log_flow('midi_event', data, send)
 		end
 
 		self:emit('midi_event', data, track)
@@ -106,36 +119,20 @@ function TrackComponent:off(event_name, listener)
 end
 
 function TrackComponent:emit(event_name, ...)
-    if self.event_listeners and self.event_listeners[event_name]then
+	-- Event system tracing
+	local event_tracer = Tracer.event(self.context)
+	local listener_count = 0
+	
+    if self.event_listeners and self.event_listeners[event_name] then
+		listener_count = #self.event_listeners[event_name]
+		event_tracer:log_event(event_name, {...}, listener_count)
+		
         for _, listener in ipairs(self.event_listeners[event_name]) do
             listener(...)
         end
     end
 end
 
-function TrackComponent:log(track, fmt, ...)
-	if self.track then
-		track = self.track
-	end
 
-	if track then
-		fmt = string.format("[T%s:%s] %s", track.id, self.name, fmt)
-	end
-
-	-- Log conditions
-	-- 1. No track trace, but component trace is enabled
-	local cond_1 = not App.flags.get('trace_track') and App.flags.get('trace_component') == self.name
-	-- 2. Track trace is enabled, but component trace is disabled
-	local cond_2 = App.flags.get('trace_track') == track.id and not App.flags.get('trace_component')
-	-- 3. Track trace is enabled, and component trace is enabled
-	local cond_3 = App.flags.get('trace_track') == track.id and App.flags.get('trace_component') == self.name
-	-- 4. Verbose flag is enabled
-	local cond_4 = App.flags.get('verbose')
-	
-	if cond_1 or cond_2 or cond_3 or cond_4 or cond_5 then
-		debug.log(fmt, ...)
-	end
-
-end
 
 return TrackComponent

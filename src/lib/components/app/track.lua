@@ -1,4 +1,5 @@
 local debug = require('Foobar/lib/utilities/diagnostics')
+local Tracer = require('Foobar/lib/utilities/tracer')
 
 local Grid = require('Foobar/lib/grid')
 local utilities = require('Foobar/lib/utilities')
@@ -567,21 +568,33 @@ function Track:chain_components(components, process_name)
 	return function(s, input)
 		
 		if track.enabled then
-			if App.flags.get('trace_track') == self.id then
-				debug.log('T%s: %s\t%s', self.id, process_name, debug.table_line(input) )
-			end
+			-- Create chain tracer
+			local event_type = process_name:match('process_(.+)') or process_name
+			local chain_tracer = Tracer.chain(self.id, event_type)
+			
+			-- Add correlation ID for flow tracking
+			input = Tracer.add_correlation_id(input)
+			
+			chain_tracer:log_flow('chain_start', input)
 
 			local output = input
 			for i, trackcomponent in ipairs(components) do
 				if trackcomponent[process_name] then
+					local prev_output = output
 					output = trackcomponent[process_name](trackcomponent, output, track)
-					if output == nil then return end
+					
+					chain_tracer:log_flow(trackcomponent.name, prev_output, output)
+					
+					if output == nil then 
+						chain_tracer:log_flow('chain_terminated', prev_output)
+						return 
+					end
 				end
 			end
+			
+			chain_tracer:log_flow('chain_complete', input, output)
 			return output
 		end
-
-		
 
 	end
 end
