@@ -363,7 +363,7 @@ function DeviceManager:register_mixer_device(port)
     return -- Skip if no mixer device is connected
   end
 
-  print("Mixer on port " .. port .. ": " .. mixer_device.name)
+  print("MIXER\tPORT " .. port .. "\t" .. mixer_device.name)
   local trimmed_name = util.trim_string_to_width(mixer_device.name, 70)
   local props = {
     type = 'mixer',
@@ -398,25 +398,51 @@ function DeviceManager:new()
 
     d.device_names = {} -- Indexed by device.id
     d.midi_device_names = {}
-    
+    d.midi_device_abbrs = {}
     print('Registering Devices:')
-    -- Register MIDI devices
+
+    local names = { trimmed = {}, abbr = {}, counts={} }
+
+    -- Extract device names
     for i = 1, #midi.vports do
-        d:register_midi_device(i)
+        local midi_device = midi.connect(i)
+        if midi_device.name ~= 'none' then
+            names.trimmed[i] = util.trim_string_to_width(midi_device.name, 70)
+            names.abbr[i] = string.gsub(string.upper(string.sub(midi_device.name, 1,8)), "%s+$", "")
+            names.counts[names.abbr[i]] = (names.counts[names.abbr[i]] or 0) + 1
+        end
+    end
+
+    -- Handle duplicate names by appending numbers
+    local renamed = {store={}, counts={}}
+    for i = 1, #names.abbr do
+        local name = names.abbr[i]
+        if names.counts[name] > 1 then
+
+            if renamed.counts[name] then
+                renamed.counts[name] = renamed.counts[name] + 1
+            else
+                renamed.counts[name] = 1
+            end
+            table.insert(renamed.store, name .. ' ' .. renamed.counts[name])
+        else
+            table.insert(renamed.store, name)
+        end
+    end
+
+    names.abbr = renamed.store
+
+    for i = 1, #midi.vports do
+        d:register_midi_device(i, names)
     end
 
     print('\n')
 
     -- Register Virtual Device
     d:register_virtual_device()
-    
     -- Register Crow device
     d:register_crow_device()
 
-    
-
-    -- Register Grid
-    --d:register_grid_device()
 
     d.none = d:add({id = 0})
     
@@ -429,16 +455,22 @@ function DeviceManager:register_params()
   
   params:add_option('clock_in', 'Clock Input', midi_devices)
   params:set_action('clock_in', function(x)
-     print('Clock in on port ' .. x .. ': ' .. midi_devices[x])
+    if App.flags.state.initializing then return end
+    print('CLOCK\tPORT ' .. x .. '\t' .. midi_devices[x])
     self.clock_in_id = x
   end)
 
   params:add_option('mixer', 'Mixer', midi_devices)
-  params:set_action('mixer', function(x) self:register_mixer_device(x) end)
+  params:set_action('mixer', function(x)
+    if App.flags.state.initializing then return end
+    self:register_mixer_device(x)
+end)
 
   params:add_option('midi_grid', 'Grid', midi_devices)
   params:set_action('midi_grid', function(x)
-    print('LaunchPad Mini on port ' .. x .. ': ' .. midi_devices[x])
+    if App.flags.state.initializing then return end
+    print('GRID\tPORT ' .. x .. '\t' .. midi_devices[x])
+    
     local midi_grid = self:get(x)
     App.midi_grid.event = nil
     App.midi_grid = midi_grid
@@ -520,8 +552,7 @@ end
 
 function DeviceManager:emit(device_id, event_name, data)
     if data == nil then data = {} end
-    -- Add / keep a correlation‑ID so every downstream listener shares the same flow tag
-    data = Tracer.add_correlation_id(data)
+    
     -- Emit device event to subscribers
     if self.event_listeners
        and self.event_listeners[device_id]
@@ -529,6 +560,10 @@ function DeviceManager:emit(device_id, event_name, data)
 
         -- Create a shallow copy of the listeners to prevent issues during iteration
         local listeners = { table.unpack(self.event_listeners[device_id][event_name]) }
+       
+        -- Add / keep a correlation‑ID so every downstream listener shares the same flow tag
+        data = Tracer.add_correlation_id(data)
+        Tracer.device(device_id, 'emit'):log_flow(event_name, data)
 
         for _, listener in ipairs(listeners) do
             listener(data)
@@ -536,14 +571,15 @@ function DeviceManager:emit(device_id, event_name, data)
     end
 end
 
-function DeviceManager:send(device_id, event_data)
+function DeviceManager:send(device_id, data)
     -- Send events out to a device (e.g., MIDI out)
     local dev = self.devices[device_id]
     if not dev then
         return
     end
 
-    dev:send(event_data)
+    Tracer.device(device_id, 'send'):log_flow(event_name, data)
+    dev:send(data)
 
 end
 
@@ -552,7 +588,7 @@ function DeviceManager:get(n)
 end
 
 -- Register a MIDI Device
-function DeviceManager:register_midi_device(port)
+function DeviceManager:register_midi_device(port, names)
     local midi_device = midi.connect(port)
     
 
@@ -562,11 +598,15 @@ function DeviceManager:register_midi_device(port)
 
     print("PORT " .. port .. "\t\t" .. midi_device.name)
 
-    local trimmed_name = util.trim_string_to_width(midi_device.name, 70)
+    local trimmed_name = names.trimmed[port]
 
     table.insert( -- register its name:
 		  self.midi_device_names, -- table to insert to
 		  trimmed_name
+		)
+    table.insert( -- register its name:
+		  self.midi_device_abbrs, -- table to insert to
+		  names.abbr[port]
 		)
     table.insert( -- register its name:
         self.device_names, -- table to insert to
@@ -576,7 +616,7 @@ function DeviceManager:register_midi_device(port)
     local props = {
         type = 'midi',
         name = midi_device.name,
-        abbr = string.gsub(string.upper(string.sub(midi_device.name, 1,8)), "%s+$", ""),
+        abbr = names.abbr[port],
         port = port,
         device = midi_device,
         trimmed_name = trimmed_name,
@@ -595,8 +635,7 @@ function DeviceManager:register_midi_device(port)
         else
             if event.type == 'start' or event.type == 'stop' or event.type == 'continue' or event.type == 'clock' then
                 if device.id == self.clock_in_id then
-                    local tracer = require('Foobar/lib/utilities/tracer').device(device.id, 'transport')
-                    tracer:log('debug', 'Transport: %s from device %s', event.type, device.id)
+                    Tracer.device(device.id, 'transport'):log_flow(event.type, event)
                     App:on_transport(event)
                     for _, dev in ipairs(self.midi) do
                         if dev.id ~= self.clock_in_id then
@@ -605,10 +644,13 @@ function DeviceManager:register_midi_device(port)
                     end
                 end
             elseif event.type == 'program_change' then
+                Tracer.device(device.id, 'program_change'):log_flow(event.type, event)
                 self:emit(device.id, 'program_change', event)
             elseif event.type == 'cc' then
                 event.processed = 'true'
+                Tracer.device(device.id, 'cc'):log_flow(event.type, event)
                 for i,track in ipairs(device.triggers) do
+                    Tracer.device(device.id, 'emit'):log_flow('cc_event', event)
                     track:emit('cc_event', event)
                 end
             else

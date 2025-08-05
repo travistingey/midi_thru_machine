@@ -3,8 +3,8 @@
 -- Handles shared components, events, params, and modes
 
 local diagnostics    = require('Foobar/lib/utilities/diagnostics')
-local feature_flags  = require('Foobar/lib/utilities/feature_flags')
-local cfg            = feature_flags.flags 
+local flags  = require('Foobar/lib/utilities/feature_flags')
+local cfg = flags.trace_config
 
 local Tracer = {}
 Tracer.__index = Tracer
@@ -23,8 +23,11 @@ local CONTEXT_TYPES = {
 
 -- Data flow event types
 local EVENT_TYPES = {
+    EMIT = 'emit',
     MIDI = 'midi',
     CC = 'cc', 
+    PROGRAM_CHANGE = 'program_change',
+    SEND = 'send',
     TRANSPORT = 'transport',
     MIXER = 'mixer'
 }
@@ -82,7 +85,7 @@ function Tracer:evaluate_trace_conditions()
     local ctx = self.context
 
     -- 1. honour global hammer
-    if cfg.verbose then return true end
+    if flags.verbose then return true end
 
     -- 2. using the feature flags
     local hit = false
@@ -90,7 +93,7 @@ function Tracer:evaluate_trace_conditions()
     if ctx.track_id   and #cfg.tracks      > 0 then hit = self:contains(cfg.tracks, ctx.track_id)   end
     if ctx.device_id  and #cfg.devices     > 0 then hit = hit or self:contains(cfg.devices, ctx.device_id) end
     if ctx.component_name and #cfg.components > 0 then hit = hit or self:contains(cfg.components, ctx.component_name) end
-    if ctx.event_type and #cfg.chains      > 0 then hit = hit or self:contains(cfg.chains, ctx.event_type) end
+    if ctx.event_type and #cfg.event_types      > 0 then hit = hit or self:contains(cfg.event_types, ctx.event_type) end
 
     if ctx.context_type == 'load'  and cfg.load_trace then hit = true end
     if ctx.context_type == 'event' and cfg.events     then hit = true end
@@ -145,36 +148,25 @@ function Tracer:log_flow(step, data, output)
     local ctx = self.context
     local track_info = ""
     if ctx.track_id then
-        track_info = string.format("Track %d\t", ctx.track_id)
+        track_info = string.format("TRACK %d", ctx.track_id)
     end
     
     -- Build bracket content based on step and settings
     local bracket_content = ""
     if step == "chain_start" then
         if flow_id ~= "" then
-            bracket_content = "START:" .. flow_id
+            bracket_content = track_info .. ":" .. flow_id
         else
             bracket_content = "START"
         end
     elseif step == "chain_complete" then
-        if flow_id ~= "" then
-            bracket_content = "END:" .. flow_id
-        else
             bracket_content = "END"
-        end
+        
     elseif step == "chain_terminated" then
-        if flow_id ~= "" then
-            bracket_content = "STOP:" .. flow_id
-        else
             bracket_content = "STOP"
-        end
     else
         -- Component step
-        if flow_id ~= "" then
-            bracket_content = step:upper() .. ":" .. flow_id
-        else
-            bracket_content = step:upper()
-        end
+        bracket_content = step:upper()
     end
     
     -- Apply verbose level filtering
@@ -182,12 +174,12 @@ function Tracer:log_flow(step, data, output)
     
     if step == "chain_start" then
         local event_info = ctx.event_type and (ctx.event_type .. ":\t") or ""
-        diagnostics.log("┌─[%s] %s%s%s", bracket_content, track_info, event_info, self:format_data(data))
+        diagnostics.log("┌─[%s]\t%s%s", bracket_content, event_info, self:format_data(data))
     elseif step == "chain_complete" then
         local event_info = ctx.event_type and (ctx.event_type .. ":\t") or ""
-        diagnostics.log("└─[%s] %s%s%s", bracket_content, track_info, event_info, self:format_data(data))
+        diagnostics.log("└─[%s]\t%s%s", bracket_content, event_info, self:format_data(data))
     elseif step == "chain_terminated" then
-        diagnostics.log("✗─[%s] %sterminated", bracket_content, track_info)
+        diagnostics.log("✗─[%s]\t%sterminated", bracket_content, track_info)
     else
         -- Component step - only show based on verbose level
         if verbose_level >= 2 then
@@ -200,7 +192,7 @@ function Tracer:log_flow(step, data, output)
             -- Level 3: show all components
             
             if show_component then
-                diagnostics.log("  [%s] %s:\t%s", bracket_content, step, self:format_data(data))
+                diagnostics.log("| [%s] %s:\t%s", bracket_content, step, self:format_data(data))
             end
         end
     end
@@ -229,40 +221,15 @@ end
 
 function Tracer:format_data(data)
     if type(data) ~= "table" then
-        return tostring(data)
-    end
-    
-    -- Create clean copy without correlation_id for display
-    local clean_data = {}
-    for k, v in pairs(data) do
-        if k ~= "correlation_id" then
-            clean_data[k] = v
-        end
-    end
-    
-    local parts = {}
-    
-    -- MIDI data formatting
-    if clean_data.note then table.insert(parts, "note:" .. clean_data.note) end
-    if clean_data.vel then table.insert(parts, "vel:" .. clean_data.vel) end
-    if clean_data.ch then table.insert(parts, "ch:" .. clean_data.ch) end
-    
-    -- Transport data formatting
-    if clean_data.type then table.insert(parts, "type:" .. clean_data.type) end
-    if clean_data.beat then table.insert(parts, "beat:" .. clean_data.beat) end
-    if clean_data.position then table.insert(parts, "pos:" .. clean_data.position) end
-    if clean_data.bpm then table.insert(parts, "bpm:" .. clean_data.bpm) end
-    
-    -- CC data formatting  
-    if clean_data.cc then table.insert(parts, "cc:" .. clean_data.cc) end
-    if clean_data.val then table.insert(parts, "val:" .. clean_data.val) end
-    
-    -- Generic handling for any other fields
-    for k, v in pairs(clean_data) do
-        if not string.match(k, "^(note|vel|ch|type|beat|position|bpm|cc|val)$") then
-            table.insert(parts, k .. ":" .. tostring(v))
-        end
-    end
+		return data
+	end
+
+	local delimiter = ":"
+	local parts = {}
+
+	for k, v in pairs(data) do
+		table.insert(parts, tostring(k) .. delimiter .. tostring(v))
+	end
     
     if #parts > 0 then
         return table.concat(parts, "\t")
@@ -389,7 +356,7 @@ end
 -- CLI Functions - directly modify the feature flags
 function Tracer.trace_tracks(...)
 
-    feature_flags.set('tracks', {...})
+    flags.trace_config.set('tracks', {...})
     if next(cfg.tracks) then
         print("Tracing tracks: " .. table.concat(cfg.tracks, ", "))
     else
@@ -399,16 +366,16 @@ function Tracer.trace_tracks(...)
 end
 
 function Tracer.trace_clear()
-    feature_flags.set('tracks', {})
-    feature_flags.set('devices', {})
-    feature_flags.set('components', {})
-    feature_flags.set('chains', {})
-    feature_flags.set('verbose_level', 1)
-    feature_flags.set('correlate_flows', false)
-    feature_flags.set('events', false)
-    feature_flags.set('params', false)
-    feature_flags.set('modes', false)
-    feature_flags.set('load_trace', false)
+    flags.trace_config.set('tracks', {})
+    flags.trace_config.set('devices', {})
+    flags.trace_config.set('components', {})
+    flags.trace_config.set('chains', {})
+    flags.trace_config.set('verbose_level', 1)
+    flags.trace_config.set('correlate_flows', false)
+    flags.trace_config.set('events', false)
+    flags.trace_config.set('params', false)
+    flags.trace_config.set('modes', false)
+    flags.trace_config.set('load_trace', false)
     Tracer.clear_cache()
     print("All tracing cleared")
 end
@@ -426,7 +393,7 @@ end
 
 function Tracer.verbose_level(level)
     if level then
-        feature_flags.set('verbose_level', level)
+        flags.trace_config.set('verbose_level', level)
         local level_names = {"minimal", "detailed", "full"}
         print("Verbose level: " .. level .. " (" .. (level_names[level] or "unknown") .. ")")
     else
@@ -437,25 +404,25 @@ end
 
 function Tracer.trace_flows(enabled)
     if enabled == nil then enabled = true end
-    feature_flags.set('correlate_flows', enabled)
+    flags.trace_config.set('correlate_flows', enabled)
     print("Flow correlation: " .. (enabled and "ON" or "OFF"))
 end
 
 function Tracer.trace_events(enabled)
     if enabled == nil then enabled = true end
-    feature_flags.set('events', enabled)
+    flags.trace_config.set('events', enabled)
     print("Event tracing: " .. (enabled and "ON" or "OFF"))
 end
 
 function Tracer.trace_params(enabled)
     if enabled == nil then enabled = true end
-    feature_flags.set('params', enabled)
+    flags.trace_config.set('params', enabled)
     print("Parameter tracing: " .. (enabled and "ON" or "OFF"))
 end
 
 function Tracer.trace_load_trace(enabled)
     if enabled == nil then enabled = true end
-    feature_flags.set('load_trace', enabled)
+    flags.trace_config.set('load_trace', enabled)
     print("Load order tracing: " .. (enabled and "ON" or "OFF"))
 end
 

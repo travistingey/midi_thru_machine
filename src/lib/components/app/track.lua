@@ -1,7 +1,4 @@
-local debug = require('Foobar/lib/utilities/diagnostics')
 local Tracer = require('Foobar/lib/utilities/tracer')
-
-local Grid = require('Foobar/lib/grid')
 local utilities = require('Foobar/lib/utilities')
 local path_name = 'Foobar/lib/components/track/'
 local Auto = require(path_name .. 'auto')
@@ -115,7 +112,6 @@ function Track:set(o)
 	params:add_option(track .. "device_in", "Device In", midi_devices)
 	
 	params:set_action(track .. 'device_in',function(d)
-
 		self.device_in = d
 
 		-- Remove old input device listeners
@@ -217,6 +213,8 @@ function Track:set(o)
 
 	 params:add_binary(track .. 'mixer', 'Mixer', 'toggle', 0)
 	 params:set_action(track .. 'mixer', function(d)
+		if App.flags.state.initializing then return end
+
 		 if d == 0 then
 			App.device_manager.mixer:remove_track(self)
 		 else
@@ -478,6 +476,7 @@ function Track:add_trigger()
 end
 
 function Track:enable()
+	if App.flags.state.initializing then return end
 	
 	if self.output_type == 'midi' and self.midi_out > 0  or self.output_type == 'crow' then
 		self.enabled = true

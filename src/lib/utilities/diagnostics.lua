@@ -31,7 +31,7 @@ end
 
 -- One-shot load-order print
 function M.trace_load(fmt, ...)
-	if not flags.get('load_trace') then
+	if not flags.trace_config.load_trace then
 		return
 	end
 	local id = M.next_load_id()

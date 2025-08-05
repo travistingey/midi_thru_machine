@@ -411,10 +411,6 @@ function App:init(o)
 	-- For MIDI CC event subscribers
 	self.cc_subscribers = {}
 
-	-- State flags for modes
-	self.send_out = true
-	self.send_in = true
-
 	----------------------------------------------------------------------------
 	-- Instantiate Device-Related Modules (MIDI, Grid, etc.)
 	----------------------------------------------------------------------------
@@ -456,6 +452,7 @@ function App:init(o)
 	----------------------------------------------------------------------------
 
 	print("params:default")
+	App.flags.state.set('initializing', false)
 	params:default()
 end
 
@@ -632,7 +629,6 @@ end
 --==============================================================================
 -- Parameter Registration and Song Settings
 --==============================================================================
-
 
 function App:save_preset(d, param)
 	if self.preset[d] == nil then
