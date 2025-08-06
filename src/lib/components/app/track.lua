@@ -1,6 +1,9 @@
 local Tracer = require('Foobar/lib/utilities/tracer')
 local utilities = require('Foobar/lib/utilities')
+
+local param_trace = require('Foobar/lib/utilities/param_trace')
 local path_name = 'Foobar/lib/components/track/'
+
 local Auto = require(path_name .. 'auto')
 local Input = require(path_name .. 'input')
 local Seq = require(path_name .. 'seq')
@@ -83,11 +86,13 @@ function Track:set(o)
 
 	local track = 'track_' .. self.id ..'_'
 
-	params:add_group('Track '.. self.id, 23)
+	
+	
+	param_trace.add_with_trace('add_group', 'Track '.. self.id, 23)
 
 	
-	params:add_text(track .. 'name', 'Name', self.name)
-	params:set_action(track .. 'name', function(d) 
+	param_trace.add_with_trace('add_text', track .. 'name', 'Name', self.name)
+	param_trace.set_action_with_trace(track .. 'name', function(d) 
 		self.name = d
 	end)
 
@@ -109,9 +114,9 @@ function Track:set(o)
 	local midi_devices =  App.device_manager.midi_device_names
 
 	self.device_in = 1
-	params:add_option(track .. "device_in", "Device In", midi_devices)
+	param_trace.add_with_trace('add_option', track .. "device_in", "Device In", midi_devices)
 	
-	params:set_action(track .. 'device_in',function(d)
+	param_trace.set_action_with_trace(track .. 'device_in', function(d)
 		self.device_in = d
 
 		-- Remove old input device listeners
@@ -126,8 +131,8 @@ function Track:set(o)
 	end)
 	
 	self.device_out = d
-	params:add_option(track .. "device_out", "Device Out",midi_devices,2)
-	params:set_action(track .. 'device_out',function(d)
+	param_trace.add_with_trace('add_option', track .. "device_out", "Device Out",midi_devices,2)
+	param_trace.set_action_with_trace(track .. 'device_out', function(d)
 		self.device_out = d
 		self.output_device = App.device_manager:get(d)
 		self:load_component(Output)
@@ -135,8 +140,6 @@ function Track:set(o)
 	end)
 
 	-- Input Type
-	local param_trace = require('Foobar/lib/utilities/param_trace')
-	
 	param_trace.add_with_trace('add_option', track .. 'input_type', 'Input Type', Input.options, 1)
 	param_trace.set_action_with_trace(track .. 'input_type', function(d)
 		self:kill()
@@ -154,8 +157,8 @@ function Track:set(o)
 
 	-- Output Type
 	self.output_type = o.output_type or Output.options[1]
-	params:add_option(track .. 'output_type', 'Output Type', Output.options, 1)
-	params:set_action(track .. 'output_type',function(d)
+	param_trace.add_with_trace('add_option', track .. 'output_type', 'Output Type', Output.options, 1)
+	param_trace.set_action_with_trace(track .. 'output_type', function(d)
 		self:kill()
 		self.output_type = Output.options[d]
 		self:load_component(Output)
@@ -164,7 +167,7 @@ function Track:set(o)
 
 	-- MIDI In
 	self.midi_in = o.midi_in or 0
-	params:add_number(track .. 'midi_in', 'MIDI In', 0, 17, 0, function(param)
+	param_trace.add_with_trace('add_number', track .. 'midi_in', 'MIDI In', 0, 17, 0, function(param)
 		local ch = param:get()
 		if ch == 0 then 
 			return 'off'
@@ -175,7 +178,7 @@ function Track:set(o)
 		end
 	end)
 	
-	params:set_action(track .. 'midi_in', function(d) 
+	param_trace.set_action_with_trace(track .. 'midi_in', function(d) 
 		self:kill()
 
 		self.midi_in = d
@@ -186,7 +189,7 @@ function Track:set(o)
 
 	-- MIDI Out
 	self.midi_out = o.midi_out or 0
-	params:add_number(track .. 'midi_out', 'MIDI Out', 0, 17, 0, function(param)
+	param_trace.add_with_trace('add_number', track .. 'midi_out', 'MIDI Out', 0, 17, 0, function(param)
 		local ch = param:get()
 		if ch == 0 then 
 			return 'off'
@@ -197,7 +200,7 @@ function Track:set(o)
 		end
 	end)
 
-	params:set_action(track .. 'midi_out', function(d) 
+	param_trace.set_action_with_trace(track .. 'midi_out', function(d) 
 		self:kill()
 		self.midi_out = d
 		self:load_component(Output)
@@ -212,8 +215,8 @@ function Track:set(o)
 	-- 	self.midi_thru = (d>0)
 	-- end)
 
-	 params:add_binary(track .. 'mixer', 'Mixer', 'toggle', 0)
-	 params:set_action(track .. 'mixer', function(d)
+	 param_trace.add_with_trace('add_binary', track .. 'mixer', 'Mixer', 'toggle', 0)
+	 param_trace.set_action_with_trace(track .. 'mixer', function(d)
 		if App.flags.state.initializing then return end
 
 		 if d == 0 then
@@ -363,7 +366,7 @@ function Track:set(o)
 		self:kill()
 		self.note_range_lower = d
 
-		params:set(track .. 'note_range_upper', util.clamp(params:get(track .. 'note_range') * 12 + d,0,127))			
+		param_trace.set(track .. 'note_range_upper', util.clamp(params:get(track .. 'note_range') * 12 + d,0,127), 'note_range_calc')			
 	end)
 
 	-- Upper
@@ -375,10 +378,10 @@ function Track:set(o)
 		self:kill()
 		self.note_range_upper = d
 
-		params:set(track .. 'note_range', math.ceil((d - self.note_range_lower) / 12))
+		param_trace.set(track .. 'note_range', math.ceil((d - self.note_range_lower) / 12), 'note_range_lower_calc')
 
 		if d < self.note_range_lower then
-			params:set(track .. 'note_range_lower', d)
+			param_trace.set(track .. 'note_range_lower', d, 'note_range_lower_set')
 		end
 		
 	end)
@@ -389,7 +392,7 @@ function Track:set(o)
 	params:add_number(track .. 'note_range', 'Octaves', 1, 11, 2)
 	params:set_action(track .. 'note_range', function(d) 
 		App.settings[track .. 'note_range'] = d
-		params:set(track .. 'note_range_upper', util.clamp(d * 12 + self.note_range_lower,0,127))
+		param_trace.set(track .. 'note_range_upper', util.clamp(d * 12 + self.note_range_lower,0,127), 'note_range_upper_set')
 	end)
 	
 
@@ -455,7 +458,7 @@ function Track:update(o, silent)
 			self[prop] = value
 
 			if not silent then
-				params:set('track_' .. self.id .. '_' .. prop, value)
+				param_trace.set('track_' .. self.id .. '_' .. prop, value, 'track_property_set')
 			end
 		else
 			-- This will enforce all parameters are set
@@ -530,7 +533,7 @@ function Track:save(o)
 
 	for prop, value in pairs(o) do
 		if self[prop] ~= nil then
-			params:set(track .. prop, value)
+			param_trace.set(track .. prop, value, 'track_prop_update')
 		end
 	end
 end

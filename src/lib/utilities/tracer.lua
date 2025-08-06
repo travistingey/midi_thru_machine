@@ -69,6 +69,8 @@ function Tracer:should_trace()
     -- Evaluate trace conditions
     local should_trace = self:evaluate_trace_conditions()
     
+
+    
     -- Cache the result
     if now >= trace_cache.cache_expires then
         trace_cache.cache = {} -- Clear expired cache
@@ -305,7 +307,10 @@ function Tracer.event(source_context)
             ctx[k] = v
         end
     end
-    ctx.context_type = CONTEXT_TYPES.EVENT
+    -- Only set context_type to EVENT if not already specified
+    if not ctx.context_type then
+        ctx.context_type = CONTEXT_TYPES.EVENT
+    end
     return Tracer:new(ctx)
 end
 

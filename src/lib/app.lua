@@ -25,6 +25,7 @@ local DeviceManager = require("Foobar/lib/components/app/devicemanager")
 local LaunchControl = require(path_name .. "launchcontrol")
 local feature_flags = require(path_name .. "utilities/feature_flags")
 local trace = require(path_name .. "utilities/trace_cli")
+local param_trace = require(path_name .. "utilities/param_trace")
 local LATCH_CC = 64
 
 --==============================================================================
@@ -677,19 +678,19 @@ function App:load_preset(d, param, force)
 	if type(param) == "string" then
 		local value = preset[param]
 		if force or (self.settings[param] ~= value) then
-			params:set(param, value)
+			param_trace.set(param, value, 'preset_load_single')
 		end
 	elseif type(param) == "table" then
 		for index, name in ipairs(param) do
 			local value = preset[name]
 			if force or (value and self.settings[name] ~= value) then
-				params:set(name, value)
+				param_trace.set(name, value, 'preset_load_table')
 			end
 		end
 	else
 		for name, value in pairs(preset) do
 			if self.settings[name] ~= value then
-				params:set(name, value)
+				param_trace.set(name, value, 'preset_load_all')
 			end
 		end
 	end

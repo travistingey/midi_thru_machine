@@ -119,8 +119,9 @@ Input.types['midi'] = {
 }
 
 Input.set_trigger = function (s, track)
-    params:set('track_' .. track.id .. '_voice', 2) -- mono
-    params:set('track_' .. track.id .. '_note_range_lower', 60) -- mono
+    		local param_trace = require('Foobar/lib/utilities/param_trace')
+		param_trace.set('track_' .. track.id .. '_voice', 2, 'input_mono_setup') -- mono
+    		param_trace.set('track_' .. track.id .. '_note_range_lower', 60, 'input_mono_setup') -- mono
     track.triggered = true
     s.index = 0
 
@@ -154,7 +155,7 @@ Input.types['arpeggio'] = {
         Input.set_trigger(s,track)
         
         if track.scale_select == 0 then
-            params:set('track_' .. track.id .. '_scale_select',1)
+            			param_trace.set('track_' .. track.id .. '_scale_select', 1, 'input_scale_reset')
         end       
     end,
     process = function (s, data)
