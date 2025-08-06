@@ -16,37 +16,228 @@ local flags  = require('Foobar/lib/utilities/feature_flags')
 
 local ParamTrace = {}
 
+-- Helper function to detect calling component from stack trace
+local function detect_calling_component()
+  -- Look through multiple stack levels to find the actual calling component
+  for level = 3, 10 do  -- Check levels 3-10
+    local info = debug.getinfo(level, "S")
+    
+    if not info then break end
+    
+    local source = info.source
+    if not source then break end
+    
+    -- Skip param_trace.lua itself
+    if string.find(source, "param_trace.lua") then
+      goto continue
+    end
+    
+    -- Extract component name from file path
+    local component_match = string.match(source, "/([^/]+)%.lua$")
+    if component_match and component_match ~= "param_trace" then
+      return component_match
+    end
+    
+    -- Try to match specific patterns
+    if string.find(source, "track/") then
+      local track_component = string.match(source, "track/([^/]+)%.lua$")
+      if track_component then
+        return track_component
+      end
+    end
+    
+    if string.find(source, "components/") then
+      local component = string.match(source, "components/([^/]+)%.lua$")
+      if component then
+        return component
+      end
+    end
+    
+    ::continue::
+  end
+  
+  return nil
+end
+
+-- Helper function to check component filtering with hierarchy
+local function check_component_filtering(component_name)
+  if not component_name or #flags.trace_config.components == 0 then
+    return true  -- No filtering if no component or no component filter
+  end
+  
+  -- Check exact component match
+  for _, allowed_component in ipairs(flags.trace_config.components) do
+    if allowed_component == component_name then
+      return true
+    end
+  end
+  
+  -- Check hierarchical matches
+  if component_name == 'track' then
+    -- Track components are always allowed if 'track' is in the filter
+    for _, allowed_component in ipairs(flags.trace_config.components) do
+      if allowed_component == 'track' then
+        return true
+      end
+    end
+  elseif component_name == 'trackcomponent' then
+    -- TrackComponent is allowed if 'trackcomponent' is in the filter
+    for _, allowed_component in ipairs(flags.trace_config.components) do
+      if allowed_component == 'trackcomponent' then
+        return true
+      end
+    end
+  end
+  
+  return false
+end
+
 -------------------------------------------------------------------------------
 -- Core logging functions
 -------------------------------------------------------------------------------
 
 function ParamTrace.log_registration(param_id, registration_type)
   if not flags.trace_config.load_trace then return end
+  
+  -- Extract component ID from param_id for filtering
+  local component_id = nil
+  local component_type = nil
+  
+  -- Try different component ID patterns
+  local track_match = string.match(param_id, 'track_(%d+)_')
+  if track_match then
+    component_id = tonumber(track_match)
+    component_type = 'track'
+  else
+    local scale_match = string.match(param_id, 'scale_(%d+)_')
+    if scale_match then
+      component_id = tonumber(scale_match)
+      component_type = 'scale'
+    else
+      local device_match = string.match(param_id, 'device_(%d+)_')
+      if device_match then
+        component_id = tonumber(device_match)
+        component_type = 'device'
+      end
+    end
+  end
+  
+  -- Check ID filtering for load-time registration
+  if component_id and #flags.trace_config.tracks > 0 then
+    local id_allowed = false
+    for _, allowed_id in ipairs(flags.trace_config.tracks) do
+      if allowed_id == component_id then
+        id_allowed = true
+        break
+      end
+    end
+    if not id_allowed then return end
+  end
+  
+  -- Detect calling component for filtering
+  local calling_component = detect_calling_component()
+  
+  -- Check component filtering for registration
+  if not check_component_filtering(calling_component) then
+    return
+  end
+  
   Tracer.load():log('param:register', '%s %s', tostring(registration_type), tostring(param_id))
 end
 
 function ParamTrace.log_set_action(param_id)
   if not flags.trace_config.load_trace then return end
+  
+  -- Extract component ID from param_id for filtering
+  local component_id = nil
+  local component_type = nil
+  
+  -- Try different component ID patterns
+  local track_match = string.match(param_id, 'track_(%d+)_')
+  if track_match then
+    component_id = tonumber(track_match)
+    component_type = 'track'
+  else
+    local scale_match = string.match(param_id, 'scale_(%d+)_')
+    if scale_match then
+      component_id = tonumber(scale_match)
+      component_type = 'scale'
+    else
+      local device_match = string.match(param_id, 'device_(%d+)_')
+      if device_match then
+        component_id = tonumber(device_match)
+        component_type = 'device'
+      end
+    end
+  end
+  
+  -- Check ID filtering for set_action registration
+  if component_id and #flags.trace_config.tracks > 0 then
+    local id_allowed = false
+    for _, allowed_id in ipairs(flags.trace_config.tracks) do
+      if allowed_id == component_id then
+        id_allowed = true
+        break
+      end
+    end
+    if not id_allowed then return end
+  end
+  
+  -- Detect calling component for filtering
+  local calling_component = detect_calling_component()
+  
+  -- Check component filtering for set_action
+  if not check_component_filtering(calling_component) then
+    return
+  end
+  
   Tracer.load():log('param:set_action', 'set_action %s', tostring(param_id))
 end
 
 function ParamTrace.log_value_change(param_id, value, source)
   if not flags.trace_config.params then return end
   
-  -- Extract track number from param_id for filtering
-  local track_match = string.match(param_id, 'track_(%d+)_')
-  local track_num = track_match and tonumber(track_match)
+  -- Extract component ID from param_id for filtering
+  local component_id = nil
+  local component_type = nil
   
-  -- Check track filtering
-  if track_num and #flags.trace_config.tracks > 0 then
-    local track_allowed = false
-    for _, allowed_track in ipairs(flags.trace_config.tracks) do
-      if allowed_track == track_num then
-        track_allowed = true
+  -- Try different component ID patterns
+  local track_match = string.match(param_id, 'track_(%d+)_')
+  if track_match then
+    component_id = tonumber(track_match)
+    component_type = 'track'
+  else
+    local scale_match = string.match(param_id, 'scale_(%d+)_')
+    if scale_match then
+      component_id = tonumber(scale_match)
+      component_type = 'scale'
+    else
+      local device_match = string.match(param_id, 'device_(%d+)_')
+      if device_match then
+        component_id = tonumber(device_match)
+        component_type = 'device'
+      end
+    end
+  end
+  
+  -- Check ID filtering (generalized from track filtering)
+  if component_id and #flags.trace_config.tracks > 0 then
+    local id_allowed = false
+    for _, allowed_id in ipairs(flags.trace_config.tracks) do
+      if allowed_id == component_id then
+        id_allowed = true
         break
       end
     end
-    if not track_allowed then return end
+    if not id_allowed then return end
+  end
+  
+  -- Detect calling component for filtering
+  local calling_component = detect_calling_component()
+  
+  -- Check component filtering
+  if not check_component_filtering(calling_component) then
+    return
   end
   
   -- Determine log tag based on source
@@ -61,7 +252,9 @@ function ParamTrace.log_value_change(param_id, value, source)
     context_type = 'param',
     param_id     = param_id,
     source       = source,
-    track_id     = track_num,
+    track_id     = component_id,  -- Use component_id for backward compatibility
+    component_name = calling_component,
+    component_type = component_type,
   }:log(log_tag, '%s ← %s (%s)', tostring(param_id), tostring(value), tostring(source))
 end
 

@@ -96,7 +96,7 @@ local trace_config_values = {
   -- Filters
   devices      = {},
   tracks       = {1},
-  components   = {},
+  components   = {'track'},
   chains       = {},
   event_types  = {'midi'},
 
@@ -104,7 +104,7 @@ local trace_config_values = {
   correlate_flows = true,
   show_timestamps = false,
   events          = false,
-  params          = true,
+  params          = false,
   modes           = false,
   load_trace      = true,
 

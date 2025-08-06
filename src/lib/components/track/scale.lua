@@ -64,8 +64,8 @@ function Scale:register_params()
 	local scale = 'scale_' .. self.id .. '_'
 	params:add_group('Scale ' .. self.id, 5 ) 
 
-	params:add_number(scale .. 'bits', 'Bits',0,4095,0)
-	params:set_action(scale .. 'bits',function(bits)
+	param_trace.add_with_trace('add_number', scale .. 'bits', 'Bits',0,4095,0)
+	param_trace.set_action_with_trace(scale .. 'bits', function(bits)
 		App.settings[scale .. 'bits'] = bits
 		self:set_scale(bits)
 		
@@ -75,8 +75,8 @@ function Scale:register_params()
 		self:emit('scale_changed', 'bits')
 	end)
 	
-	params:add_number(scale .. 'root', 'Root',-24,24,0)
-	params:set_action(scale .. 'root', function(root)
+	param_trace.add_with_trace('add_number', scale .. 'root', 'Root',-24,24,0)
+	param_trace.set_action_with_trace(scale .. 'root', function(root)
 		App.settings[scale .. 'root'] = root
 		self.root = root
 
@@ -87,8 +87,8 @@ function Scale:register_params()
 		self:emit('scale_changed', 'root')
 	end)
 
-	params:add_number(scale .. 'follow', 'Follow',0,16,0)
-	params:set_action(scale .. 'follow', function(d)
+	param_trace.add_with_trace('add_number', scale .. 'follow', 'Follow',0,16,0)
+	param_trace.set_action_with_trace(scale .. 'follow', function(d)
 		App.settings[scale .. 'follow'] = d
 		self.follow = d
 		
@@ -104,8 +104,8 @@ function Scale:register_params()
 		self:emit('scale_changed', 'follow')
 	end)
 
-	params:add_option(scale .. 'follow_method', 'Follow Method',{'transpose','scale degree','pentatonic','chord','midi on', 'midi latch','midi lock'},1)
-	params:set_action(scale .. 'follow_method', function(d)
+	param_trace.add_with_trace('add_option', scale .. 'follow_method', 'Follow Method',{'transpose','scale degree','pentatonic','chord','midi on', 'midi latch','midi lock'},1)
+	param_trace.set_action_with_trace(scale .. 'follow_method', function(d)
 		App.settings[scale .. 'follow_method'] = d
 		self.follow_method = d
 
@@ -120,8 +120,8 @@ function Scale:register_params()
 		self:emit('scale_changed', 'follow_method')
 	end)
 
-	params:add_option(scale .. 'chord_set', 'Chord Set', {'All', 'Plaits', 'EO'}, 1)
-	params:set_action(scale .. 'chord_set', function(d) 
+	param_trace.add_with_trace('add_option', scale .. 'chord_set', 'Chord Set', {'All', 'Plaits', 'EO'}, 1)
+	param_trace.set_action_with_trace(scale .. 'chord_set', function(d) 
 		App.settings[scale .. 'chord_set'] = d
 		
 		if d == 1 then
