@@ -437,7 +437,7 @@ function App:init(o)
 	self.device_manager:register_params()
 	-- Create the tracks
 	params:add_separator("tracks", "Tracks")
-	for i = 1, 16 do
+	for i = 1, 5 do
 		self.track[i] = Track:new({ id = i })
 	end
 
@@ -510,8 +510,18 @@ function App:on_stop()
 	if params:get("clock_source") == 1 then
 		if self.clock then
 			clock.cancel(self.clock)
+			self.clock = nil
 		end
 	end
+end
+
+function App:cleanup()
+	-- Clean up any running clocks when script reloads
+	if self.clock then
+		clock.cancel(self.clock)
+		self.clock = nil
+	end
+	self.playing = false
 end
 
 --==============================================================================

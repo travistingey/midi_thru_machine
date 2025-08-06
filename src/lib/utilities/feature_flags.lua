@@ -104,7 +104,7 @@ local trace_config_values = {
   correlate_flows = true,
   show_timestamps = false,
   events          = false,
-  params          = false,
+  params          = true,
   modes           = false,
   load_trace      = true,
 

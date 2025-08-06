@@ -135,9 +135,10 @@ function Track:set(o)
 	end)
 
 	-- Input Type
+	local param_trace = require('Foobar/lib/utilities/param_trace')
 	
-	params:add_option(track .. 'input_type', 'Input Type', Input.options, 1)
-	params:set_action(track .. 'input_type',function(d)
+	param_trace.add_with_trace('add_option', track .. 'input_type', 'Input Type', Input.options, 1)
+	param_trace.set_action_with_trace(track .. 'input_type', function(d)
 		self:kill()
 		self.input_type = Input.options[d]
 

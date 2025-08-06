@@ -101,4 +101,5 @@ end
 
 function cleanup() --------------- cleanup() is automatically called on script close
 	clock.cancel(redraw_clock_id) -- melt our clock via the id we noted
+	App:cleanup() -- clean up app-specific resources
 end

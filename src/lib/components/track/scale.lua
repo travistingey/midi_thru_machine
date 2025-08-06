@@ -121,7 +121,6 @@ function Scale:register_params()
 
 	params:add_option(scale .. 'chord_set', 'Chord Set', {'All', 'Plaits', 'EO'}, 1)
 	params:set_action(scale .. 'chord_set', function(d) 
-		
 		App.settings[scale .. 'chord_set'] = d
 		
 		if d == 1 then
