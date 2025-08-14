@@ -3,7 +3,7 @@
 -- Handles shared components, events, params, and modes
 
 local diagnostics    = require('Foobar/lib/utilities/diagnostics')
-local flags  = require('Foobar/lib/utilities/feature_flags')
+local flags  = require('Foobar/lib/utilities/flags')
 local cfg = flags.trace_config
 
 local Tracer = {}

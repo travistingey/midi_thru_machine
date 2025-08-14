@@ -1,6 +1,6 @@
 local Grid = require('Foobar/lib/grid')
 local utilities = require('Foobar/lib/utilities')
-local param_trace = require('Foobar/lib/utilities/param_trace')
+local ParamTrace = require('Foobar/lib/utilities/paramtrace')
 local path_name = 'Foobar/lib/components/mode/'
 
 local MuteGrid = require('Foobar/lib/components/mode/mutegrid') 
@@ -80,9 +80,9 @@ local SessionMode = Mode:new({
             local mode = App.mode[1]
             
             if mode.cursor == 1 then
-                			param_trace.set('track_' .. App.current_track .. '_device_in', App.track[App.current_track].device_in + d, 'session_device_in_change')
+                ParamTrace.set('track_' .. App.current_track .. '_device_in', App.track[App.current_track].device_in + d, 'session_device_in_change')
             elseif mode.cursor == 2 then
-                			param_trace.set('track_' .. App.current_track .. '_device_out', App.track[App.current_track].device_out + d, 'session_device_out_change')
+                ParamTrace.set('track_' .. App.current_track .. '_device_out', App.track[App.current_track].device_out + d, 'session_device_out_change')
             end
             App.screen_dirty = true
         end,
@@ -90,9 +90,9 @@ local SessionMode = Mode:new({
             local mode = App.mode[1]
             
             if mode.cursor == 1 then
-                			param_trace.set('track_' .. App.current_track .. '_midi_in', App.track[App.current_track].midi_in + d, 'session_midi_in_change')
+                ParamTrace.set('track_' .. App.current_track .. '_midi_in', App.track[App.current_track].midi_in + d, 'session_midi_in_change')
             elseif mode.cursor == 2 then
-                			param_trace.set('track_' .. App.current_track .. '_midi_out', App.track[App.current_track].midi_out + d, 'session_midi_out_change')
+                ParamTrace.set('track_' .. App.current_track .. '_midi_out', App.track[App.current_track].midi_out + d, 'session_midi_out_change')
             end
             App.screen_dirty = true
         end

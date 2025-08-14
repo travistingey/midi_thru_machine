@@ -1,7 +1,7 @@
 local path_name = 'Foobar/lib/'
 local TrackComponent = require('Foobar/lib/components/track/trackcomponent')
 local musicutil = require(path_name .. 'musicutil-extended')
-local param_trace = require('Foobar/lib/utilities/param_trace')
+local ParamTrace = require('Foobar/lib/utilities/paramtrace')
 
 -- CONSTANTS
 local NO_FOLLOW = 0
@@ -64,8 +64,8 @@ function Scale:register_params()
 	local scale = 'scale_' .. self.id .. '_'
 	params:add_group('Scale ' .. self.id, 5 ) 
 
-	param_trace.add_with_trace('add_number', scale .. 'bits', 'Bits',0,4095,0)
-	param_trace.set_action_with_trace(scale .. 'bits', function(bits)
+	ParamTrace.add('add_number', scale .. 'bits', 'Bits',0,4095,0)
+	ParamTrace.set_action(scale .. 'bits', function(bits)
 		App.settings[scale .. 'bits'] = bits
 		self:set_scale(bits)
 		
@@ -75,8 +75,8 @@ function Scale:register_params()
 		self:emit('scale_changed', 'bits')
 	end)
 	
-	param_trace.add_with_trace('add_number', scale .. 'root', 'Root',-24,24,0)
-	param_trace.set_action_with_trace(scale .. 'root', function(root)
+	ParamTrace.add('add_number', scale .. 'root', 'Root',-24,24,0)
+	ParamTrace.set_action(scale .. 'root', function(root)
 		App.settings[scale .. 'root'] = root
 		self.root = root
 
@@ -87,8 +87,8 @@ function Scale:register_params()
 		self:emit('scale_changed', 'root')
 	end)
 
-	param_trace.add_with_trace('add_number', scale .. 'follow', 'Follow',0,16,0)
-	param_trace.set_action_with_trace(scale .. 'follow', function(d)
+	ParamTrace.add('add_number', scale .. 'follow', 'Follow',0,16,0)
+	ParamTrace.set_action(scale .. 'follow', function(d)
 		App.settings[scale .. 'follow'] = d
 		self.follow = d
 		
@@ -104,8 +104,8 @@ function Scale:register_params()
 		self:emit('scale_changed', 'follow')
 	end)
 
-	param_trace.add_with_trace('add_option', scale .. 'follow_method', 'Follow Method',{'transpose','scale degree','pentatonic','chord','midi on', 'midi latch','midi lock'},1)
-	param_trace.set_action_with_trace(scale .. 'follow_method', function(d)
+	ParamTrace.add('add_option', scale .. 'follow_method', 'Follow Method',{'transpose','scale degree','pentatonic','chord','midi on', 'midi latch','midi lock'},1)
+	ParamTrace.set_action(scale .. 'follow_method', function(d)
 		App.settings[scale .. 'follow_method'] = d
 		self.follow_method = d
 
@@ -120,8 +120,8 @@ function Scale:register_params()
 		self:emit('scale_changed', 'follow_method')
 	end)
 
-	param_trace.add_with_trace('add_option', scale .. 'chord_set', 'Chord Set', {'All', 'Plaits', 'EO'}, 1)
-	param_trace.set_action_with_trace(scale .. 'chord_set', function(d) 
+	ParamTrace.add('add_option', scale .. 'chord_set', 'Chord Set', {'All', 'Plaits', 'EO'}, 1)
+	ParamTrace.set_action(scale .. 'chord_set', function(d) 
 		App.settings[scale .. 'chord_set'] = d
 		
 		if d == 1 then
@@ -184,7 +184,7 @@ function Scale:set_scale(bits)
 	self.intervals = musicutil.bits_to_intervals(bits)
 	self.notes = {}
 
-	param_trace.set('scale_'..self.id..'_bits', bits, 'scale_bits_update')
+	ParamTrace.set('scale_'..self.id..'_bits', bits, 'scale_bits_update')
 
 	local i = 0
 	for oct=1,10 do
@@ -208,7 +208,7 @@ function Scale:shift_scale_to_note(n)
 	self.root = n
 
 	self:set_scale(scale)
-	param_trace.set('scale_'..self.id..'_root', n, 'scale_root_note_set')
+	ParamTrace.set('scale_'..self.id..'_root', n, 'scale_root_note_set')
 end
 
 
@@ -281,11 +281,11 @@ function Scale:follow_scale(notes)
 		if self.follow_method == TRANSPOSE_MODE and not self.lock then
 			-- Transpose
 			self.root = other.root
-			param_trace.set(scale .. 'root', other.root, 'scale_follow_transpose')
+			ParamTrace.set(scale .. 'root', other.root, 'scale_follow_transpose')
 		elseif self.follow_method == SCALE_DEGREE_MODE and not self.lock then
 			-- App.scale Degree
 			self:shift_scale_to_note(other.root)
-			param_trace.set(scale .. 'root', other.root, 'scale_follow_degree')
+			ParamTrace.set(scale .. 'root', other.root, 'scale_follow_degree')
 		elseif self.follow_method == PENTATONIC_MODE and not self.lock then
 			-- Pentatonic
 			local major = musicutil.intervals_to_bits({0,4})
@@ -294,15 +294,15 @@ function Scale:follow_scale(notes)
 			if other.bits & major == major then
 				self:set_scale(661)
 				self.root = other.root
-				param_trace.set(scale .. 'root', other.root, 'scale_follow_pentatonic_major') -- We need to keep the params silent to avoid a loop
+				ParamTrace.set(scale .. 'root', other.root, 'scale_follow_pentatonic_major') -- We need to keep the params silent to avoid a loop
 			elseif other.bits & minor == minor then
 				self:set_scale(1193)
 				self.root = other.root
-				param_trace.set(scale .. 'root', other.root, 'scale_follow_pentatonic_minor')
+				ParamTrace.set(scale .. 'root', other.root, 'scale_follow_pentatonic_minor')
 			else
 				self:set_scale(1)
 				self.root = other.root
-				param_trace.set(scale .. 'root', other.root, 'scale_follow_pentatonic_other')
+				ParamTrace.set(scale .. 'root', other.root, 'scale_follow_pentatonic_other')
 			end
 		elseif self.follow_method == CHORD_MODE and not self.lock then
 				if #other.intervals > 2 then
@@ -310,7 +310,7 @@ function Scale:follow_scale(notes)
 					self.chord = self:chord_id(other.bits)
 					self:set_scale(self.chord.bits)
 									self.root = other.root + self.chord.root
-				param_trace.set(scale .. 'root', other.root + self.chord.root, 'scale_follow_chord')
+				ParamTrace.set(scale .. 'root', other.root + self.chord.root, 'scale_follow_chord')
 				end
 		elseif self.follow_method > CHORD_MODE and notes then
 			-- MIDI controlled
@@ -332,7 +332,7 @@ function Scale:follow_scale(notes)
 			if s > 0 then
 				self.root = min % 12
 			end
-			param_trace.set(scale .. 'root', self.root, 'scale_follow_midi')
+			ParamTrace.set(scale .. 'root', self.root, 'scale_follow_midi')
 			
 			self:set_scale(s)
 		end

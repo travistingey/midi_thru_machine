@@ -1,18 +1,18 @@
--- lib/utilities/param_trace.lua
+-- lib/utilities/ParamTrace.lua
 --
 -- Clean parameter tracing utilities that don't interfere with the environment.
 -- This module provides manual tracing functions that can be called explicitly
 -- where needed, without any global monkey-patching.
 --
 -- Usage: 
---   local param_trace = require('Foobar/lib/utilities/param_trace')
---   param_trace.log_registration('my_param', 'add_number')
---   param_trace.log_set_action('my_param')
---   param_trace.log_value_change('my_param', 42, 'user_input')
+--   local ParamTrace = require('Foobar/lib/utilities/paramtrace')
+--   ParamTrace.log_registration('my_param', 'add_number')
+--   ParamTrace.log_set_action('my_param')
+--   ParamTrace.log_value_change('my_param', 42, 'user_input')
 -----------------------------------------------------------------------------
 
 local Tracer = require('Foobar/lib/utilities/tracer')
-local flags  = require('Foobar/lib/utilities/feature_flags')
+local flags  = require('Foobar/lib/utilities/flags')
 
 local ParamTrace = {}
 
@@ -27,14 +27,14 @@ local function detect_calling_component()
     local source = info.source
     if not source then break end
     
-    -- Skip param_trace.lua itself
-    if string.find(source, "param_trace.lua") then
+    -- Skip ParamTrace.lua itself
+    if string.find(source, "ParamTrace.lua") then
       goto continue
     end
     
     -- Extract component name from file path
     local component_match = string.match(source, "/([^/]+)%.lua$")
-    if component_match and component_match ~= "param_trace" then
+    if component_match and component_match ~= "ParamTrace" then
       return component_match
     end
     
@@ -104,7 +104,7 @@ function ParamTrace.log_registration(param_id, registration_type)
   local component_type = nil
   
   -- Try different component ID patterns
-  local track_match = string.match(param_id, 'track_(%d+)_')
+  local track_match = string.match(param_id, 'track_(%d+)_') or (registration_type == 'add_group' and string.match(param_id, 'Track (%d+)'))
   if track_match then
     component_id = tonumber(track_match)
     component_type = 'track'
@@ -191,7 +191,7 @@ function ParamTrace.log_set_action(param_id)
     return
   end
   
-  Tracer.load():log('param:set_action', 'set_action %s', tostring(param_id))
+  Tracer.load():log('param:set_action', '%s', tostring(param_id))
 end
 
 function ParamTrace.log_value_change(param_id, value, source)
@@ -240,12 +240,18 @@ function ParamTrace.log_value_change(param_id, value, source)
     return
   end
   
-  -- Determine log tag based on source
+   -- Determine log tag based on source
   local log_tag = 'param:change'
+  local log_template = '%s'
+  local log_data = {tostring(source), tostring(value)}
+  local previous_value = params:get(param_id)
   if source == 'set_action' then
-    log_tag = 'param:set_action'
+    log_tag = 'param:set'
+    log_template = '%s: %s → %s'
+    log_data = {tostring(param_id), tostring(previous_value), tostring(value)}
   elseif source and source ~= 'set_action' then
     log_tag = 'param:caller'
+    log_data = {tostring(source)}
   end
   
   Tracer.event{
@@ -255,13 +261,13 @@ function ParamTrace.log_value_change(param_id, value, source)
     track_id     = component_id,  -- Use component_id for backward compatibility
     component_name = calling_component,
     component_type = component_type,
-  }:log(log_tag, '%s ← %s (%s)', tostring(param_id), tostring(value), tostring(source))
+  }:log(log_tag, log_template, table.unpack(log_data))
 end
 
 -------------------------------------------------------------------------------
 -- Convenience wrapper for set_action that includes tracing
 -------------------------------------------------------------------------------
-function ParamTrace.set_action_with_trace(param_id, callback)
+function ParamTrace.set_action(param_id, callback)
   ParamTrace.log_set_action(param_id)
   
   if not callback then
@@ -279,20 +285,16 @@ end
 -------------------------------------------------------------------------------
 -- Helper for tracking parameter registration with automatic ID extraction
 -------------------------------------------------------------------------------
-function ParamTrace.add_with_trace(registration_type, ...)
+function ParamTrace.add(registration_type, ...)
   local param_id = select(1, ...)
   ParamTrace.log_registration(param_id, registration_type)
   return params[registration_type](params, ...)
 end
 
 -------------------------------------------------------------------------------
--- Manual tracing for direct params:set() calls
--------------------------------------------------------------------------------
-function ParamTrace.trace_set(param_id, value, source)
-  ParamTrace.log_value_change(param_id, value, source or 'manual_set')
-end
-
 -- Traced wrapper for params:set() that logs the change and then sets the value
+-------------------------------------------------------------------------------
+
 function ParamTrace.set(param_id, value, source)
   ParamTrace.log_value_change(param_id, value, source or 'traced_set')
   return params:set(param_id, value)

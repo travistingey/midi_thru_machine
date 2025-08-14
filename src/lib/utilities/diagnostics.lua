@@ -1,5 +1,5 @@
 -- lib/utilities/diagnostics.lua
-local flags = require("Foobar/lib/utilities/feature_flags")
+local flags = require("Foobar/lib/utilities/flags")
 
 -- global load counter
 local load_counter = 0

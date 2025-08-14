@@ -1,4 +1,4 @@
--- lib/utilities/feature_flags.lua
+-- lib/utilities/flags.lua
 --
 -- Centralised feature-flag system with nested configuration tables.
 -- Each flag table is wrapped with a metatable that
@@ -7,7 +7,7 @@
 --   • propagates the same behaviour to every nested flag table.
 --
 -- Example usage:
---   local flags = require('Foobar/lib/utilities/feature_flags')
+--   local flags = require('Foobar/lib/utilities/flags')
 --   flags.toggle('verbose')                 -- top-level flag
 --   flags.trace_config.set('tracks', {1})   -- nested table mutation
 --   if flags.state.playing then ... end     -- runtime state
@@ -96,7 +96,7 @@ local trace_config_values = {
   -- Filters
   devices      = {},
   tracks       = {1},
-  components   = {'track'},
+  components   = {},
   chains       = {},
   event_types  = {'midi'},
 
@@ -104,7 +104,7 @@ local trace_config_values = {
   correlate_flows = true,
   show_timestamps = false,
   events          = false,
-  params          = false,
+  params          = true,
   modes           = false,
   load_trace      = true,
 
