@@ -6,6 +6,10 @@ local PresetSeq = ModeComponent:new()
 PresetSeq.__base = ModeComponent
 PresetSeq.name = 'presetseq'
 
+local max_step_length = App.ppqn * 16 -- 4 bars
+local min_step_length = App.ppqn / 8 -- 1/32th note
+local max_ticks = max_step_length * 64
+
 function PresetSeq:set(o)
     self.__base.set(self, o)
     self.active = true
@@ -22,13 +26,22 @@ function PresetSeq:set(o)
     
     self.grid = Grid:new({
         name = 'PresetSeq ' .. o.track,
-        grid_start = {x=1,y=4},
-        grid_end = {x=8,y=1},
+        grid_start = o.grid_start or {x=1,y=4},
+        grid_end = o.grid_end or {x=8,y=1},
         display_start = o.display_start or {x=1,y=1},
         display_end = o.display_end or {x=8,y=4},
         offset = o.offset or {x=0,y=4},
         midi = App.midi_grid
     })
+
+    self.row_length = self.grid.bounds.width
+    self.row_ticks = self.row_length * self.step_length
+
+    self.display_length = self.grid.bounds.height * self.row_length
+    self.display_ticks = self.display_length * self.step_length  
+    
+
+    self.step_offset = self.display_offset * self.row_length
 
     self.grid:refresh()
 
@@ -107,33 +120,62 @@ function PresetSeq:set_select(value)
     
 end
 
+function PresetSeq:recalculate_display(previous_offset)
+    self.row_ticks = self.step_length * self.row_length
+    local new_offset = self.step_length * self.display_length
+    self.display_ticks = self.step_length * self.display_length + new_offset
+    -- recalculate display offset
+    if previous_offset then
+        self.display_offset = math.floor(previous_offset / self.step_length)
+        self.step_offset = self.display_offset * self.row_length
+    end
+    
+end
+
 function PresetSeq:increase_step_length()
-    if self.step_length < 384 then
+    -- max step length is 384 ticks = 16 beats * 24ppqn = 16 bars
+    if self.step_length < max_step_length then
+        local current_display_offset = self.display_offset * self.step_length
         self.step_length = self.step_length * 2
+        self:recalculate_display(current_display_offset)
+        
         self:set_grid(self:get_component())
-    end 
+    end
+    
 end
 
 function PresetSeq:decrease_step_length()
-    if self.step_length > 3 then
+    local current_display_offset = self.display_offset * self.step_length
+    -- min step length is 3 ticks = 1/32th note
+    -- Note length calculated as PPQN / 2^3 (subdivisions)
+    if self.step_length > min_step_length then
         self.step_length = self.step_length / 2
+        self:recalculate_display(current_display_offset)
         self:set_grid(self:get_component())
-    elseif self.step_length <= 3 then
-        self.step_length = 1
+    elseif self.step_length <= min_step_length then
+        self.step_length = 1 -- show ticks
+        self:recalculate_display(current_display_offset)
         self:set_grid(self:get_component())
     end
+    self.row_ticks = self.step_length * self.row_length
+    self.display_ticks = self.step_length * self.display_length
 end
 
 function PresetSeq:increase_display_offset()
-    if self.display_offset < 128 then
+    local new_offset = self.step_offset * self.step_length + self.display_ticks
+    print('new_offset', new_offset)
+    print('max_ticks', max_ticks)
+    if new_offset < max_ticks then
         self.display_offset = self.display_offset + 1
+        self.step_offset = self.display_offset * self.row_length
         self:set_grid(self:get_component())
     end
 end
 
 function PresetSeq:decrease_display_offset()
-    if self.display_offset >= 0 then
+    if self.display_offset > 0 then
         self.display_offset = self.display_offset - 1
+        self.step_offset = self.display_offset * self.row_length
         self:set_grid(self:get_component())
     end
 end
@@ -143,10 +185,12 @@ function PresetSeq:grid_event(component, data)
     local auto = component
 
     self:set_select()
+    
 
     if data.type == 'pad_long' and data.pad_down and #data.pad_down == 1 then
-        local pad_1 = self.grid:grid_to_index(data)
-        local pad_2 = self.grid:grid_to_index(data.pad_down[1])
+        local pad_1 = self.grid:grid_to_index(data) + self.step_offset
+        local pad_2 = self.grid:grid_to_index(data.pad_down[1]) + self.step_offset
+        print(pad_1, pad_2)
         local selection_start = math.min(pad_1,pad_2)
         local selection_end = math.max(pad_1,pad_2)
 
@@ -165,7 +209,7 @@ function PresetSeq:grid_event(component, data)
             end
         end
     elseif data.type == 'pad' and data.state and not self.mode.alt then
-        local index = self.grid:grid_to_index(data)
+        local index = self.grid:grid_to_index(data) + self.step_offset
         local current = self:get_step(index, self.select)
 
         if current ~= nil and current.value ~= self.select.value then
@@ -245,10 +289,7 @@ function PresetSeq:set_grid(component)
     local VALUE = (1 << 1)
     local LOOP_END = (1 << 2)
     local STEP = (1 << 3)
-
-    -- Calculate the offset in steps. Each unit of display_offset shifts by 8 steps (8 * step_length ticks)
-    local offset_steps = self.display_offset * 8
-
+  
     grid:for_each(function(s, x, y, i)
         local pad = 0
 
@@ -259,7 +300,7 @@ function PresetSeq:set_grid(component)
         local lane = self.selected_lane
         
         -- Determine the global step index for this LED pad based on the display offset
-        local global_step = i + offset_steps
+        local global_step = i + self.step_offset
         local current_step = math.floor(auto.step / self.step_length) + 1
         local seq_value
 

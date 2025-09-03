@@ -34,7 +34,7 @@ local function detect_calling_component()
     
     -- Extract component name from file path
     local component_match = string.match(source, "/([^/]+)%.lua$")
-    if component_match and component_match ~= "ParamTrace" then
+    if component_match and component_match ~= "paramtrace" then
       return component_match
     end
     

@@ -95,10 +95,10 @@ local state_flag_values = {
 local trace_config_values = {
   -- Filters
   devices      = {},
-  tracks       = {1},
+  tracks       = {},
   components   = {},
   chains       = {},
-  event_types  = {'midi'},
+  event_types  = {},
 
   -- Behaviours
   correlate_flows = true,
@@ -109,7 +109,7 @@ local trace_config_values = {
   load_trace      = true,
 
   -- Verbosity
-  verbose_level   = 3,
+  verbose_level   = 0,
 }
 
 ---------------------------------------------------------------------------
