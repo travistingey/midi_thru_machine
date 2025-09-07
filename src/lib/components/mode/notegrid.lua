@@ -175,7 +175,7 @@ function NoteGrid:grid_event (component, data)
     self.selection = pad
 
     if self.mode.alt and data.state then
-        self.mode:handle_context(self.alt_context, self.alt_screen, {
+        self.mode:use_context(self.alt_context, self.alt_screen, {
           timeout = true,
           callback = function()
             self.selection = nil 

@@ -16,13 +16,14 @@
 local path_name = "Foobar/lib/"
 local utilities = require(path_name .. "utilities")
 local Grid = require(path_name .. "grid")
-local Track = require("Foobar/lib/components/app/track")
-local Scale = require("Foobar/lib/components/track/scale")
-local Output = require("Foobar/lib/components/track/output")
-local Mode = require("Foobar/lib/components/app/mode")
+local Track = require(path_name .. "components/app/track")
+local Scale = require(path_name .. "components/track/scale")
+local Output = require(path_name .. "components/track/output")
+local Mode = require(path_name .. "components/app/mode")
 local musicutil = require(path_name .. "musicutil-extended")
-local DeviceManager = require("Foobar/lib/components/app/devicemanager")
+local DeviceManager = require(path_name .. "components/app/devicemanager")
 local LaunchControl = require(path_name .. "launchcontrol")
+local UI = require(path_name .. "ui")
 local flags = require(path_name .. "utilities/flags")
 local trace = require(path_name .. "utilities/trace_cli")
 local ParamTrace = require(path_name .. "utilities/paramtrace")
@@ -37,253 +38,8 @@ App.__index = App
 --==============================================================================
 -- Constructor & Initialization
 --==============================================================================
-function App:set_font(n)
-	local fonts = {
-		{ name = "04B_03", face = 1, size = 8 },
-		{ name = "ALEPH", face = 2, size = 8 },
-		{ name = "tom-thumb", face = 25, size = 6 },
-		{ name = "creep", face = 26, size = 16 },
-		{ name = "ctrld", face = 27, size = 10 },
-		{ name = "ctrld", face = 28, size = 10 },
-		{ name = "ctrld", face = 29, size = 13 },
-		{ name = "ctrld", face = 30, size = 13 },
-		{ name = "ctrld", face = 31, size = 13 },
-		{ name = "ctrld", face = 32, size = 13 },
-		{ name = "ctrld", face = 33, size = 16 },
-		{ name = "ctrld", face = 34, size = 16 },
-		{ name = "ctrld", face = 35, size = 16 },
-		{ name = "ctrld", face = 36, size = 16 },
-		{ name = "scientifica", face = 37, size = 11 },
-		{ name = "scientifica", face = 38, size = 11 },
-		{ name = "scientifica", face = 39, size = 11 },
-		{ name = "ter", face = 40, size = 12 },
-		{ name = "ter", face = 41, size = 12 },
-		{ name = "ter", face = 42, size = 14 },
-		{ name = "ter", face = 43, size = 14 },
-		{ name = "ter", face = 44, size = 14 },
-		{ name = "ter", face = 45, size = 16 },
-		{ name = "ter", face = 46, size = 16 },
-		{ name = "ter", face = 47, size = 16 },
-		{ name = "ter", face = 48, size = 18 },
-		{ name = "ter", face = 49, size = 18 },
-		{ name = "ter", face = 50, size = 20 },
-		{ name = "ter", face = 51, size = 20 },
-		{ name = "ter", face = 52, size = 22 },
-		{ name = "ter", face = 53, size = 22 },
-		{ name = "ter", face = 54, size = 24 },
-		{ name = "ter", face = 55, size = 24 },
-		{ name = "ter", face = 56, size = 28 },
-		{ name = "ter", face = 57, size = 28 },
-		{ name = "ter", face = 58, size = 32 },
-		{ name = "ter", face = 59, size = 32 },
-		{ name = "unscii", face = 60, size = 16 },
-		{ name = "unscii", face = 61, size = 16 },
-		{ name = "unscii", face = 62, size = 8 },
-		{ name = "unscii", face = 63, size = 8 },
-		{ name = "unscii", face = 64, size = 8 },
-		{ name = "unscii", face = 65, size = 8 },
-		{ name = "unscii", face = 66, size = 16 },
-		{ name = "unscii", face = 67, size = 8 },
-	}
-	screen.font_face(fonts[n].face)
-	screen.font_size(fonts[n].size)
-end
-
-local function draw_tempo()
-	if App.playing then
-		local beat = 15 - math.floor((App.tick % App.ppqn) / App.ppqn * 16)
-		screen.level(beat)
-	else
-		screen.level(5)
-	end
-
-	screen.rect(76, 0, 127, 32)
-	screen.fill()
-
-	screen.move(102, 28)
-	App:set_font(34)
-	screen.level(0)
-	screen.text_center(math.floor(clock.get_tempo() + 0.5))
-	screen.fill()
-
-	screen.level(0)
-
-	if App.playing then
-		App:set_font(5)
-		screen.move(79, 7)
-		screen.text("\u{25b8}")
-	else
-		App:set_font(1)
-		screen.move(79, 7)
-		screen.text("||")
-	end
-
-	App:set_font(1)
-	screen.move(124, 7)
-	local quarter = math.floor(App.tick / App.ppqn)
-	local measure = math.floor(quarter / 4) + 1
-	local count = math.floor(quarter % 4) + 1
-	screen.text_right(measure .. ":" .. count)
-	screen.fill()
-
-	if App.recording then
-		screen.level(0)
-		App:set_font(1)
-		screen.move(85, 7)
-		screen.text("REC")
-		screen.fill()
-	end
-end
-
-local function draw_chord(select, x, y)
-	x = x or 60
-	y = y or 14
-	local scale = App.scale[select]
-	local chord = scale.chord
-	if chord and #scale.intervals > 2 then
-		local name = chord.name
-		local root = chord.root + scale.root
-		local bass = scale.root
-
-		screen.level(15)
-		App:set_font(37)
-		screen.move(x, y + 12)
-		screen.text(musicutil.note_num_to_name(root))
-		local name_offset = screen.text_extents(musicutil.note_num_to_name(root)) + x
-		App:set_font(9)
-
-		screen.move(name_offset, y)
-		screen.text(name)
-		screen.fill()
-
-		if bass ~= root then
-			screen.move(name_offset, y + 12)
-			screen.text("/" .. musicutil.note_num_to_name(bass))
-		end
-	end
-end
-
-local function draw_chord_small(select, x, y)
-	x = x or 60
-	y = y or 46
-	local scale = App.scale[select]
-	local chord = scale.chord
-	if chord and #scale.intervals > 2 then
-		local name = chord.name
-		local root = chord.root + scale.root
-		local bass = scale.root
-
-		screen.level(15)
-		App:set_font(1)
-		screen.move(x, y)
-		screen.text(musicutil.note_num_to_name(root) .. name)
-		screen.fill()
-	end
-end
-
-function draw_intervals(select, x, y)
-	x = x or 0
-	y = y or 63
-	screen.move(127, 41)
-
-	local interval_names = { "R", "b2", "2", "b3", "3", "4", "b5", "5", "b6", "6", "b7", "7" }
-
-	App:set_font(1)
-	for i = 1, #interval_names do
-		if App.scale[1].bits & (1 << (i - 1)) > 0 then
-			screen.level(15)
-		else
-			screen.level(1)
-		end
-		screen.move(i * 10 + x, y)
-		screen.text_center(interval_names[i])
-		screen.fill()
-	end
-end
-
-function draw_tag(label, value, x, y)
-	x = x or 0
-	y = y or 35
-	screen.level(0)
-	screen.rect(x, y, 128, 29)
-	screen.fill()
-
-	screen.level(15)
-	screen.rect(x, y, 32, 32)
-	screen.fill()
-
-	screen.level(0)
-	screen.move(x + 1, y + 7)
-	screen.text(label)
-
-	screen.move(x + 16, y + 27)
-	App:set_font(34)
-	screen.text_center(value)
-
-	App:set_font(1)
-	screen.move(x + 16, y + 17)
-	screen.text_center("shit")
-	screen.fill()
-end
-
-local function draw_status()
-	App:set_font(1)
-	screen.level(15)
-	screen.rect(0, 0, 10, 9)
-	screen.fill()
-	screen.level(0)
-	screen.move(5, 7)
-	screen.text_center(App.current_track)
-	screen.fill()
-
-	screen.level(15)
-	screen.move(15, 7)
-	screen.text(App.track[App.current_track].name)
-
-	App:set_font(5)
-	screen.move(0, 20)
-	screen.text("\u{25b8}")
-	screen.move(0, 30)
-	screen.text("\u{25c2}")
-
-	App:set_font(1)
-
-	local in_ch = "off"
-	if App.track[App.current_track].midi_in == 17 then
-		in_ch = "all"
-	elseif App.track[App.current_track].midi_in ~= 0 then
-		in_ch = App.track[App.current_track].midi_in
-	end
-	screen.move(6, 20)
-	screen.text(App.track[App.current_track].input_device.abbr)
-
-	screen.move(70, 20)
-	screen.text_right(in_ch)
-
-	screen.fill()
-
-	local out_ch = "off"
-	if App.track[App.current_track].midi_out == 17 then
-		out_ch = "all"
-	elseif App.track[App.current_track].midi_out ~= 0 then
-		out_ch = App.track[App.current_track].midi_out
-	end
-
-	screen.move(6, 30)
-	screen.text(App.track[App.current_track].output_device.abbr)
-
-	screen.move(70, 30)
-	screen.text_right(out_ch)
-
-	screen.fill()
-
-	screen.move(6, 20)
-end
-
 function App:init(o)
-	----------------------------------------------------------------------------
 	-- Model & State Variables
-	----------------------------------------------------------------------------
 	self.screen_dirty = true
 	self.device_manager = DeviceManager:new()
 	self.flags = flags
@@ -339,52 +95,58 @@ function App:init(o)
 	self.start_time = 0
 	self.last_time = 0
 
+	-- UI redraw heartbeat (used by Foobar.lua watchdog)
+	-- Stores last time the UI successfully redrew, in seconds.
+	self.ui_last_redraw = (util and util.time and util.time()) or os.time()
+
+	
+
 	-- Default function bindings
 	self.default = {
 		enc1 = function(d)
-			print("default enc 1 " .. d)
+			UI:set_cursor(d)
 		end,
 		enc2 = function(d)
-			print("default enc 2 " .. d)
+			UI:use_menu('enc2', d)
 		end,
 		enc3 = function(d)
-			print("default enc 3 " .. d)
+			UI:use_menu('enc3', d)
 		end,
 		alt_enc1 = function(d)
-			print("default alt enc 1 " .. d)
+			UI:use_menu('alt_enc1', d)
 		end,
 		alt_enc2 = function(d)
-			print("default alt enc 2 " .. d)
+			UI:use_menu('alt_enc2', d)
 		end,
 		alt_enc3 = function(d)
-			print("default alt enc 3 " .. d)
+			UI:use_menu('alt_enc3', d)
 		end,
 		long_fn_2 = function()
+			UI:use_menu('long_fn_2', d)
+		end,
+		long_fn_3 = function()
 			self.recording = not self.recording
 			print("Recording: " .. tostring(self.recording))
 			self.screen_dirty = true
 		end,
-		long_fn_3 = function()
-			print("Long 3")
-		end,
 		alt_fn_2 = function()
-			print("Alt 2")
+			UI:use_menu('alt_fn_2', d)
 		end,
 		alt_fn_3 = function()
-			print("Alt 3")
+			UI:use_menu('alt_fn_3', d)
 		end,
 		press_fn_2 = function()
+			UI:use_menu('press_fn_2', d)
+		end,
+		press_fn_3 = function()
 			if App.playing then
 				App:stop()
 			else
 				App:start()
 			end
 		end,
-		press_fn_3 = function()
-			print("press 3")
-		end,
 		screen = function()
-			draw_tempo()
+			UI:draw_tempo()
 
 			local track_name = params:get("track_" .. App.current_track .. "_name")
 
@@ -394,13 +156,64 @@ function App:init(o)
 				screen.level(2)
 			end
 
-			draw_chord(1, 80, 45)
-			draw_chord_small(2)
+			UI:draw_chord(1, 80, 45)
+			UI:draw_chord_small(2)
 			-- draw_intervals(1)
 
-			draw_status()
+			UI:draw_status()
 		end,
 	}
+	local menu_style = {inactive_color = 15}
+
+	UI:add_menu_item({
+		icon = "\u{2192}",
+		label = function()
+			return App.track[App.current_track].input_device.abbr
+		end,
+		value = function()
+			local in_ch = "off"
+
+			if App.track[App.current_track].midi_in == 17 then
+				in_ch = "all"
+			elseif App.track[App.current_track].midi_in ~= 0 then
+				in_ch = App.track[App.current_track].midi_in
+			end
+
+			return in_ch
+		end,
+		style = menu_style,
+		enc2 = function(d)
+            ParamTrace.set('track_' .. App.current_track .. '_device_in', App.track[App.current_track].device_in + d, 'session_device_in_change')                
+		end,
+		enc3 = function(d)
+			ParamTrace.set('track_' .. App.current_track .. '_midi_in', App.track[App.current_track].midi_in + d, 'session_midi_in_change')
+		end
+	}, true)
+
+	UI:add_menu_item({
+		icon = "\u{2190}",
+		label = function()
+			return App.track[App.current_track].output_device.abbr
+		end,
+		value = function()
+			local out_ch = "off"
+			
+			if App.track[App.current_track].midi_out == 17 then
+				out_ch = "all"
+			elseif App.track[App.current_track].midi_out ~= 0 then
+				out_ch = App.track[App.current_track].midi_out
+			end
+
+			return out_ch
+		end,
+		style = menu_style,
+		enc2 = function(d)
+            ParamTrace.set('track_' .. App.current_track .. '_device_out', App.track[App.current_track].device_out + d, 'session_device_out_change')                
+		end,
+		enc3 = function(d)
+			ParamTrace.set('track_' .. App.current_track .. '_midi_out', App.track[App.current_track].midi_out + d, 'session_midi_out_change')
+		end
+	}, true)
 
 	-- For triggers, keys, and mode-specific contexts
 	self.triggers = {}
@@ -538,6 +351,14 @@ function App:on_tick()
 end
 
 --==============================================================================
+-- UI Heartbeat
+--==============================================================================
+-- Called by the top-level redraw function to record the last successful redraw.
+function App:ui_heartbeat()
+	self.ui_last_redraw = (util and util.time and util.time()) or os.time()
+end
+
+--==============================================================================
 -- MIDI In/Out and Grid Registration
 --==============================================================================
 
@@ -617,6 +438,7 @@ function App:handle_enc(e, d)
 			context.enc3(d)
 		end
 	end
+	App.mode[App.current_mode]:reset_timeout()
 end
 
 function App:handle_key(k, z)
@@ -635,6 +457,7 @@ function App:handle_key(k, z)
 			context["press_fn_" .. k]()
 		end
 	end
+	App.mode[App.current_mode]:reset_timeout()
 end
 
 --==============================================================================

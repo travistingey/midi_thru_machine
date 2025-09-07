@@ -1,11 +1,11 @@
-local Grid = require('Foobar/lib/grid')
-local utilities = require('Foobar/lib/utilities')
-local ParamTrace = require('Foobar/lib/utilities/paramtrace')
-local path_name = 'Foobar/lib/components/mode/'
+local path_name = 'Foobar/lib/'
 
-local PresetSeq = require('Foobar/lib/components/mode/presetseq')
-
-local Mode = require('Foobar/lib/components/app/mode')
+local Grid = require(path_name .. 'grid')
+local utilities = require(path_name .. 'utilities')
+local ParamTrace = require(path_name .. 'utilities/paramtrace')
+local PresetSeq = require(path_name .. 'components/mode/presetseq')
+local Mode = require(path_name .. 'components/app/mode')
+local UI = require(path_name .. 'ui')
 
 local presetseq = PresetSeq:new({
     track=1,
@@ -20,7 +20,6 @@ local presetseq = PresetSeq:new({
 local SessionMode = Mode:new({
     id = 1,
     track = 1,
-    cursor = 1,
     components = {
         presetseq
     },
@@ -65,42 +64,6 @@ local SessionMode = Mode:new({
             end
         end
     end,
-    context = {
-        enc1 = function(d)
-            local mode = App.mode[1]
-            mode.cursor = util.clamp (mode.cursor + d, 1, 2)
-            App.screen_dirty = true
-        end,
-        enc2 = function(d)
-            local mode = App.mode[1]
-            
-            if mode.cursor == 1 then
-                ParamTrace.set('track_' .. App.current_track .. '_device_in', App.track[App.current_track].device_in + d, 'session_device_in_change')
-            elseif mode.cursor == 2 then
-                ParamTrace.set('track_' .. App.current_track .. '_device_out', App.track[App.current_track].device_out + d, 'session_device_out_change')
-            end
-            App.screen_dirty = true
-        end,
-        enc3 = function(d)
-            local mode = App.mode[1]
-            
-            if mode.cursor == 1 then
-                ParamTrace.set('track_' .. App.current_track .. '_midi_in', App.track[App.current_track].midi_in + d, 'session_midi_in_change')
-            elseif mode.cursor == 2 then
-                ParamTrace.set('track_' .. App.current_track .. '_midi_out', App.track[App.current_track].midi_out + d, 'session_midi_out_change')
-            end
-
-            App.screen_dirty = true
-        end
-    },
-    layer = {[2] = function()
-            screen.level(15)
-            App:set_font(1)
-            screen.move(0, App.mode[1].cursor * 10 + 12)
-            screen.text('_')
-            screen.fill()
-        end
-    }
 })
 
 

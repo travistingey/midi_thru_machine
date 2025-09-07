@@ -1,7 +1,8 @@
 local path_name = 'Foobar/lib/'
-local ModeComponent = require('Foobar/lib/components/mode/modecomponent')
+local ModeComponent = require(path_name .. 'components/mode/modecomponent')
 local Grid = require(path_name .. 'grid')
 local PresetSeq = ModeComponent:new()
+local UI = require(path_name .. 'ui')
 
 PresetSeq.__base = ModeComponent
 PresetSeq.name = 'presetseq'
@@ -9,6 +10,7 @@ PresetSeq.name = 'presetseq'
 local max_step_length = App.ppqn * 16 -- 4 bars
 local min_step_length = App.ppqn / 8 -- 1/32th note
 local max_ticks = max_step_length * 64
+
 
 function PresetSeq:set(o)
     self.__base.set(self, o)
@@ -45,50 +47,49 @@ function PresetSeq:set(o)
 
     self.grid:refresh()
 
+    self.test_value = 1
+
     self.context = {
-        enc1 = function(d)
+        enc2 = function(d)
             local auto = self:get_component()
             self.selected_lane_index = (self.selected_lane_index + d - 1) % #self.lanes + 1
             self.selected_lane = self.lanes[self.selected_lane_index]
             self:set_grid(auto)
+            self.mode:reset_timeout()
             App.screen_dirty = true
         end,
+        menu = {
+            {
+                label = "LANE",
+                value = function()
+                    return self.select.value
+                end,
+            },
+            {
+                icon = "PRESET",
+                label = "second",
+            },
+            {
+                label = "SETTINGS",
+                value = "#"
+                next = {
+
+                }
+            }
+            
+        }
     }
 
     self.screen =  function()
-        screen.level(0)
-        screen.rect(0,35,128,29)
-        screen.fill()
-        screen.level(15)
-        screen.rect(0,35,32,32)
-        screen.fill()
-        screen.level(0)
         
-        screen.move(36, 42)
-        screen.text(self.selected_lane)
+        
 
-        screen.move(16,62)
-        screen.font_face(56)
-        screen.font_size(28)
-        
-        local auto = self:get_component()
-        local step_value = ''
-        if self.index and auto.seq[self.index] and auto.seq[self.index][self.selected_lane] then
-            screen.text_center(auto.seq[self.index][self.selected_lane].value)
-        end
-        screen.font_face(1)
-        screen.font_size(8)
-        screen.move(16, 42)
-        screen.text_center(self.selected_lane)
-        screen.fill()
-        screen.level(15)
-        screen.move(36, 42)
-        screen.text('TYPE')
-        screen.move(128, 42)
-        screen.text_right('poops')
-        screen.fill()
+        UI:draw_tag(90, 36, 'step', self.last_event)
+       
     end
 end
+
+
 
 function PresetSeq:enable_event()
     local auto = self:get_component()
@@ -136,7 +137,11 @@ function PresetSeq:increase_step_length()
     -- max step length is 384 ticks = 16 beats * 24ppqn = 16 bars
     if self.step_length < max_step_length then
         local current_display_offset = self.display_offset * self.step_length
-        self.step_length = self.step_length * 2
+        if self.step_length == 1 then
+            self.step_length = 3
+        else
+            self.step_length = self.step_length * 2
+        end
         self:recalculate_display(current_display_offset)
         
         self:set_grid(self:get_component())
@@ -186,11 +191,12 @@ function PresetSeq:grid_event(component, data)
 
     self:set_select()
     
+    self.mode:use_context(self.context, self.screen, {timeout = true, menu_override = true})
+    self.last_event = self.grid:grid_to_index(data) + self.step_offset
 
     if data.type == 'pad_long' and data.pad_down and #data.pad_down == 1 then
         local pad_1 = self.grid:grid_to_index(data) + self.step_offset
         local pad_2 = self.grid:grid_to_index(data.pad_down[1]) + self.step_offset
-        print(pad_1, pad_2)
         local selection_start = math.min(pad_1,pad_2)
         local selection_end = math.max(pad_1,pad_2)
 
@@ -289,6 +295,8 @@ function PresetSeq:set_grid(component)
     local VALUE = (1 << 1)
     local LOOP_END = (1 << 2)
     local STEP = (1 << 3)
+    local OUTSIDE = (1 << 4)
+
   
     grid:for_each(function(s, x, y, i)
         local pad = 0
@@ -321,6 +329,8 @@ function PresetSeq:set_grid(component)
         local loop_start_index = math.floor(loop_start / self.step_length) + 1
         local loop_end_index = math.floor(loop_end / self.step_length) + 1
 
+       
+        
         if global_step == loop_start_index or global_step == loop_end_index then
             pad = pad | LOOP_END
         end
@@ -329,11 +339,16 @@ function PresetSeq:set_grid(component)
             pad = pad | STEP
         end
 
-        local color = 123
+        if global_step > loop_end_index then
+            pad = pad | OUTSIDE
+        end
 
-        if pad & (BLINK | VALUE | STEP) == 0 or pad == BLINK then
-            -- empty
-            color = 0
+        local color = 123
+        
+        if pad & (OUTSIDE | VALUE) == (OUTSIDE | VALUE) then
+            color = {2,2,2} -- draw division lines
+        elseif pad & (BLINK | VALUE | STEP) == 0 or pad == BLINK then
+            color = 0 -- empty
         elseif pad & STEP > 0 and pad & (BLINK | VALUE) == 0 or pad == (BLINK | STEP) then
             -- LOW White
             color = {5,5,5}
@@ -345,6 +360,7 @@ function PresetSeq:set_grid(component)
             color = 1
         elseif pad & (VALUE | STEP) > 0 or pad & (BLINK | VALUE) > 0 and pad & STEP == 0 then
             color = grid.rainbow_on[(seq_value - 1) % 16 + 1]
+        
         end
    
         s.led[x][y] = color

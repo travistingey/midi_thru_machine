@@ -1,11 +1,11 @@
+local path_name = 'Foobar/lib/'
+local Grid = require(path_name .. 'grid')
+local utilities = require(path_name .. 'utilities')
 
-local Grid = require('Foobar/lib/grid')
-local utilities = require('Foobar/lib/utilities')
-local path_name = 'Foobar/lib/components/track/'
-local Input = require(path_name .. 'input')
-local Seq = require(path_name .. 'seq')
-local Output = require(path_name .. 'output')
-
+local Input = require(path_name .. 'components/track/input')
+local Seq = require(path_name .. 'components/track/seq')
+local Output = require(path_name .. 'components/track/output')
+local UI = require(path_name .. 'ui')
 
 -- Define a new class for Mode
 local Mode = {}
@@ -51,7 +51,9 @@ function Mode:set(o)
 
     self.layer = o.layer or {}
     self.layer[1] = App.default.screen
-    
+    self.screen = o.screen or function() end
+
+
     -- Create the modes
     self.grid = Grid:new({
         grid_start = { x = 1, y = 1 },
@@ -198,6 +200,8 @@ function Mode:cancel_context()
         end
         self.context_layer = nil
     end
+    
+    UI:set_menu()
 
     -- Reset the context functions to default
     for binding, func in pairs(self.default) do
@@ -275,16 +279,21 @@ end
 -- If an option is a type of number, we will assume its a timeout
 -- if an option is type of boolean, we will assume whether or not to use a timeout
 -- if the timeout is true then we use the default timeout
-function Mode:handle_context(context, screen, option)
+function Mode:use_context(context, screen, option)
     local callback
     local timeout
+    local menu_override = false
+    local menu_context = context.menu or nil
 
     if type(option) == 'table' then
-        timeout = option.timeout or nil
-        callback = option.callback or nil
+        timeout = option.timeout 
+        callback = option.callback
+        menu_override = option.menu_override
+        
         if timeout == true then
             timeout = self.timeout
         end
+        
     elseif type(option) == 'number' then
         timeout = option
     elseif type(option) == 'function' then
@@ -300,6 +309,12 @@ function Mode:handle_context(context, screen, option)
 
     -- Cancel any existing toast when a new context is started
     self:cancel_toast()
+
+    -- Store original menu state if menu context is provided
+    if menu_context then
+        -- Set the new menu context
+        UI:set_menu(menu_context, menu_override)
+    end
 
     -- Insert the context screen and keep a reference to it
     self.context_layer = screen
@@ -323,12 +338,11 @@ function Mode:handle_context(context, screen, option)
     end
 end
 
-function Mode:toast(toast_text)
+function Mode:toast(toast_text, draw_fn)
+    draw_fn = draw_fn or function(t) UI:draw_toast(t) end
+    
     local function toast_screen()
-        screen.level(15)
-        screen.move(64,32)
-        screen.text_center(toast_text)
-        screen.fill()
+       draw_fn(toast_text)
     end
 
     -- Cancel any existing toast
@@ -356,6 +370,15 @@ function Mode:register_params(o)
 end
 
 -- Methods
+function Mode:register_screens()
+    self.layer = {App.default.screen}
+
+    -- Register screen functions
+    if self.screen and type(self.screen) == 'function' then
+        table.insert(self.layer, self.screen)
+    end
+end
+
 function Mode:enable()
     if self.enabled then
         return -- Prevent re-enabling
@@ -368,6 +391,9 @@ function Mode:enable()
         component:enable()
     end
 
+    -- Register component screen functions into the layer system
+    self:register_screens()
+
     self.grid:enable()
     self.enabled = true
 
@@ -375,13 +401,6 @@ function Mode:enable()
         self.mode_pads.led[4 + self.id][9] = 3
         self.mode_pads:refresh()
     end
-
-    -- Listen for an 'alt_reset' event so that components can trigger a reset of the alt pad.
-    self:on('alt_reset', function()
-        self.alt_pad:reset()
-        self.alt = false
-        self.alt_pad:refresh()
-    end)
     
     if self.load_event ~= nil then
         self:load_event()
@@ -404,7 +423,6 @@ function Mode:disable()
     self:cancel_context()
     self:cancel_toast()
     self.enabled = false
-    
     -- reset alt
     self:emit('alt_reset')
 

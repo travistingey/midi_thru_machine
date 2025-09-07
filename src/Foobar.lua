@@ -15,7 +15,9 @@ print('When things blow up, manually reload using: norns.script.load("/home/we/d
 ------------------------------------------------------------------------------
 function init()
 	App:init()
-	redraw_clock_id = clock.run(redraw_clock)
+	-- Start UI redraw metro and watchdog
+	start_redraw_metro()
+	start_watchdog_metro()
 end -- end Init
 
 function enc(e, d) --------------- enc() is automatically called by norns
@@ -26,19 +28,62 @@ function key(k, z) ------------------ key() is automatically called by norns
 	App:handle_key(k,z)
 end
 
-function redraw_clock() ----- a clock that draws space
-	while true do ------------- "while true do" means "do this forever"
-		clock.sleep(1 / 24) ------- pause for a fifteenth of a second (aka 15fps)
-		if App.screen_dirty then ---- only if something changed
-			redraw() -------------- redraw space
-			App.screen_dirty = false -- and everything is clean again
+-- UI redraw and watchdog
+local ui_redraw_metro = nil
+local ui_watchdog_metro = nil
+
+function start_redraw_metro()
+	if ui_redraw_metro then
+		ui_redraw_metro:stop()
+		ui_redraw_metro = nil
+	end
+
+	ui_redraw_metro = metro.init()
+	ui_redraw_metro.time = 1 / 24
+	ui_redraw_metro.count = -1 -- repeat indefinitely
+	ui_redraw_metro.event = function(stage)
+		if App.screen_dirty then
+			redraw()
+			App.screen_dirty = false
+		end
+		-- Update heartbeat each tick so watchdog knows UI loop is alive
+		if App and App.ui_last_redraw then
+			App:ui_heartbeat()
 		end
 	end
+	ui_redraw_metro:start()
+end
+
+function start_watchdog_metro()
+	if ui_watchdog_metro then
+		ui_watchdog_metro:stop()
+		ui_watchdog_metro = nil
+	end
+
+	ui_watchdog_metro = metro.init()
+	ui_watchdog_metro.time = 1.0 -- check once per second
+	ui_watchdog_metro.count = -1
+	ui_watchdog_metro.event = function(stage)
+		local now = (util and util.time and util.time()) or os.time()
+		local last = (App and App.ui_last_redraw) or 0
+		-- If no redraw activity for > 2.5s, restart the redraw metro
+		if (now - last) > 2.5 then
+			print('[ui] redraw stalled, restarting metro')
+			start_redraw_metro()
+			App.screen_dirty = true
+			App:ui_heartbeat()
+		end
+	end
+	ui_watchdog_metro:start()
 end
 
 function redraw() -------------- redraw() is automatically called by norns
 	App:draw()
 	screen.update()
+	-- Mark successful redraw for watchdog heartbeat
+	if App and App.ui_last_redraw then
+		App:ui_heartbeat()
+	end
 end
 
 function test() 
@@ -100,6 +145,14 @@ function r()
 end
 
 function cleanup() --------------- cleanup() is automatically called on script close
-	clock.cancel(redraw_clock_id) -- melt our clock via the id we noted
+	-- Stop UI metros
+	if ui_redraw_metro then
+		ui_redraw_metro:stop()
+		ui_redraw_metro = nil
+	end
+	if ui_watchdog_metro then
+		ui_watchdog_metro:stop()
+		ui_watchdog_metro = nil
+	end
 	App:cleanup() -- clean up app-specific resources
 end
