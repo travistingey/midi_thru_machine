@@ -1,0 +1,16 @@
+{
+  "name": "midi_thru_machine",
+  "version": "1.0.0",
+  "description": "MIDI Thru Machine project with Norns integration",
+  "main": "scripts/send-to-norns.js",
+  "scripts": {
+    "send": "node scripts/send-to-norns.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "ws": "^8.14.2"
+  },
+  "keywords": ["midi", "norns", "websocket"],
+  "author": "",
+  "license": "ISC"
+} 

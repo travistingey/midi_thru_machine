@@ -1,0 +1,29 @@
+# StyLua configuration for Norns Lua project
+# Configured to match user's style preferences
+
+# Line endings
+line_endings = "Unix"
+
+# Indentation - tabs with 4 spaces
+indent_type = "Tabs"
+indent_width = 4
+
+# Column width - 200 characters
+column_width = 200
+
+# Quote style - single quotes
+quote_style = "ForceSingle"
+
+# Call parentheses - no spaces around functions
+call_parentheses = "Always"
+
+# Collapse simple statements
+collapse_simple_statement = "Always"
+
+# Space after function names - never
+space_after_function_names = "Never"
+
+trim_whitespace = "Always"
+
+# Syntax (Lua 5.3 for Norns)
+syntax = "Lua53" 
