@@ -3,13 +3,28 @@ local ModeComponent = require(path_name .. 'components/mode/modecomponent')
 local UI = require(path_name .. 'ui')
 local ParamTrace = require(path_name .. 'utilities/paramtrace')
 
-local ModeDefault = ModeComponent:new({})
+local Default = ModeComponent:new({})
 
-function ModeDefault:enable_event()
-  -- Build the baseline menu for the active track
-  local menu_style = { inactive_color = 15 }
+local menu_style = { inactive_color = 15 }
 
-  local menu = {
+function Default:sub_menu(menu, parent_menu)
+  local current_cursor = self.mode.cursor
+
+  local prev = function()
+    print("Previous Menu")
+    self.mode:use_context({menu=parent_menu}, self:screen(), { timeout = false, cursor = current_cursor })
+  end
+  
+  local context = {
+    press_fn_2 = prev,
+    menu = menu
+  }
+  
+  self.mode:use_context(context, self:screen(), { timeout = false })
+end
+
+function Default:track_menu()
+  return {
     {
       icon = "\u{2192}",
       label = function()
@@ -24,7 +39,6 @@ function ModeDefault:enable_event()
         end
         return in_ch
       end,
-      style = menu_style,
       enc2 = function(d)
         ParamTrace.set('track_' .. App.current_track .. '_device_in', App.track[App.current_track].device_in + d, 'session_device_in_change')
       end,
@@ -46,18 +60,50 @@ function ModeDefault:enable_event()
         end
         return out_ch
       end,
-      style = menu_style,
       enc2 = function(d)
         ParamTrace.set('track_' .. App.current_track .. '_device_out', App.track[App.current_track].device_out + d, 'session_device_out_change')
       end,
       enc3 = function(d)
         ParamTrace.set('track_' .. App.current_track .. '_midi_out', App.track[App.current_track].midi_out + d, 'session_midi_out_change')
       end
-    }
+    },
+    {
+      icon = "\u{266a}",
+      label = "SCALE",
+      value = function()
+        local scale = App.track[App.current_track].scale_select
+        if scale == 0 then
+          return 'none'
+        else
+          return scale
+        end
+      end,
+      enc3 = function(d)
+        ParamTrace.set('track_' .. App.current_track .. '_scale_select', App.track[App.current_track].scale_select + d, 'session_scale_select_change')
+      end,
+      press_fn_3 = function()
+        print("Scale Sub Menu")
+        self:sub_menu(self:scale_menu(), self:track_menu())
+      end
+    }    
   }
+end
 
-  -- Baseline screen draws tempo, chords, header, and menu
-  local function baseline_screen()
+function Default:scale_menu()
+  return {
+      {
+        icon = "\u{2192}",
+        label = "SCALE SUB MENU",
+        value = function()
+          return App.track[App.current_track].scale_select
+        end,
+      }
+    }
+end
+
+
+function Default:screen()
+  return function ()
     UI:draw_tempo()
 
     if App.track[App.current_track].enabled then
@@ -71,11 +117,19 @@ function ModeDefault:enable_event()
     UI:draw_status()
     UI:draw_menu(0, 20, self.mode.menu, self.mode.cursor)
   end
+end
+
+
+function Default:enable_event()
+  -- Build the baseline menu for the active track
+  
+  local menu = self:track_menu()
 
   -- Apply as the mode's default UI and menu
   local context = { menu = menu }
-  self.mode:use_context(context, baseline_screen, { menu_override = true, set_default = true, timeout = false })
+
+  self.mode:use_context(context, self:screen(), { timeout = false })
 end
 
-return ModeDefault
+return Default
 

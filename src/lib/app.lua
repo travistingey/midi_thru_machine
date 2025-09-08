@@ -122,7 +122,7 @@ function App:init(o)
 			self.mode[self.current_mode]:use_menu('alt_enc3', d)
 		end,
 		long_fn_2 = function()
-			self.mode[self.current_mode]:use_menu('long_fn_2', d)
+			self.mode[self.current_mode]:use_menu('long_fn_2')
 		end,
 		long_fn_3 = function()
 			self.recording = not self.recording
@@ -130,20 +130,16 @@ function App:init(o)
 			self.screen_dirty = true
 		end,
 		alt_fn_2 = function()
-			self.mode[self.current_mode]:use_menu('alt_fn_2', d)
+			self.mode[self.current_mode]:use_menu('alt_fn_2')
 		end,
 		alt_fn_3 = function()
-			self.mode[self.current_mode]:use_menu('alt_fn_3', d)
+			self.mode[self.current_mode]:use_menu('alt_fn_3')
 		end,
 		press_fn_2 = function()
-			self.mode[self.current_mode]:use_menu('press_fn_2', d)
+			self.mode[self.current_mode]:use_menu('press_fn_2')
 		end,
 		press_fn_3 = function()
-			if App.playing then
-				App:stop()
-			else
-				App:start()
-			end
+			self.mode[self.current_mode]:use_menu('press_fn_3')
 		end,
 		screen = function()
 			-- Baseline screen now provided by a gridless mode component.

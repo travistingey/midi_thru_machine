@@ -5,21 +5,21 @@ local path_name = 'Foobar/lib/components/mode/'
 local MuteGrid = require('Foobar/lib/components/mode/mutegrid') 
 local NoteGrid = require('Foobar/lib/components/mode/notegrid')
 local PresetSeq = require('Foobar/lib/components/mode/presetseq')
-local ModeDefault = require('Foobar/lib/components/mode/modedefault')
+local Default = require('Foobar/lib/components/mode/default')
 
 local Mode = require('Foobar/lib/components/app/mode')
 
 local presetseq = PresetSeq:new({track=1})
 local mutegrid = MuteGrid:new({track=1})
 local notegrid = NoteGrid:new({track=1})
-local modedefault = ModeDefault:new({})
+local default = Default:new({})
 
 
 local SessionMode = Mode:new({
     id = 1,
     track = 1,
     components = {
-        modedefault,
+        default,
         presetseq,
         mutegrid,
         notegrid

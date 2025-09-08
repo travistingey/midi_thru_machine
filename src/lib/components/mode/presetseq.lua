@@ -78,7 +78,6 @@ function PresetSeq:set(o)
     }
 
     self.screen =  function()
-
         UI:draw_tag(1, 2, 'step', self.last_event)
     end
 end

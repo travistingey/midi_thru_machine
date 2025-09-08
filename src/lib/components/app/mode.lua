@@ -348,13 +348,13 @@ function Mode:use_context(context, screen, option)
     local menu_override = false
     local set_default = false
     local menu_context = context.menu or nil
-
+    local cursor = 1
     if type(option) == 'table' then
         timeout = option.timeout 
         callback = option.callback
         menu_override = option.menu_override
         set_default = option.set_default or false
-        
+        cursor = option.cursor or 1
         if timeout == true then
             timeout = self.timeout
         end
@@ -383,7 +383,7 @@ function Mode:use_context(context, screen, option)
         for _, menu_item in ipairs(menu_context) do
             table.insert(self.menu, menu_item)
         end
-        self.cursor = 1
+        self.cursor = cursor
         self.cursor_positions = #self.menu
     end
 
