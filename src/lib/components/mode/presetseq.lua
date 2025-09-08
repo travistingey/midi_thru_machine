@@ -72,20 +72,14 @@ function PresetSeq:set(o)
             {
                 label = "SETTINGS",
                 value = "#"
-                next = {
-
-                }
             }
             
         }
     }
 
     self.screen =  function()
-        
-        
 
-        UI:draw_tag(90, 36, 'step', self.last_event)
-       
+        UI:draw_tag(1, 2, 'step', self.last_event)
     end
 end
 

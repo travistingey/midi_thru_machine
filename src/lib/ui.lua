@@ -1,10 +1,7 @@
 require('Foobar/lib/musicutil-extended')
 
 local UI = {
-    cursor = 1,
-    cursor_positions = 1,
     current_font = 1,
-    menu = {},
     max_visible_items = 5,
     fonts = {
 		{ name = "04B_03", face = 1, size = 8 },        -- 1
@@ -64,66 +61,12 @@ local UI = {
             aa = 0,
             line_join = 'square',
             line_width = 1,
-        },
-        menu = {}
+        }
     }
 }
 
--- Menu Functions
-function UI:set_cursor(d)
-    self.cursor = util.clamp (self.cursor + d, 1, self.cursor_positions)
-    App.screen_dirty = true
-end
-
--- Add a menu item to the end of the menu
-function UI:add_menu_item(menu_item, default)
-    table.insert(self.menu, menu_item)
-    self.cursor_positions = #self.menu
-
-    if default then
-        table.insert(self.default.menu, menu_item)
-    end
-end
-
--- Add a menu item to the end of the menu
-function UI:next_menu()
-    table.insert(self.menu, menu_item)
-    self.cursor_positions = #self.menu
-
-    if default then
-        table.insert(self.default.menu, menu_item)
-    end
-end
-
--- set a table of menu items
-function UI:set_menu(menu, override)
-    self.cursor = 1
-    self.cursor_positions = #self.menu
-    self.menu = {}
-
-    -- Override skipts the default menu
-    if not override then
-        for i, menu_item in ipairs(self.default.menu) do
-            self:add_menu_item(menu_item)
-        end
-    end
-        
-    if menu then
-        for _, menu_item in ipairs(menu) do
-            self:add_menu_item(menu_item)
-        end
-    end
-end
-
 
 -- Use a menu item, selected by context key and cursor position
-function UI:use_menu(ctx, d)
-    if type(self.menu[self.cursor][ctx]) == "function" then
-        self.menu[self.cursor][ctx](d)
-    end
-    App.screen_dirty = true
-end
-
 -- Set font and size to avoid aliasing
 function UI:set_font(n)
     self.current_font = n
@@ -153,36 +96,6 @@ function UI:merge_style(default_style, override_style)
     end
     
     return merged
-end
-
--- Calculate which menu items should be visible based on cursor position
-function UI:get_visible_menu_range()
-    local total_items = #self.menu
-    local max_visible = self.max_visible_items
-    
-    -- If we have 5 or fewer items, show all
-    if total_items <= max_visible then
-        return 1, total_items
-    end
-    
-    -- Calculate scroll behavior
-    local start_index = 1
-    local end_index = max_visible
-    
-    if self.cursor > max_visible - 2 then
-        -- We're in the scrolling zone
-        if self.cursor <= total_items - 2 then
-            -- Middle scrolling: cursor stays in position 3, menu scrolls
-            start_index = self.cursor - 2
-            end_index = self.cursor + 2
-        else
-            -- End scrolling: cursor moves normally for last 2 positions
-            start_index = total_items - max_visible + 1
-            end_index = total_items
-        end
-    end
-    
-    return start_index, end_index
 end
 
 
@@ -292,17 +205,35 @@ function UI:draw_toast(toast_text)
     screen.fill()
 end
 
-function UI:draw_menu(x,y)
-    local start_index, end_index = self:get_visible_menu_range()
-    
+function UI:draw_menu(x, y, menu, cursor)
+    menu = menu or {}
+    cursor = cursor or 1
+
+    -- compute visible range
+    local total_items = #menu
+    local max_visible = self.max_visible_items
+    local start_index, end_index = 1, total_items
+    if total_items > max_visible then
+        end_index = max_visible
+        if cursor > max_visible - 2 then
+            if cursor <= total_items - 2 then
+                start_index = cursor - 2
+                end_index = cursor + 2
+            else
+                start_index = total_items - max_visible + 1
+                end_index = total_items
+            end
+        end
+    end
+
     for i = start_index, end_index do
-        local menu_item = self.menu[i]
+        local menu_item = menu[i]
         if menu_item then
             local icon = menu_item.icon or ""
             local label = menu_item.label or ""
             local value = menu_item.value or ""
             local style = menu_item.style
-            local is_active = (i == self.cursor)
+            local is_active = (i == cursor)
 
             if type(menu_item.label) == "function" then
                 label = menu_item.label()
@@ -370,7 +301,7 @@ function UI:draw_status()
 	screen.move(15, 7)
 	screen.text(App.track[App.current_track].name)
 
-    self:draw_menu(0, 20)
+    -- menu rendering is owned by a gridless mode component
 
 end
 

@@ -104,25 +104,25 @@ function App:init(o)
 	-- Default function bindings
 	self.default = {
 		enc1 = function(d)
-			UI:set_cursor(d)
+			self.mode[self.current_mode]:set_cursor(d)
 		end,
 		enc2 = function(d)
-			UI:use_menu('enc2', d)
+			self.mode[self.current_mode]:use_menu('enc2', d)
 		end,
 		enc3 = function(d)
-			UI:use_menu('enc3', d)
+			self.mode[self.current_mode]:use_menu('enc3', d)
 		end,
 		alt_enc1 = function(d)
-			UI:use_menu('alt_enc1', d)
+			self.mode[self.current_mode]:use_menu('alt_enc1', d)
 		end,
 		alt_enc2 = function(d)
-			UI:use_menu('alt_enc2', d)
+			self.mode[self.current_mode]:use_menu('alt_enc2', d)
 		end,
 		alt_enc3 = function(d)
-			UI:use_menu('alt_enc3', d)
+			self.mode[self.current_mode]:use_menu('alt_enc3', d)
 		end,
 		long_fn_2 = function()
-			UI:use_menu('long_fn_2', d)
+			self.mode[self.current_mode]:use_menu('long_fn_2', d)
 		end,
 		long_fn_3 = function()
 			self.recording = not self.recording
@@ -130,13 +130,13 @@ function App:init(o)
 			self.screen_dirty = true
 		end,
 		alt_fn_2 = function()
-			UI:use_menu('alt_fn_2', d)
+			self.mode[self.current_mode]:use_menu('alt_fn_2', d)
 		end,
 		alt_fn_3 = function()
-			UI:use_menu('alt_fn_3', d)
+			self.mode[self.current_mode]:use_menu('alt_fn_3', d)
 		end,
 		press_fn_2 = function()
-			UI:use_menu('press_fn_2', d)
+			self.mode[self.current_mode]:use_menu('press_fn_2', d)
 		end,
 		press_fn_3 = function()
 			if App.playing then
@@ -146,74 +146,11 @@ function App:init(o)
 			end
 		end,
 		screen = function()
-			UI:draw_tempo()
-
-			local track_name = params:get("track_" .. App.current_track .. "_name")
-
-			if App.track[App.current_track].enabled then
-				screen.level(10)
-			else
-				screen.level(2)
-			end
-
-			UI:draw_chord(1, 80, 45)
-			UI:draw_chord_small(2)
-			-- draw_intervals(1)
-
-			UI:draw_status()
+			-- Baseline screen now provided by a gridless mode component.
+			-- Keep this minimal to avoid duplicate drawing.
 		end,
 	}
-	local menu_style = {inactive_color = 15}
-
-	UI:add_menu_item({
-		icon = "\u{2192}",
-		label = function()
-			return App.track[App.current_track].input_device.abbr
-		end,
-		value = function()
-			local in_ch = "off"
-
-			if App.track[App.current_track].midi_in == 17 then
-				in_ch = "all"
-			elseif App.track[App.current_track].midi_in ~= 0 then
-				in_ch = App.track[App.current_track].midi_in
-			end
-
-			return in_ch
-		end,
-		style = menu_style,
-		enc2 = function(d)
-            ParamTrace.set('track_' .. App.current_track .. '_device_in', App.track[App.current_track].device_in + d, 'session_device_in_change')                
-		end,
-		enc3 = function(d)
-			ParamTrace.set('track_' .. App.current_track .. '_midi_in', App.track[App.current_track].midi_in + d, 'session_midi_in_change')
-		end
-	}, true)
-
-	UI:add_menu_item({
-		icon = "\u{2190}",
-		label = function()
-			return App.track[App.current_track].output_device.abbr
-		end,
-		value = function()
-			local out_ch = "off"
-			
-			if App.track[App.current_track].midi_out == 17 then
-				out_ch = "all"
-			elseif App.track[App.current_track].midi_out ~= 0 then
-				out_ch = App.track[App.current_track].midi_out
-			end
-
-			return out_ch
-		end,
-		style = menu_style,
-		enc2 = function(d)
-            ParamTrace.set('track_' .. App.current_track .. '_device_out', App.track[App.current_track].device_out + d, 'session_device_out_change')                
-		end,
-		enc3 = function(d)
-			ParamTrace.set('track_' .. App.current_track .. '_midi_out', App.track[App.current_track].midi_out + d, 'session_midi_out_change')
-		end
-	}, true)
+	-- Default menu is now provided by a gridless ModeComponent per mode.
 
 	-- For triggers, keys, and mode-specific contexts
 	self.triggers = {}

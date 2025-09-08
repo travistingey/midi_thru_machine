@@ -3,9 +3,12 @@ local ScaleGrid = require('Foobar/lib/components/mode/scalegrid')
 local PresetGrid = require('Foobar/lib/components/mode/presetgrid')
 local ParamTrace = require('Foobar/lib/utilities/paramtrace')
 
+local ModeDefault = require('Foobar/lib/components/mode/modedefault')
+
 local KeysMode = Mode:new({
     id = 3,
     components = {
+        ModeDefault:new({}),
         ScaleGrid:new({id=1, offset = {x=0,y=6}}),
         ScaleGrid:new({id=2, offset = {x=0,y=4}}),
         ScaleGrid:new({id=3, offset = {x=0,y=2}}),

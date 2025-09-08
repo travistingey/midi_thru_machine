@@ -6,6 +6,7 @@ local ParamTrace = require(path_name .. 'utilities/paramtrace')
 local PresetSeq = require(path_name .. 'components/mode/presetseq')
 local Mode = require(path_name .. 'components/app/mode')
 local UI = require(path_name .. 'ui')
+local ModeDefault = require('Foobar/lib/components/mode/modedefault')
 
 local presetseq = PresetSeq:new({
     track=1,
@@ -21,6 +22,7 @@ local SessionMode = Mode:new({
     id = 1,
     track = 1,
     components = {
+        ModeDefault:new({}),
         presetseq
     },
     load_event = function(self,data)

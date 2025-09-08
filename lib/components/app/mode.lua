@@ -67,7 +67,9 @@ function Mode:set(o)
             end
 
             for i, c in ipairs(self.components) do
-                c.grid:process(msg)
+                if c.grid and c.grid.process then
+                    c.grid:process(msg)
+                end
             end
         end
     })

@@ -21,6 +21,44 @@ function Mode:new(o)
     return o
 end
 
+-- Menu interaction logic (moved from UI)
+function Mode:set_cursor(d)
+    self.cursor = util.clamp((self.cursor or 1) + d, 1, self.cursor_positions or 1)
+    App.screen_dirty = true
+end
+
+function Mode:use_menu(ctx, d)
+    local item = self.menu and self.menu[self.cursor]
+    if item and type(item[ctx]) == 'function' then
+        item[ctx](d)
+    end
+    App.screen_dirty = true
+end
+
+function Mode:get_visible_menu_range()
+    local total_items = #(self.menu or {})
+    local max_visible = UI.max_visible_items
+
+    if total_items <= max_visible then
+        return 1, total_items
+    end
+
+    local start_index = 1
+    local end_index = max_visible
+
+    if (self.cursor or 1) > max_visible - 2 then
+        if (self.cursor or 1) <= total_items - 2 then
+            start_index = self.cursor - 2
+            end_index = self.cursor + 2
+        else
+            start_index = total_items - max_visible + 1
+            end_index = total_items
+        end
+    end
+
+    return start_index, end_index
+end
+
 
 function Mode:set(o)
     self.id = o.id
@@ -53,6 +91,14 @@ function Mode:set(o)
     self.layer[1] = App.default.screen
     self.screen = o.screen or function() end
 
+    -- Stateless UI now; track menu state per mode
+    self.menu = {}
+    self.cursor = 1
+    self.cursor_positions = 0
+    self.max_visible_items = 5
+    self.default_menu = nil
+    self.default_screen = nil
+
 
     -- Create the modes
     self.grid = Grid:new({
@@ -69,7 +115,9 @@ function Mode:set(o)
             end
 
             for i, c in ipairs(self.components) do
-                c.grid:process(msg)
+                if c.grid and c.grid.process then
+                    c.grid:process(msg)
+                end
             end
         end
     })
@@ -201,7 +249,22 @@ function Mode:cancel_context()
         self.context_layer = nil
     end
     
-    UI:set_menu()
+    -- restore default menu and screen if defined
+    if self.default_menu then
+        self.menu = self.default_menu
+        self.cursor_positions = #self.menu
+        self.cursor = util.clamp(self.cursor or 1, 1, math.max(1, self.cursor_positions))
+    else
+        self.menu = {}
+        self.cursor = 1
+        self.cursor_positions = 0
+    end
+
+    if self.default_screen then
+        -- reapply default screen as context layer
+        self.context_layer = self.default_screen
+        table.insert(self.layer, self.context_layer)
+    end
 
     -- Reset the context functions to default
     for binding, func in pairs(self.default) do
@@ -283,12 +346,14 @@ function Mode:use_context(context, screen, option)
     local callback
     local timeout
     local menu_override = false
+    local set_default = false
     local menu_context = context.menu or nil
 
     if type(option) == 'table' then
         timeout = option.timeout 
         callback = option.callback
         menu_override = option.menu_override
+        set_default = option.set_default or false
         
         if timeout == true then
             timeout = self.timeout
@@ -310,10 +375,23 @@ function Mode:use_context(context, screen, option)
     -- Cancel any existing toast when a new context is started
     self:cancel_toast()
 
-    -- Store original menu state if menu context is provided
+    -- Apply menu context to this mode
     if menu_context then
-        -- Set the new menu context
-        UI:set_menu(menu_context, menu_override)
+        if menu_override then
+            self.menu = {}
+        end
+        for _, menu_item in ipairs(menu_context) do
+            table.insert(self.menu, menu_item)
+        end
+        self.cursor = 1
+        self.cursor_positions = #self.menu
+    end
+
+    if set_default and menu_context then
+        -- store default baseline
+        self.default_menu = {}
+        for _, item in ipairs(menu_context) do table.insert(self.default_menu, item) end
+        self.default_screen = screen
     end
 
     -- Insert the context screen and keep a reference to it
