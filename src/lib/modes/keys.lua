@@ -1,7 +1,7 @@
 local Mode = require('Foobar/lib/components/app/mode')
 local ScaleGrid = require('Foobar/lib/components/mode/scalegrid')
 local PresetGrid = require('Foobar/lib/components/mode/presetgrid')
-local ParamTrace = require('Foobar/lib/utilities/paramtrace')
+local Registry = require('Foobar/lib/utilities/registry')
 
 local Default = require('Foobar/lib/components/mode/default')
 
@@ -41,7 +41,7 @@ local KeysMode = Mode:new({
     end,
     context = {
         enc1 = function(d)
-            		ParamTrace.set('scale_1_root', App.scale[1].root + d, 'keys_scale_root_change')
+            		Registry.set('scale_1_root', App.scale[1].root + d, 'keys_scale_root_change')
             App.screen_dirty = true
         end,
         alt_enc1 = function(d)

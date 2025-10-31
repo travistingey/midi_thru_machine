@@ -1,7 +1,7 @@
 local Tracer = require('Foobar/lib/utilities/tracer')
 local utilities = require('Foobar/lib/utilities')
 
-local ParamTrace = require('Foobar/lib/utilities/paramtrace')
+local Registry = require('Foobar/lib/utilities/registry')
 local path_name = 'Foobar/lib/components/track/'
 
 local Auto = require(path_name .. 'auto')
@@ -88,11 +88,11 @@ function Track:set(o)
 
 	
 	
-	ParamTrace.add('add_group', 'Track '.. self.id, 23)
+	Registry.add('add_group', 'Track '.. self.id, 23)
 
 	
-	ParamTrace.add('add_text', track .. 'name', 'Name', self.name)
-	ParamTrace.set_action(track .. 'name', function(d) 
+	Registry.add('add_text', track .. 'name', 'Name', self.name)
+	Registry.set_action(track .. 'name', function(d) 
 		self.name = d
 	end)
 
@@ -111,12 +111,16 @@ function Track:set(o)
 	end
 
 	-- Device In/Out
-	local midi_devices =  App.device_manager.midi_device_names
+    local midi_devices =  App.device_manager.midi_device_names
+    -- Extend device_out options to include Crow as a selectable output device
+    local output_devices = {}
+    for i,name in ipairs(midi_devices) do output_devices[#output_devices+1] = name end
+    output_devices[#output_devices+1] = 'Crow'
 
 	self.device_in = 1
-	ParamTrace.add('add_option', track .. "device_in", "Device In", midi_devices)
+	Registry.add('add_option', track .. "device_in", "Device In", midi_devices)
 	
-	ParamTrace.set_action(track .. 'device_in', function(d)
+	Registry.set_action(track .. 'device_in', function(d)
 		self.device_in = d
 
 		-- Remove old input device listeners
@@ -131,17 +135,27 @@ function Track:set(o)
 	end)
 	
 	self.device_out = d
-	ParamTrace.add('add_option', track .. "device_out", "Device Out",midi_devices,2)
-	ParamTrace.set_action(track .. 'device_out', function(d)
-		self.device_out = d
-		self.output_device = App.device_manager:get(d)
-		self:load_component(Output)
-		self:enable()
-	end)
+    Registry.add('add_option', track .. "device_out", "Device Out", output_devices, 2)
+    Registry.set_action(track .. 'device_out', function(d)
+        self.device_out = d
+        if output_devices[d] == 'Crow' then
+            -- Switch to Crow output type
+            Registry.set(track .. 'output_type', 2, 'device_out_select') -- 2 = crow
+            self.output_type = 'crow'
+            -- keep output_device as-is for crow; Output component uses App.crow
+        else
+            -- Ensure MIDI output type and set selected MIDI device
+            Registry.set(track .. 'output_type', 1, 'device_out_select') -- 1 = midi
+            self.output_type = 'midi'
+            self.output_device = App.device_manager:get(d)
+        end
+        self:load_component(Output)
+        self:enable()
+    end)
 
 	-- Input Type
-	ParamTrace.add('add_option', track .. 'input_type', 'Input Type', Input.options, 1)
-	ParamTrace.set_action(track .. 'input_type', function(d)
+	Registry.add('add_option', track .. 'input_type', 'Input Type', Input.options, 1)
+	Registry.set_action(track .. 'input_type', function(d)
 		self:kill()
 		self.input_type = Input.options[d]
 
@@ -157,8 +171,8 @@ function Track:set(o)
 
 	-- Output Type
 	self.output_type = o.output_type or Output.options[1]
-	ParamTrace.add('add_option', track .. 'output_type', 'Output Type', Output.options, 1)
-	ParamTrace.set_action(track .. 'output_type', function(d)
+	Registry.add('add_option', track .. 'output_type', 'Output Type', Output.options, 1)
+	Registry.set_action(track .. 'output_type', function(d)
 		self:kill()
 		self.output_type = Output.options[d]
 		self:load_component(Output)
@@ -167,7 +181,7 @@ function Track:set(o)
 
 	-- MIDI In
 	self.midi_in = o.midi_in or 0
-	ParamTrace.add('add_number', track .. 'midi_in', 'MIDI In', 0, 17, 0, function(param)
+	Registry.add('add_number', track .. 'midi_in', 'MIDI In', 0, 17, 0, function(param)
 		local ch = param:get()
 		if ch == 0 then 
 			return 'off'
@@ -178,7 +192,7 @@ function Track:set(o)
 		end
 	end)
 	
-	ParamTrace.set_action(track .. 'midi_in', function(d) 
+	Registry.set_action(track .. 'midi_in', function(d) 
 		self:kill()
 
 		self.midi_in = d
@@ -189,7 +203,7 @@ function Track:set(o)
 
 	-- MIDI Out
 	self.midi_out = o.midi_out or 0
-	ParamTrace.add('add_number', track .. 'midi_out', 'MIDI Out', 0, 17, 0, function(param)
+	Registry.add('add_number', track .. 'midi_out', 'MIDI Out', 0, 17, 0, function(param)
 		local ch = param:get()
 		if ch == 0 then 
 			return 'off'
@@ -200,7 +214,7 @@ function Track:set(o)
 		end
 	end)
 
-	ParamTrace.set_action(track .. 'midi_out', function(d) 
+	Registry.set_action(track .. 'midi_out', function(d) 
 		self:kill()
 		self.midi_out = d
 		self:load_component(Output)
@@ -210,13 +224,13 @@ function Track:set(o)
 
 	-- -- MIDI Thru
 	-- self.midi_thru = o.midi_thru or false
-	-- ParamTrace.add('add_binary', track .. 'midi_thru','MIDI Thru','toggle', 0)
-	-- ParamTrace.set_action(track .. 'midi_thru',function(d)
+	-- Registry.add('add_binary', track .. 'midi_thru','MIDI Thru','toggle', 0)
+	-- Registry.set_action(track .. 'midi_thru',function(d)
 	-- 	self.midi_thru = (d>0)
 	-- end)
 
-	 ParamTrace.add('add_binary', track .. 'mixer', 'Mixer', 'toggle', 0)
-	 ParamTrace.set_action(track .. 'mixer', function(d)
+	 Registry.add('add_binary', track .. 'mixer', 'Mixer', 'toggle', 0)
+	 Registry.set_action(track .. 'mixer', function(d)
 		if App.flags.state.initializing then return end
 
 		 if d == 0 then
@@ -229,8 +243,8 @@ function Track:set(o)
 	-- Arpeggio
 	local arp_options = {'up','down','up down', 'down up', 'converge', 'diverge'}
 	self.arp = o.arp or arp_options[1]
-	ParamTrace.add('add_option', track .. 'arp','Arpeggio',arp_options, 1)
-	ParamTrace.set_action(track .. 'arp',function(d)
+	Registry.add('add_option', track .. 'arp','Arpeggio',arp_options, 1)
+	Registry.set_action(track .. 'arp',function(d)
 		App.settings[track .. 'arp'] = d
 		self.arp = arp_options[d]
 	end)
@@ -242,8 +256,8 @@ function Track:set(o)
 	
 	self.step = o.step or step_values[1]
 	
-	ParamTrace.add('add_option', track .. 'step','Step',step_options, 1)
-	ParamTrace.set_action(track .. 'step',function(d)
+	Registry.add('add_option', track .. 'step','Step',step_options, 1)
+	Registry.set_action(track .. 'step',function(d)
 		self:kill()
 		App.settings[track .. 'step'] = d
 		self.step = step_values[d]
@@ -254,7 +268,7 @@ function Track:set(o)
 	-- Reset Step
 	self.reset_step = o.reset_step or 0
 	self.reset_tick = o.reset_tick or 1
-	ParamTrace.add('add_number', track .. 'reset_step','Reset step',0,64,0, function(param) 
+	Registry.add('add_number', track .. 'reset_step','Reset step',0,64,0, function(param) 
 		local v = param:get()
 		if v == 0 then
 			return 'off'
@@ -267,7 +281,7 @@ function Track:set(o)
 	
 	self.step_count = 0
 	
-	ParamTrace.set_action(track .. 'reset_step',function(d)
+	Registry.set_action(track .. 'reset_step',function(d)
 		App.settings[track .. 'reset_step'] = d
 		self.reset_step = d
 		self.reset_tick = 1
@@ -279,8 +293,8 @@ function Track:set(o)
 	chance_spec.default = 0.5
 
 	self.chance = o.chance or 0.5
-	ParamTrace.add('add_control', track .. 'chance', 'Chance', chance_spec)
-	ParamTrace.set_action(track .. 'chance', function(d) 
+	Registry.add('add_control', track .. 'chance', 'Chance', chance_spec)
+	Registry.set_action(track .. 'chance', function(d) 
 		App.settings[track .. 'chance'] = d
 		self.chance = d
 	end)
@@ -291,8 +305,8 @@ function Track:set(o)
 
 	self.slew = o.slew or 0
 
-	ParamTrace.add('add_control', track .. 'slew', 'Slew', slew_spec)
-	ParamTrace.set_action(track .. 'slew', function(d) 
+	Registry.add('add_control', track .. 'slew', 'Slew', slew_spec)
+	Registry.set_action(track .. 'slew', function(d) 
 		App.settings[track .. 'slew'] = d
 		self.slew = d
 	end)
@@ -300,7 +314,7 @@ function Track:set(o)
 	-- Scale
 	self.scale_select = o.scale_select or 0
 	
-	ParamTrace.add('add_number', track .. 'scale_select', 'Scale', 0, 3, 0,function(param)
+	Registry.add('add_number', track .. 'scale_select', 'Scale', 0, 3, 0,function(param)
 		local ch = param:get()
 		if ch == 0 then 
 		   return 'off'
@@ -314,7 +328,7 @@ function Track:set(o)
 		self.output_device:emit('interrupt', {type='interrupt_scale', scale=self.scale, ch=self.midi_out})
 	end
 
-	ParamTrace.set_action(track .. 'scale_select', function(d) 
+	Registry.set_action(track .. 'scale_select', function(d) 
 		App.settings[track .. 'scale_select'] = d
 
 		self:kill()
@@ -341,16 +355,16 @@ function Track:set(o)
 
 	-- Trigger
 	self.trigger = o.trigger or 36
-	ParamTrace.add('add_number', track .. 'trigger', 'Trigger', 0, 127, 36)
-	ParamTrace.set_action(track .. 'trigger', function(d) 
+	Registry.add('add_number', track .. 'trigger', 'Trigger', 0, 127, 36)
+	Registry.set_action(track .. 'trigger', function(d) 
 		self:kill()
 		self.trigger = d
 	end)
 
 	-- Step Length
 	self.step_length = o.step_legnth or 16
-	ParamTrace.add('add_number', track .. 'step_length', 'Step Length', 1, 16, 16)
-	ParamTrace.set_action(track .. 'step_length', function(d) 
+	Registry.add('add_number', track .. 'step_length', 'Step Length', 1, 16, 16)
+	Registry.set_action(track .. 'step_length', function(d) 
 		App.settings[track .. 'step_length'] = d
 		self.step_length = d
 	end)
@@ -360,28 +374,28 @@ function Track:set(o)
 	-- Lower
 	self.note_range_lower = o.note_range_lower or 0
 	
-	ParamTrace.add('add_number', track .. 'note_range_lower', 'From Note', 0, 127, 0)
-	ParamTrace.set_action(track .. 'note_range_lower', function(d) 
+	Registry.add('add_number', track .. 'note_range_lower', 'From Note', 0, 127, 0)
+	Registry.set_action(track .. 'note_range_lower', function(d) 
 		App.settings[track .. 'note_range_lower'] = d
 		self:kill()
 		self.note_range_lower = d
 
-		ParamTrace.set(track .. 'note_range_upper', util.clamp(params:get(track .. 'note_range') * 12 + d,0,127), 'note_range_calc')			
+		Registry.set(track .. 'note_range_upper', util.clamp(params:get(track .. 'note_range') * 12 + d,0,127), 'note_range_calc')			
 	end)
 
 	-- Upper
 
 	self.note_range_upper = o.note_range_upper or 127
 
-	ParamTrace.add('add_number', track .. 'note_range_upper', 'To Note', 0, 127, 127)
-	ParamTrace.set_action(track .. 'note_range_upper', function(d) 
+	Registry.add('add_number', track .. 'note_range_upper', 'To Note', 0, 127, 127)
+	Registry.set_action(track .. 'note_range_upper', function(d) 
 		self:kill()
 		self.note_range_upper = d
 
-		ParamTrace.set(track .. 'note_range', math.ceil((d - self.note_range_lower) / 12), 'note_range_lower_calc')
+		Registry.set(track .. 'note_range', math.ceil((d - self.note_range_lower) / 12), 'note_range_lower_calc')
 
 		if d < self.note_range_lower then
-			ParamTrace.set(track .. 'note_range_lower', d, 'note_range_lower_set')
+			Registry.set(track .. 'note_range_lower', d, 'note_range_lower_set')
 		end
 		
 	end)
@@ -389,10 +403,10 @@ function Track:set(o)
 	params:hide(track .. 'note_range_upper')
 
 	-- Octaves (convenience parameter thats easier to set than two ranges)
-	ParamTrace.add('add_number', track .. 'note_range', 'Octaves', 1, 11, 2)
-	ParamTrace.set_action(track .. 'note_range', function(d) 
+	Registry.add('add_number', track .. 'note_range', 'Octaves', 1, 11, 2)
+	Registry.set_action(track .. 'note_range', function(d) 
 		App.settings[track .. 'note_range'] = d
-		ParamTrace.set(track .. 'note_range_upper', util.clamp(d * 12 + self.note_range_lower,0,127), 'note_range_upper_set')
+		Registry.set(track .. 'note_range_upper', util.clamp(d * 12 + self.note_range_lower,0,127), 'note_range_upper_set')
 	end)
 	
 
@@ -400,8 +414,8 @@ function Track:set(o)
 	
 	self.crow_in = o.crow_in or 1
 
-	ParamTrace.add('add_number', track .. 'crow_in', 'Crow In', 1, 2, 1)
-	ParamTrace.set_action(track .. 'crow_in', function(d) 
+	Registry.add('add_number', track .. 'crow_in', 'Crow In', 1, 2, 1)
+	Registry.set_action(track .. 'crow_in', function(d) 
 		self:kill()
 		self.crow_in = d
 
@@ -415,8 +429,8 @@ function Track:set(o)
 
 	local crow_options = {'1 + 2', '3 + 4'}
 	
-	ParamTrace.add('add_option', track .. 'crow_out', 'Crow Out', crow_options, 1)
-	ParamTrace.set_action(track .. 'crow_out', function(d) 		
+	Registry.add('add_option', track .. 'crow_out', 'Crow Out', crow_options, 1)
+	Registry.set_action(track .. 'crow_out', function(d) 		
 		self:kill()
 		self.crow_out = d
 		if self.output_type == 'crow' then
@@ -426,8 +440,8 @@ function Track:set(o)
 	end)
 
 	-- Shoot program change events
-	ParamTrace.add('add_number', track .. 'program_change', 'Program Change', 0,16,0)
-	ParamTrace.set_action(track .. 'program_change', function(d) 
+	Registry.add('add_number', track .. 'program_change', 'Program Change', 0,16,0)
+	Registry.set_action(track .. 'program_change', function(d) 
 		App.settings[track .. 'program_change'] = d
 		if d > 0 then
 		    self.input_device:program_change (d-1, self.midi_in)
@@ -438,8 +452,8 @@ function Track:set(o)
 	-- this may also be a shit implementation but I dont know yet. mono and voice are redundant
 	self.voice = o.voice or 1
 	self.mono = o.mono or false
-	ParamTrace.add('add_option', track .. 'voice','Voice',{'polyphonic','mono'}, 1)
-	ParamTrace.set_action(track .. 'voice',function(d)
+	Registry.add('add_option', track .. 'voice','Voice',{'polyphonic','mono'}, 1)
+	Registry.set_action(track .. 'voice',function(d)
 		-- whether track is polyphonic or mono
 		if d == 1 then
 			self.mono = false
@@ -458,7 +472,7 @@ function Track:update(o, silent)
 			self[prop] = value
 
 			if not silent then
-				ParamTrace.set('track_' .. self.id .. '_' .. prop, value, 'track_property_set')
+				Registry.set('track_' .. self.id .. '_' .. prop, value, 'track_property_set')
 			end
 		else
 			-- This will enforce all parameters are set
@@ -533,7 +547,7 @@ function Track:save(o)
 
 	for prop, value in pairs(o) do
 		if self[prop] ~= nil then
-			ParamTrace.set(track .. prop, value, 'track_prop_update')
+			Registry.set(track .. prop, value, 'track_prop_update')
 		end
 	end
 end

@@ -26,7 +26,7 @@ local LaunchControl = require(path_name .. "launchcontrol")
 local UI = require(path_name .. "ui")
 local flags = require(path_name .. "utilities/flags")
 local trace = require(path_name .. "utilities/trace_cli")
-local ParamTrace = require(path_name .. "utilities/paramtrace")
+local Registry = require(path_name .. "utilities/registry")
 local LATCH_CC = 64
 
 --==============================================================================
@@ -434,19 +434,19 @@ function App:load_preset(d, param, force)
 	if type(param) == "string" then
 		local value = preset[param]
 		if force or (self.settings[param] ~= value) then
-			ParamTrace.set(param, value, 'preset_load_single')
+			Registry.set(param, value, 'preset_load_single')
 		end
 	elseif type(param) == "table" then
 		for index, name in ipairs(param) do
 			local value = preset[name]
 			if force or (value and self.settings[name] ~= value) then
-				ParamTrace.set(name, value, 'preset_load_table')
+				Registry.set(name, value, 'preset_load_table')
 			end
 		end
 	else
 		for name, value in pairs(preset) do
 			if self.settings[name] ~= value then
-				ParamTrace.set(name, value, 'preset_load_all')
+				Registry.set(name, value, 'preset_load_all')
 			end
 		end
 	end

@@ -65,7 +65,6 @@ end
 -- ---------------------------------------------------------------------------
 --  • Core primitives live in table `core`
 --  • `assert` is the single public table exposing every core primitive.
---    (No more `are` vs `is` sugar: we prefer one canonical entry‑point.)
 --  • Added helpers: deep_equal, near, throws
 -- ---------------------------------------------------------------------------
 

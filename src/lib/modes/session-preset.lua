@@ -1,6 +1,6 @@
 local Grid = require('Foobar/lib/grid')
 local utilities = require('Foobar/lib/utilities')
-local ParamTrace = require('Foobar/lib/utilities/paramtrace')
+local Registry = require('Foobar/lib/utilities/registry')
 local path_name = 'Foobar/lib/components/mode/'
 
 local MuteGrid = require('Foobar/lib/components/mode/mutegrid') 

@@ -2,7 +2,7 @@ local path_name = 'Foobar/lib/'
 
 local Grid = require(path_name .. 'grid')
 local utilities = require(path_name .. 'utilities')
-local ParamTrace = require(path_name .. 'utilities/paramtrace')
+local Registry = require(path_name .. 'utilities/registry')
 local PresetSeq = require(path_name .. 'components/mode/presetseq')
 local Mode = require(path_name .. 'components/app/mode')
 local UI = require(path_name .. 'ui')

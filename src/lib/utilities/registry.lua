@@ -1,20 +1,20 @@
--- lib/utilities/ParamTrace.lua
+-- lib/utilities/Registry.lua
 --
 -- Clean parameter tracing utilities that don't interfere with the environment.
 -- This module provides manual tracing functions that can be called explicitly
 -- where needed, without any global monkey-patching.
 --
 -- Usage: 
---   local ParamTrace = require('Foobar/lib/utilities/paramtrace')
---   ParamTrace.log_registration('my_param', 'add_number')
---   ParamTrace.log_set_action('my_param')
---   ParamTrace.log_value_change('my_param', 42, 'user_input')
+--   local Registry = require('Foobar/lib/utilities/registry')
+--   Registry.log_registration('my_param', 'add_number')
+--   Registry.log_set_action('my_param')
+--   Registry.log_value_change('my_param', 42, 'user_input')
 -----------------------------------------------------------------------------
 
 local Tracer = require('Foobar/lib/utilities/tracer')
 local flags  = require('Foobar/lib/utilities/flags')
 
-local ParamTrace = {}
+local Registry = {}
 
 -- Helper function to detect calling component from stack trace
 local function detect_calling_component()
@@ -27,14 +27,14 @@ local function detect_calling_component()
     local source = info.source
     if not source then break end
     
-    -- Skip ParamTrace.lua itself
-    if string.find(source, "ParamTrace.lua") then
+    -- Skip Registry.lua itself
+    if string.find(source, "Registry.lua") then
       goto continue
     end
     
     -- Extract component name from file path
     local component_match = string.match(source, "/([^/]+)%.lua$")
-    if component_match and component_match ~= "paramtrace" then
+    if component_match and component_match ~= "registry" then
       return component_match
     end
     
@@ -96,7 +96,7 @@ end
 -- Core logging functions
 -------------------------------------------------------------------------------
 
-function ParamTrace.log_registration(param_id, registration_type)
+function Registry.log_registration(param_id, registration_type)
   if not flags.trace_config.load_trace then return end
   
   -- Extract component ID from param_id for filtering
@@ -145,7 +145,7 @@ function ParamTrace.log_registration(param_id, registration_type)
   Tracer.load():log('param:register', '%s %s', tostring(registration_type), tostring(param_id))
 end
 
-function ParamTrace.log_set_action(param_id)
+function Registry.log_set_action(param_id)
   if not flags.trace_config.load_trace then return end
   
   -- Extract component ID from param_id for filtering
@@ -194,7 +194,7 @@ function ParamTrace.log_set_action(param_id)
   Tracer.load():log('param:set_action', '%s', tostring(param_id))
 end
 
-function ParamTrace.log_value_change(param_id, value, source)
+function Registry.log_value_change(param_id, value, source)
   if not flags.trace_config.params then return end
   
   -- Extract component ID from param_id for filtering
@@ -267,15 +267,15 @@ end
 -------------------------------------------------------------------------------
 -- Convenience wrapper for set_action that includes tracing
 -------------------------------------------------------------------------------
-function ParamTrace.set_action(param_id, callback)
-  ParamTrace.log_set_action(param_id)
+function Registry.set_action(param_id, callback)
+  Registry.log_set_action(param_id)
   
   if not callback then
     return params:set_action(param_id, nil)
   end
   
   local wrapped = function(value, ...)
-    ParamTrace.log_value_change(param_id, value, 'set_action')
+    Registry.log_value_change(param_id, value, 'set_action')
     return callback(value, ...)
   end
   
@@ -285,9 +285,9 @@ end
 -------------------------------------------------------------------------------
 -- Helper for tracking parameter registration with automatic ID extraction
 -------------------------------------------------------------------------------
-function ParamTrace.add(registration_type, ...)
+function Registry.add(registration_type, ...)
   local param_id = select(1, ...)
-  ParamTrace.log_registration(param_id, registration_type)
+  Registry.log_registration(param_id, registration_type)
   return params[registration_type](params, ...)
 end
 
@@ -295,12 +295,176 @@ end
 -- Traced wrapper for params:set() that logs the change and then sets the value
 -------------------------------------------------------------------------------
 
-function ParamTrace.set(param_id, value, source)
-  ParamTrace.log_value_change(param_id, value, source or 'traced_set')
-  return params:set(param_id, value)
+function Registry.set(param_id, value, source, callback)
+  Registry.log_value_change(param_id, value, source or 'traced_set')
+  local result = params:set(param_id, value)
+  if callback then
+    callback(result)
+  end
+  return result
+end
+
+-------------------------------------------------------------------------------
+-- Menu helpers: centralize menu item composition and param bumping
+-------------------------------------------------------------------------------
+
+-- local clamp that does not depend on util
+local function _clamp(v, lo, hi)
+  if lo ~= nil and v < lo then v = lo end
+  if hi ~= nil and v > hi then v = hi end
+  return v
+end
+
+Registry.menu = {}
+
+-- Format a param value using native formatter/string()
+function Registry.menu.format_value(id)
+  local s = params:string(id)
+  if s ~= nil then return s end
+  local v = params:get(id)
+  return tostring(v)
+end
+
+-- Get a human label for a param id
+function Registry.menu.label(id)
+  local p = params:lookup_param(id)
+  if p and p.name then return p.name end
+  return id
+end
+
+-- Increment/decrement a param value based on its type
+function Registry.menu.bump(id, delta, step, callback)
+  local p = params:lookup_param(id)
+  if not p then return end
+
+  local t = p.t or p.type or ''
+
+  local cur = params:get(id)
+  local new = cur
+  
+  if t == 'number' then
+    local s = step or 1
+    local lo = p.min
+    local hi = p.max
+    new = _clamp(cur + (delta * s), lo, hi)
+
+  elseif t == 'option' then
+    local count = (p.options and #p.options) or 0
+    if count > 0 then
+      new = _clamp(cur + delta, 1, count)
+    end
+
+  elseif t == 'binary' then
+    if delta ~= 0 then
+      new = (cur > 0) and 0 or 1
+    end
+
+  elseif t == 'control' then
+    local cs = p.controlspec
+    local s = step or (cs and cs.step) or 0.01
+    local lo = cs and cs.min or nil
+    local hi = cs and cs.max or nil
+    new = _clamp(cur + (delta * s), lo, hi)
+
+  else
+    -- Fallback: treat as numeric
+    new = cur + delta
+  end
+
+  if new ~= cur then
+    Registry.set(id, new, 'menu_bump', callback)
+  end
+end
+
+-- One-param menu row helper
+function Registry.menu.make_item(id, opts)
+  opts = opts or {}
+  
+  local item = {
+    icon  = opts.icon,
+    label = opts.label_fn or opts.label or function() return Registry.menu.label(id) end,
+    value = opts.value_fn or opts.value or function() return Registry.menu.format_value(id) end,
+    style = opts.style,
+    draw  = opts.draw,
+    draw_buttons = opts.draw_buttons,
+    can_press = opts.can_press,
+    on_set = opts.on_set,
+  }
+
+  if opts.enc3 then
+    -- Wrap custom handler to also invoke on_set after it runs
+    item.enc3 = function(d)
+      opts.enc3(d)
+      if type(item.on_set) == 'function' then
+        pcall(item.on_set)
+      end
+    end
+  elseif not opts.disable then
+    item.enc3 = function(d) Registry.menu.bump(id, d, opts.step, item.on_set) end
+  end
+
+  if opts.on_press then
+    item.press_fn_3 = opts.on_press
+    item.has_press = true
+  end
+
+  item.is_editable = (not opts.disable) and (item.enc2 ~= nil or item.enc3 ~= nil)
+
+  return item
+end
+
+-- Two-param combo row helper (enc2=left, enc3=right)
+function Registry.menu.make_combo(left_id, right_id, opts)
+  opts = opts or {}
+  local row = {
+    icon  = opts.icon,
+    label = opts.left_label_fn or function() return Registry.menu.format_value(left_id) end,
+    value = opts.right_value_fn or function() return Registry.menu.format_value(right_id) end,
+    on_set = opts.on_set,
+    enc2  = opts.left_value_fn or opts.enc2 or function(d) Registry.menu.bump(left_id, d, opts.left_step, opts.on_set) end,
+    enc3  = opts.enc3 or function(d) Registry.menu.bump(right_id, d, opts.right_step, opts.on_set) end,
+    style = opts.style,
+    draw  = opts.draw,
+    draw_buttons = opts.draw_buttons,
+    can_press = opts.can_press,
+  }
+  -- Wrap custom encoders to also invoke on_set
+  if opts.enc2 then
+    row.enc2 = function(d)
+      opts.enc2(d)
+      if type(row.on_set) == 'function' then
+        pcall(row.on_set)
+      end
+    end
+  end
+  if opts.enc3 then
+    row.enc3 = function(d)
+      opts.enc3(d)
+      if type(row.on_set) == 'function' then
+        pcall(row.on_set)
+      end
+    end
+  end
+  if opts.on_press then
+    row.press_fn_3 = opts.on_press
+    row.has_press = true
+  end
+
+  row.is_editable = (row.enc2 ~= nil or row.enc3 ~= nil)
+
+  return row
+end
+
+-- Convenience: build multiple simple items from a list of ids
+function Registry.menu.make_items(ids, opts)
+  local items = {}
+  for _, id in ipairs(ids or {}) do
+    table.insert(items, Registry.menu.make_item(id, opts))
+  end
+  return items
 end
 
 -------------------------------------------------------------------------------
 -- Return the module
 -------------------------------------------------------------------------------
-return ParamTrace
+return Registry

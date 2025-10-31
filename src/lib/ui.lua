@@ -1,4 +1,4 @@
-require('Foobar/lib/musicutil-extended')
+local musicutil = require('Foobar/lib/musicutil-extended')
 
 local UI = {
     current_font = 1,
@@ -229,7 +229,7 @@ function UI:draw_menu(x, y, menu, cursor)
     for i = start_index, end_index do
         local menu_item = menu[i]
         if menu_item then
-            local icon = menu_item.icon or ""
+            local icon = menu_item.icon
             local label = menu_item.label or ""
             local value = menu_item.value or ""
             local style = menu_item.style
@@ -245,28 +245,30 @@ function UI:draw_menu(x, y, menu, cursor)
 
             -- Calculate visual position (1-based for display)
             local visual_index = i - start_index + 1
+            self.current_item = menu_item
             self:draw_menu_item(x, y + (visual_index - 1) * 10, label, value, icon, is_active, style)
+            self.current_item = nil
         end
     end
 end
 
 function UI:draw_menu_item(x, y, label, value, icon, is_active, style)
     local default_style = {
-        color = 15, stroke = 1, font = 1, width = 60, inactive_color = 5, icon_color = 15, icon_inactive_color = 5}
+        color = 15, stroke = 1, font = 1, width = 127, inactive_color = 5, icon_color = 15, icon_inactive_color = 5}
     style = self:merge_style(default_style, style)
 
-    
-    
     self:set_font(style.font)
 
-	screen.move(x, y)
+	screen.move(x + 5, y)
     if icon then
-        if is_active then
-            screen.level(style.icon_color)
-        else
-            screen.level(style.icon_inactive_color)
-        end
-        screen.text(icon)
+		-- Icons are bright only when the row is active AND editable; otherwise dim
+		local editable = self.current_item and (self.current_item.enc2 or self.current_item.enc3 or self.current_item.is_editable)
+		if is_active and editable then
+			screen.level(style.icon_color)
+		else
+			screen.level(style.icon_inactive_color)
+		end
+        screen.text_center(icon)
     end
     screen.fill()
 
@@ -276,33 +278,96 @@ function UI:draw_menu_item(x, y, label, value, icon, is_active, style)
     else
         screen.level(style.inactive_color)
     end
+    
+    local icon_offset = 15
+    
+    -- if icon then
+    --     icon_offset = 7
+    -- end
+    
+    local submenu_offset = 8
+    local entry_width = style.width - submenu_offset
 
-    screen.move(x + 6, y)
+    screen.move(x + icon_offset, y)
     screen.text(label)
 
-    screen.move(x + style.width, y)
+    screen.move(x + entry_width, y)
     screen.text_right(value)
-    
-    screen.fill()
+
+  -- Optional right-side press icon when item supports on_press and is enabled to press
+  local can_show_press = false
+  if self.current_item and self.current_item.has_press then
+      can_show_press = true
+      if self.current_item.can_press ~= nil then
+          if type(self.current_item.can_press) == 'function' then
+              can_show_press = self.current_item.can_press()
+          elseif self.current_item.on_press then
+              can_show_press = true
+          end
+      end
+  end
+  if can_show_press then
+      local icon_press = ">"
+      local press_x = x + entry_width + 6
+      if is_active then
+          screen.level(style.icon_color)
+      else
+          screen.level(style.icon_inactive_color)
+      end
+      screen.move(press_x, y)
+      screen.text(icon_press)
+      screen.fill()
+  end
+ 
+  -- Measure text widths for icon, label, and value
+  local label_w = screen.text_extents(label) or 0
+  local value_w = screen.text_extents(value) or 0
+
+  -- Precise underlines using 1px rects
+  if is_active and self.current_item then
+      -- Underline label when this is a combo item (enc2 available)
+      if self.current_item.enc2 then
+          local label_x = x + icon_offset
+          screen.level(5)
+          screen.rect(label_x, y + 1, label_w, 1)
+          screen.fill()
+      end
+
+      -- Underline value when editable (enc3 on item)
+      if self.current_item.enc3 or self.current_item.is_editable then
+          local value_x_left = x + entry_width - value_w
+          screen.level(5)
+          screen.rect(value_x_left, y + 1, value_w, 1)
+          screen.fill()
+      end
+  end
+
+  -- Optional per-item draw hooks
+  if self.current_item and self.current_item.draw then
+      pcall(self.current_item.draw, self.current_item, x, y, is_active)
+  end
+
+  if self.current_item and self.current_item.draw_buttons then
+      pcall(self.current_item.draw_buttons, self.current_item, x, y, is_active)
+  end
 end
 
-function UI:draw_status()
-    -- Track number
-	self:set_font(1)
-	screen.level(15)
-	screen.rect(0, 0, 10, 9)
-	screen.fill()
-	screen.level(0)
-	screen.move(5, 7)
-	screen.text_center(App.current_track)
-	screen.fill()
-    -- track name
-	screen.level(15)
-	screen.move(15, 7)
-	screen.text(App.track[App.current_track].name)
-
-    -- menu rendering is owned by a gridless mode component
-
+function UI:draw_status(icon, label)
+	icon = icon or App.current_track
+	label = label or App.track[App.current_track].name
+    
+    self:set_font(1)
+    screen.level(15)
+    screen.rect(0, 0, 10, 9)
+    screen.fill()
+    screen.level(0)
+    screen.move(5, 7)
+    screen.text_center(icon)
+    screen.fill()
+    screen.level(15)
+    screen.move(15, 7)
+    screen.text(label)
+    screen.fill()
 end
 
 
@@ -326,25 +391,64 @@ function UI:draw_tempo()
 	screen.level(0)
     self:set_font(1)
 
-	if App.playing then
-		screen.move(124, 7)
-		screen.text_right("\u{23f5}") -- play
-	else
-		screen.move(124, 7)
-		screen.text_right("\u{23f8}") -- pause
-	end
-
-	screen.move(79, 7)
+	
+    -- MEASURE AND BEAT COUNTER
+	screen.move(125, 7)
 	local quarter = math.floor(App.tick / App.ppqn)
 	local measure = math.floor(quarter / 4) + 1
 	local count = math.floor(quarter % 4) + 1
-	screen.text(measure .. ":" .. count)
+	screen.text_right(measure .. ":" .. count)
 	screen.fill()
 
-	if App.recording then
-		screen.move(85, 7)
+    -- RECORD BUTTON
+    local record_offset = 0
+    local left_position = 79
+
+    if App.recording then
+        record_offset = 8
+		screen.move(left_position, 7)
 		screen.text("\u{23fa}") -- record
 		screen.fill()
+	end
+
+    -- PLAY/PAUSE BUTTON
+    if App.playing then
+		screen.move(left_position + record_offset, 7)
+		screen.text("\u{23f5}") -- play
+	else
+		screen.move(left_position + record_offset, 7)
+		screen.text("\u{23f8}") -- pause
+	end
+end
+
+function UI:draw_small_tempo()
+	if App.playing then
+		local beat = 15 - math.floor((App.tick % App.ppqn) / App.ppqn * 16)
+		screen.level(beat)
+	else
+		screen.level(5)
+	end
+    
+	screen.fill()
+    self:set_font(1)
+   
+    -- RECORD BUTTON
+    local record_offset = 8
+    local right_position = 127
+
+    if App.recording then
+		screen.move(right_position - record_offset, 7)
+		screen.text_right("\u{23fa}") -- record
+		screen.fill()
+	end
+
+    -- PLAY/PAUSE BUTTON
+    if App.playing then
+		screen.move(right_position, 7)
+		screen.text_right("\u{23f5}") -- play
+	else
+		screen.move(right_position, 7)
+		screen.text_right("\u{23f8}") -- pause
 	end
 end
 

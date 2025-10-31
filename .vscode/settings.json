@@ -4,5 +4,6 @@
     "editor.formatOnPaste": true,
     "editor.minimap.autohide": true,
     "editor.minimap.enabled": true,
-    "editor.inlineSuggest.showToolbar": "always"
+    "editor.inlineSuggest.showToolbar": "always",
+    "stylua.targetReleaseVersion": "latest"
 }

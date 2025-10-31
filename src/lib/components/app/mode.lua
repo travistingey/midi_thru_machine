@@ -251,7 +251,11 @@ function Mode:cancel_context()
     
     -- restore default menu and screen if defined
     if self.default_menu then
-        self.menu = self.default_menu
+        -- copy default_menu into a fresh table to avoid mutations/duplication
+        self.menu = {}
+        for _, item in ipairs(self.default_menu) do
+            table.insert(self.menu, item)
+        end
         self.cursor_positions = #self.menu
         self.cursor = util.clamp(self.cursor or 1, 1, math.max(1, self.cursor_positions))
     else
@@ -347,6 +351,7 @@ function Mode:use_context(context, screen, option)
     local timeout
     local menu_override = false
     local set_default = false
+    local append = false
     local menu_context = context.menu or nil
     local cursor = 1
     if type(option) == 'table' then
@@ -354,6 +359,7 @@ function Mode:use_context(context, screen, option)
         callback = option.callback
         menu_override = option.menu_override
         set_default = option.set_default or false
+        append = option.append or false
         cursor = option.cursor or 1
         if timeout == true then
             timeout = self.timeout
@@ -377,7 +383,16 @@ function Mode:use_context(context, screen, option)
 
     -- Apply menu context to this mode
     if menu_context then
-        if menu_override then
+        -- Replace menu by default; only append when explicitly requested
+        local should_reset = true
+        if append == true then
+            should_reset = false
+        end
+        -- Backward compatibility: reset when menu_override or set_default are used
+        if menu_override or set_default then
+            should_reset = true
+        end
+        if should_reset then
             self.menu = {}
         end
         for _, menu_item in ipairs(menu_context) do

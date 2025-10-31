@@ -2,6 +2,7 @@ local path_name = 'Foobar/lib/'
 local utilities = require(path_name .. 'utilities')
 local Bitwise = require(path_name .. 'bitwise')
 local TrackComponent = require('Foobar/lib/components/track/trackcomponent')
+local Registry = require('Foobar/lib/utilities/registry')
 
 -- Input Class
 -- first component in a Track's process chain that accepts midi or transport events
@@ -104,7 +105,7 @@ Input.types = {}
 -- MIDI Input
 -- Note: Set actions are called from the load_component function.
 Input.types['midi'] = {
-    props = {'midi_in', 'note_range_upper','note_range_lower'},
+    props = {'midi_in','voice'},
     set_action = function(s,track)
         track.triggered = false
 
@@ -119,9 +120,9 @@ Input.types['midi'] = {
 }
 
 Input.set_trigger = function (s, track)
-    		local ParamTrace = require('Foobar/lib/utilities/paramtrace')
-		ParamTrace.set('track_' .. track.id .. '_voice', 2, 'input_mono_setup') -- mono
-    		ParamTrace.set('track_' .. track.id .. '_note_range_lower', 60, 'input_mono_setup') -- mono
+    
+	Registry.set('track_' .. track.id .. '_voice', 2, 'input_mono_setup') -- mono
+    Registry.set('track_' .. track.id .. '_note_range_lower', 60, 'input_mono_setup') -- mono
     track.triggered = true
     s.index = 0
 
@@ -135,7 +136,7 @@ end
 -- Crow Input
 -- crow.send('input[1].query()') will query and save values to App.crow_in[1].volts
 Input.types['crow'] = {
-    props = {'trigger'},
+    props = {'trigger','step','reset_step'},
     set_action = function(s, track)
         track:kill()
         Input.set_trigger(s,track)
@@ -150,12 +151,12 @@ Input.types['crow'] = {
 
 -- Arpeggiator
 Input.types['arpeggio'] = {
-    props = {'trigger','note_range_lower','note_range'},
+    props = {'trigger','note_range_lower','note_range','arp','step','reset_step'},
     set_action = function(s, track)
         Input.set_trigger(s,track)
         
         if track.scale_select == 0 then
-            			ParamTrace.set('track_' .. track.id .. '_scale_select', 1, 'input_scale_reset')
+            Registry.set('track_' .. track.id .. '_scale_select', 1, 'input_scale_reset')
         end       
     end,
     process = function (s, data)
@@ -239,7 +240,7 @@ Input.types['arpeggio'] = {
 }
 
 Input.types['chord'] = {
-    props = {'trigger','note_range_lower','note_range'},
+    props = {'trigger','note_range_lower','note_range','step','reset_step'},
     set_action = function(s, track)
         Input.set_trigger(s,track)     
     end
@@ -247,7 +248,7 @@ Input.types['chord'] = {
 
 -- Random Notes
 Input.types['random'] = {
-    props = {'trigger','note_range_lower','note_range'},
+    props = {'trigger','note_range_lower','note_range','step','reset_step'},
     set_action = function(s, track)
        Input.set_trigger(s,track)
     end,
@@ -259,7 +260,7 @@ Input.types['random'] = {
 
 -- Bitwise Sequencer
 Input.types['bitwise'] = {
-    props = {'trigger','note_range_lower','note_range','chance','step_length'},
+    props = {'trigger','note_range_lower','note_range','chance','step_length','step','reset_step'},
     set_action = function(s, track)
         Input.set_trigger(s,track)
         track.chance = params:get('track_' .. track.id .. '_chance')
