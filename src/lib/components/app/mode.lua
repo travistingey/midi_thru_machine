@@ -626,7 +626,7 @@ function Mode:use_context(context, screen, option)
 	local menu_override = false
 	local set_default = false
 	local append = false
-	local menu_context = context.menu or nil
+	local menu_context = context.menu
 	local cursor = 1
 	if type(option) == 'table' then
 		timeout = option.timeout
