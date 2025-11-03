@@ -43,7 +43,7 @@ end
 
 function ModeComponent:enable()
     local mode_component = self
-    local track_component = self:get_component()
+	local track_component = self:get_component()
 
     -- Grid is optional: only wire it if provided
     if mode_component.grid then
@@ -51,19 +51,19 @@ function ModeComponent:enable()
 
         mode_component.grid.event = function(s, d)
             local tc = self:get_component()
-            if self.grid_event then
+			if tc and self.grid_event then
                 self:grid_event(tc, d)
             end
         end
 
         mode_component.grid.set_grid = function()
             local tc = self:get_component()
-            if mode_component.set_grid ~= nil then
+			if tc and mode_component.set_grid ~= nil then
                 self:set_grid(tc)
             end
         end
 
-        mode_component.grid:set_grid()
+		if track_component then mode_component.grid:set_grid() end
     end
 
     -- Register standard event listeners for ModeComponents

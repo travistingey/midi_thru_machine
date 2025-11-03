@@ -13,20 +13,20 @@
 --==============================================================================
 -- Dependencies and Global Variables
 --==============================================================================
-local path_name = "Foobar/lib/"
-local utilities = require(path_name .. "utilities")
-local Grid = require(path_name .. "grid")
-local Track = require(path_name .. "components/app/track")
-local Scale = require(path_name .. "components/track/scale")
-local Output = require(path_name .. "components/track/output")
-local Mode = require(path_name .. "components/app/mode")
-local musicutil = require(path_name .. "musicutil-extended")
-local DeviceManager = require(path_name .. "components/app/devicemanager")
-local LaunchControl = require(path_name .. "launchcontrol")
-local UI = require(path_name .. "ui")
-local flags = require(path_name .. "utilities/flags")
-local trace = require(path_name .. "utilities/trace_cli")
-local Registry = require(path_name .. "utilities/registry")
+local path_name = 'Foobar/lib/'
+local utilities = require(path_name .. 'utilities')
+local Grid = require(path_name .. 'grid')
+local Track = require(path_name .. 'components/app/track')
+local Scale = require(path_name .. 'components/track/scale')
+local Output = require(path_name .. 'components/track/output')
+local Mode = require(path_name .. 'components/app/mode')
+local musicutil = require(path_name .. 'musicutil-extended')
+local DeviceManager = require(path_name .. 'components/app/devicemanager')
+local LaunchControl = require(path_name .. 'launchcontrol')
+local UI = require(path_name .. 'ui')
+local flags = require(path_name .. 'utilities/flags')
+local trace = require(path_name .. 'utilities/trace_cli')
+local Registry = require(path_name .. 'utilities/registry')
 local LATCH_CC = 64
 
 --==============================================================================
@@ -61,28 +61,28 @@ function App:init(o)
 	self.preset = {}
 	self.preset_props = {
 		track = {
-			"program_change",
-			"scale_select",
-			"arp",
-			"slew",
-			"note_range_upper",
-			"note_range_lower",
-			"chance",
-			"step",
-			"step_length",
-			"reset_step",
+			'program_change',
+			'scale_select',
+			'arp',
+			'slew',
+			'note_range_upper',
+			'note_range_lower',
+			'chance',
+			'step',
+			'step_length',
+			'reset_step',
 		},
 		scale = {
-			"bits",
-			"root",
-			"follow_method",
-			"chord_set",
-			"follow",
+			'bits',
+			'root',
+			'follow_method',
+			'chord_set',
+			'follow',
 		},
 	}
 	for i = 1, 16 do
 		self.preset[i] = {}
-		self.preset[i]["track_1_program_change"] = i
+		self.preset[i]['track_1_program_change'] = i
 	end
 
 	-- Timing parameters:
@@ -99,48 +99,24 @@ function App:init(o)
 	-- Stores last time the UI successfully redrew, in seconds.
 	self.ui_last_redraw = (util and util.time and util.time()) or os.time()
 
-	
-
 	-- Default function bindings
 	self.default = {
-		enc1 = function(d)
-			self.mode[self.current_mode]:set_cursor(d)
-		end,
-		enc2 = function(d)
-			self.mode[self.current_mode]:use_menu('enc2', d)
-		end,
-		enc3 = function(d)
-			self.mode[self.current_mode]:use_menu('enc3', d)
-		end,
-		alt_enc1 = function(d)
-			self.mode[self.current_mode]:use_menu('alt_enc1', d)
-		end,
-		alt_enc2 = function(d)
-			self.mode[self.current_mode]:use_menu('alt_enc2', d)
-		end,
-		alt_enc3 = function(d)
-			self.mode[self.current_mode]:use_menu('alt_enc3', d)
-		end,
-		long_fn_2 = function()
-			self.mode[self.current_mode]:use_menu('long_fn_2')
-		end,
+		enc1 = function(d) self.mode[self.current_mode]:set_cursor(d) end,
+		enc2 = function(d) self.mode[self.current_mode]:use_menu('enc2', d) end,
+		enc3 = function(d) self.mode[self.current_mode]:use_menu('enc3', d) end,
+		alt_enc1 = function(d) self.mode[self.current_mode]:use_menu('alt_enc1', d) end,
+		alt_enc2 = function(d) self.mode[self.current_mode]:use_menu('alt_enc2', d) end,
+		alt_enc3 = function(d) self.mode[self.current_mode]:use_menu('alt_enc3', d) end,
+		long_fn_2 = function() self.mode[self.current_mode]:use_menu('long_fn_2') end,
 		long_fn_3 = function()
 			self.recording = not self.recording
-			print("Recording: " .. tostring(self.recording))
+			print('Recording: ' .. tostring(self.recording))
 			self.screen_dirty = true
 		end,
-		alt_fn_2 = function()
-			self.mode[self.current_mode]:use_menu('alt_fn_2')
-		end,
-		alt_fn_3 = function()
-			self.mode[self.current_mode]:use_menu('alt_fn_3')
-		end,
-		press_fn_2 = function()
-			self.mode[self.current_mode]:use_menu('press_fn_2')
-		end,
-		press_fn_3 = function()
-			self.mode[self.current_mode]:use_menu('press_fn_3')
-		end,
+		alt_fn_2 = function() self.mode[self.current_mode]:use_menu('alt_fn_2') end,
+		alt_fn_3 = function() self.mode[self.current_mode]:use_menu('alt_fn_3') end,
+		press_fn_2 = function() self.mode[self.current_mode]:use_menu('press_fn_2') end,
+		press_fn_3 = function() self.mode[self.current_mode]:use_menu('press_fn_3') end,
 		screen = function()
 			-- Baseline screen now provided by a gridless mode component.
 			-- Keep this minimal to avoid duplicate drawing.
@@ -183,13 +159,13 @@ function App:init(o)
 
 	self.device_manager:register_params()
 	-- Create the tracks
-	params:add_separator("tracks", "Tracks")
+	params:add_separator('tracks', 'Tracks')
 	for i = 1, 5 do
 		self.track[i] = Track:new({ id = i })
 	end
 
 	-- Create Shared Components (Scales, Outputs)
-	params:add_separator("scales", "Scales")
+	params:add_separator('scales', 'Scales')
 	for i = 0, 3 do
 		self.scale[i] = Scale:new({ id = i })
 	end
@@ -198,7 +174,7 @@ function App:init(o)
 	-- params:default() loads preset and triggeres all set_actions in params
 	----------------------------------------------------------------------------
 
-	print("params:default")
+	print('params:default')
 	App.flags.state.set('initializing', false)
 	params:default()
 end
@@ -207,13 +183,13 @@ end
 -- Transport Event Handling (MIDI In, Clock, etc.)
 --==============================================================================
 function App:on_transport(data)
-	if data.type == "start" then
+	if data.type == 'start' then
 		self:on_start()
-	elseif data.type == "continue" then
+	elseif data.type == 'continue' then
 		self:on_start(true)
-	elseif data.type == "stop" then
+	elseif data.type == 'stop' then
 		self:on_stop()
-	elseif data.type == "clock" then
+	elseif data.type == 'clock' then
 		self:on_tick()
 	end
 
@@ -232,29 +208,27 @@ function App:on_start(continue)
 	self.last_time = clock.get_beats()
 
 	if continue then
-		self:emit("transport_event", { type = "continue" })
+		self:emit('transport_event', { type = 'continue' })
 	else
-		self:emit("transport_event", { type = "start" })
+		self:emit('transport_event', { type = 'start' })
 	end
 
 	-- Transport Tick Loop using PPQN (Internal = 1, External = 2)
-	if params:get("clock_source") == 1 then
-		self.clock = clock.run(function()
-			while true do
-				clock.sync(1 / self.ppqn)
-				App:on_tick()
-				App.screen_dirty = true
-			end
-		end)
-	end
+	if params:get('clock_source') == 1 then self.clock = clock.run(function()
+		while true do
+			clock.sync(1 / self.ppqn)
+			App:on_tick()
+			App.screen_dirty = true
+		end
+	end) end
 end
 
 function App:on_stop()
 	local tracer = require('Foobar/lib/utilities/tracer').device(0, 'transport')
 	tracer:log('info', 'App stop')
 	self.playing = false
-	self:emit("transport_event", { type = "stop" })
-	if params:get("clock_source") == 1 then
+	self:emit('transport_event', { type = 'stop' })
+	if params:get('clock_source') == 1 then
 		if self.clock then
 			clock.cancel(self.clock)
 			self.clock = nil
@@ -280,24 +254,21 @@ end
 function App:on_tick()
 	self.last_time = clock.get_beats()
 	self.tick = self.tick + 1
-	self:emit("transport_event", { type = "clock" })
+	self:emit('transport_event', { type = 'clock' })
 end
 
 --==============================================================================
 -- UI Heartbeat
 --==============================================================================
 -- Called by the top-level redraw function to record the last successful redraw.
-function App:ui_heartbeat()
-	self.ui_last_redraw = (util and util.time and util.time()) or os.time()
-end
+function App:ui_heartbeat() self.ui_last_redraw = (util and util.time and util.time()) or os.time() end
 
 --==============================================================================
 -- MIDI In/Out and Grid Registration
 --==============================================================================
 
-
 function App:register_midi_grid(n)
-	print("Register Grid Device " .. n)
+	print('Register Grid Device ' .. n)
 	self.midi_grid = self.device_manager:get(n)
 	self.midi_grid:send({ 240, 0, 32, 41, 2, 13, 0, 127, 247 }) -- Set Launchpad to Programmer Mode
 end
@@ -306,16 +277,10 @@ end
 -- Event Handling System (on, off, emit)
 --==============================================================================
 function App:on(event_name, listener)
-	if not self.event_listeners then
-		self.event_listeners = {}
-	end
-	if not self.event_listeners[event_name] then
-		self.event_listeners[event_name] = {}
-	end
+	if not self.event_listeners then self.event_listeners = {} end
+	if not self.event_listeners[event_name] then self.event_listeners[event_name] = {} end
 	table.insert(self.event_listeners[event_name], listener)
-	return function()
-		self:off(event_name, listener)
-	end
+	return function() self:off(event_name, listener) end
 end
 
 function App:off(event_name, listener)
@@ -344,9 +309,7 @@ function App:draw()
 	screen.ping()
 	screen.clear() -- Clear screen space
 	screen.aa(1) -- Enable anti-aliasing
-	if self.mode[self.current_mode] then
-		self.mode[self.current_mode]:draw()
-	end
+	if self.mode[self.current_mode] then self.mode[self.current_mode]:draw() end
 	screen.update()
 end
 
@@ -375,22 +338,40 @@ function App:handle_enc(e, d)
 end
 
 function App:handle_key(k, z)
-	local context = self.mode[self.current_mode].context
+	local mode = self.mode[self.current_mode]
+	local context = mode.context
 	if k == 1 then
+		local was_alt = self.alt_down
 		self.alt_down = (z == 1)
-	elseif self.alt_down and z == 1 and context["alt_fn_" .. k] then
-		context["alt_fn_" .. k]()
+		if mode and self.alt_down ~= was_alt then
+			local duration = self.alt_down and false or 2.5
+			mode:update_helper_toast({ duration = duration })
+		end
+	elseif self.alt_down and z == 1 and context['alt_fn_' .. k] then
+		context['alt_fn_' .. k]()
 	elseif z == 1 then
 		self.key_down = util.time()
 	elseif not self.alt_down then
 		local hold_time = util.time() - self.key_down
-		if hold_time > 0.3 and context["long_fn_" .. k] then
-			context["long_fn_" .. k]()
-		elseif context["press_fn_" .. k] then
-			context["press_fn_" .. k]()
+		local handled = false
+		if hold_time <= 0.3 and mode:has_pending_confirmation() then
+			if k == 2 then
+				mode:clear_pending_confirmation({ revert = true })
+				handled = true
+			elseif k == 3 then
+				handled = mode:confirm_pending_confirmation()
+			end
+			if handled then App.screen_dirty = true end
+		end
+		if not handled then
+			if hold_time > 0.3 and context['long_fn_' .. k] then
+				context['long_fn_' .. k]()
+			elseif context['press_fn_' .. k] then
+				context['press_fn_' .. k]()
+			end
 		end
 	end
-	App.mode[App.current_mode]:reset_timeout()
+	mode:reset_timeout()
 end
 
 --==============================================================================
@@ -398,28 +379,20 @@ end
 --==============================================================================
 
 function App:save_preset(d, param)
-	if self.preset[d] == nil then
-		self.preset[d] = {}
-	end
+	if self.preset[d] == nil then self.preset[d] = {} end
 	local preset = self.preset[d]
 
-	if type(param) == "string" then
+	if type(param) == 'string' then
 		local value = self.settings[param]
-		if preset[param] ~= value then
-			preset[param] = value
-		end
-	elseif type(param) == "table" then
+		if preset[param] ~= value then preset[param] = value end
+	elseif type(param) == 'table' then
 		for index, name in ipairs(param) do
 			local value = self.settings[name]
-			if preset[name] ~= value then
-				preset[name] = value
-			end
+			if preset[name] ~= value then preset[name] = value end
 		end
 	else
 		for name, value in pairs(self.settings) do
-			if preset[name] ~= value then
-				preset[name] = value
-			end
+			if preset[name] ~= value then preset[name] = value end
 		end
 	end
 end
@@ -427,27 +400,21 @@ end
 function App:load_preset(d, param, force)
 	local preset = self.preset[d]
 	if preset == nil then
-		error("App:load_preset was nil")
+		error('App:load_preset was nil')
 		return
 	end
 
-	if type(param) == "string" then
+	if type(param) == 'string' then
 		local value = preset[param]
-		if force or (self.settings[param] ~= value) then
-			Registry.set(param, value, 'preset_load_single')
-		end
-	elseif type(param) == "table" then
+		if force or (self.settings[param] ~= value) then Registry.set(param, value, 'preset_load_single') end
+	elseif type(param) == 'table' then
 		for index, name in ipairs(param) do
 			local value = preset[name]
-			if force or (value and self.settings[name] ~= value) then
-				Registry.set(name, value, 'preset_load_table')
-			end
+			if force or (value and self.settings[name] ~= value) then Registry.set(name, value, 'preset_load_table') end
 		end
 	else
 		for name, value in pairs(preset) do
-			if self.settings[name] ~= value then
-				Registry.set(name, value, 'preset_load_all')
-			end
+			if self.settings[name] ~= value then Registry.set(name, value, 'preset_load_all') end
 		end
 	end
 end
@@ -494,9 +461,7 @@ function App:register_modes()
 				local mode = App.mode[App.current_mode]
 				local selected = self:grid_to_index(data)
 
-				if App.current_mode == selected then
-					return
-				end
+				if App.current_mode == selected then return end
 
 				self:reset()
 
@@ -515,11 +480,11 @@ function App:register_modes()
 		mode.grid:process(msg)
 	end
 
-	local SessionModePreset = require("Foobar/lib/modes/session-preset")
-	local SessionModeNote = require("Foobar/lib/modes/session-note")
-	local DrumsMode = require("Foobar/lib/modes/drums")
-	local KeysMode = require("Foobar/lib/modes/keys")
-	local UserMode = require("Foobar/lib/modes/user")
+	local SessionModePreset = require('Foobar/lib/modes/session-preset')
+	local SessionModeNote = require('Foobar/lib/modes/session-note')
+	local DrumsMode = require('Foobar/lib/modes/drums')
+	local KeysMode = require('Foobar/lib/modes/keys')
+	local UserMode = require('Foobar/lib/modes/user')
 
 	self.mode[1] = SessionModePreset
 	self.mode[5] = SessionModeNote

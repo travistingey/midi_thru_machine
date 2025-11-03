@@ -23,7 +23,5 @@ collapse_simple_statement = "Always"
 # Space after function names - never
 space_after_function_names = "Never"
 
-trim_whitespace = "Always"
-
 # Syntax (Lua 5.3 for Norns)
 syntax = "Lua53" 
