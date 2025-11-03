@@ -222,6 +222,8 @@ function UI:draw_menu(x, y, menu, cursor, opts)
 	if total_visible == 0 then return end
 
 	local max_visible = self.max_visible_items
+	-- Reserve one row of vertical space at the bottom for helper toast
+	local window_rows = math.max(1, max_visible - 1)
 	local cursor_position = 1
 	for i, idx in ipairs(visible_indices) do
 		if idx == cursor then
@@ -231,22 +233,24 @@ function UI:draw_menu(x, y, menu, cursor, opts)
 	end
 
 	local start_pos, end_pos = 1, total_visible
-	if total_visible > max_visible then
-		end_pos = max_visible
-		if cursor_position > max_visible - 2 then
+	if total_visible > window_rows then
+		end_pos = window_rows
+		-- Maintain similar centering behavior but within the reduced window
+		if cursor_position > window_rows - 2 then
 			if cursor_position <= total_visible - 2 then
 				start_pos = cursor_position - 2
-				end_pos = cursor_position + 2
+				end_pos = start_pos + window_rows - 1
 			else
-				start_pos = total_visible - max_visible + 1
+				start_pos = total_visible - window_rows + 1
 				end_pos = total_visible
 			end
 		end
 	end
 
 	local rows = end_pos - start_pos + 1
-	local last_row_y = y + (rows - 1) * 10
-	local max_y = 54
+	local last_row_y = y + (rows - 2) * 10
+	-- Keep menu rows within the area above helper toast bar (10px height)
+	local max_y = 44
 	local offset_y = 0
 	local is_scrolling = (total_visible > max_visible)
 	if (not is_scrolling) and (last_row_y > max_y) then offset_y = max_y - last_row_y end
@@ -350,23 +354,28 @@ function UI:draw_menu_item(x, y, label, value, icon, is_active, style, disable_h
 	local current_item = self.current_item
 	local has_pending = current_item and current_item.pending_confirmation
 
-	if current_item then
-		if has_pending then
-			show_next = true
-		elseif current_item.has_press then
+	if has_pending then
+		show_next = true
+	elseif current_item.has_press then
+		-- Only show "next" when the item actually opens a submenu.
+		-- Prefer explicit flag; fallback to label convention ('\u{25ba}') used for submenus.
+		local opens_submenu = false
+		if current_item.has_submenu and type(current_item.has_submenu) == 'function' then
+			opens_submenu = current_item.has_submenu()
+		else
+			opens_submenu = current_item.has_submenu == true
+		end
+
+		if opens_submenu then
 			show_next = true
 			if current_item.can_press ~= nil then
-				if type(current_item.can_press) == 'function' then
-					show_next = current_item.can_press()
-				elseif current_item.on_press then
-					show_next = true
-				end
+				if type(current_item.can_press) == 'function' then show_next = current_item.can_press() end
 			end
 		end
 	end
 
 	if show_next then
-		local next_icon = has_pending and '?' or '>'
+		local next_icon = has_pending and '?' or '\u{25ba}'
 		local press_x = 127
 		if is_active then
 			screen.level(style.icon_color)
@@ -490,29 +499,8 @@ function UI:draw_helper_toast(helper_labels, y)
 	local left_text = ''
 	local right_text = ''
 
-	if helper_labels.alt_press_fn_2 and App.alt_down then
-		left_text = helper_labels.alt_press_fn_2
-	elseif helper_labels.press_fn_2 then
-		left_text = helper_labels.press_fn_2
-	end
-
-	if helper_labels.alt_press_fn_3 and App.alt_down then
-		left_text = left_text .. ' | ' .. helper_labels.alt_press_fn_3
-	elseif helper_labels.press_fn_3 then
-		left_text = left_text .. ' | ' .. helper_labels.press_fn_3
-	end
-
-	if helper_labels.alt_enc3 and App.alt_down then
-		right_text = helper_labels.alt_enc3
-	elseif helper_labels.enc3 then
-		right_text = helper_labels.enc3
-	end
-
-	if helper_labels.alt_enc2 and App.alt_down then
-		right_text = right_text .. ' | ' .. helper_labels.alt_enc2
-	elseif helper_labels.enc2 then
-		right_text = right_text .. ' | ' .. helper_labels.enc2
-	end
+	local mode = App.mode and App.mode[App.current_mode]
+	local current = mode and mode.menu and mode.menu[mode.cursor]
 
 	local height = 10
 	local pos_y = y or (64 - height)
@@ -527,10 +515,39 @@ function UI:draw_helper_toast(helper_labels, y)
 
 	screen.level(15)
 	self:set_font(1)
+
 	screen.move(0, pos_y + height - 2)
-	screen.text(left_text)
+	if current and current.pending_confirmation then
+		screen.text('x')
+	elseif helper_labels.alt_press_fn_2 and App.alt_down then
+		screen.text(helper_labels.alt_press_fn_2)
+	elseif helper_labels.press_fn_2 then
+		screen.text(helper_labels.press_fn_2)
+	end
+
+	screen.move(30, pos_y + height - 2)
+	if current and current.pending_confirmation then
+		screen.text_center('confirm')
+	elseif helper_labels.alt_press_fn_3 and App.alt_down then
+		screen.text_center(helper_labels.alt_press_fn_3)
+	elseif helper_labels.press_fn_3 then
+		screen.text_center(helper_labels.press_fn_3)
+	end
+
 	screen.move(125, pos_y + height - 2)
-	screen.text_right(right_text)
+	if helper_labels.alt_enc3 and App.alt_down then
+		screen.text_right(helper_labels.alt_enc3)
+	elseif helper_labels.enc3 then
+		screen.text_right(helper_labels.enc3)
+	end
+
+	screen.move(81, pos_y + height - 2)
+	if helper_labels.alt_enc2 and App.alt_down then
+		screen.text_center(helper_labels.alt_enc2)
+	elseif helper_labels.enc2 then
+		screen.text_center(helper_labels.enc2)
+	end
+
 	screen.fill()
 end
 

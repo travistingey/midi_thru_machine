@@ -394,14 +394,15 @@ function Registry.menu.make_item(id, opts)
 		draw = opts.draw,
 		draw_buttons = opts.draw_buttons,
 		can_press = opts.can_press,
+		can_show = opts.can_show,
+		has_submenu = opts.has_submenu,
 		on_set = opts.on_set,
-	}
+		requires_confirmation = opts.requires_confirmation,
+		helper_labels = opts.helper_labels,
+		helper_labels_default = opts.helper_labels_default,
 
-	item.requires_confirmation = opts.requires_confirmation
-	item.helper_labels = opts.helper_labels
- 	item.helper_labels_default = opts.helper_labels_default
-	item.can_show = opts.can_show
-	item.disable_highlight = opts.disable_highlight
+		disable_highlight = opts.disable_highlight,
+	}
 
 	if opts.enc3 then
 		-- Wrap custom handler to also invoke on_set after it runs
@@ -444,6 +445,9 @@ function Registry.menu.make_combo(left_id, right_id, opts)
 	row.can_show = opts.can_show
 	row.disable_highlight = opts.disable_highlight
 	row.helper_labels_default = opts.helper_labels_default
+	-- Submenu flag for combos: explicit via opts or inferred from on_press
+	row.has_submenu = opts.has_submenu
+	if row.has_submenu == nil and opts.on_press ~= nil then row.has_submenu = true end
 
 	if row.requires_confirmation_left == nil then row.requires_confirmation_left = row.requires_confirmation end
 	if row.requires_confirmation_right == nil then row.requires_confirmation_right = row.requires_confirmation end
@@ -452,27 +456,36 @@ function Registry.menu.make_combo(left_id, right_id, opts)
 
 	local function default_right_bump(d) Registry.menu.bump(right_id, d, opts.right_step, row.on_set, row, 'right') end
 
-	if opts.left_value_fn then
-		row.enc2 = function(d)
+	-- Always enforce confirmation path when required, regardless of custom handlers
+	row.enc2 = function(d)
+		local rc = row.requires_confirmation_left
+		if rc == nil then rc = row.requires_confirmation end
+		if type(rc) == 'function' then rc = rc(row, 'left') end
+		if rc then return default_left_bump(d) end
+		if opts.left_value_fn then
 			opts.left_value_fn(d)
 			if type(row.on_set) == 'function' then pcall(row.on_set) end
+		else
+			if opts.enc2 then
+				opts.enc2(d)
+				if type(row.on_set) == 'function' then pcall(row.on_set) end
+			else
+				default_left_bump(d)
+			end
 		end
-	elseif opts.enc2 then
-		row.enc2 = function(d)
-			opts.enc2(d)
-			if type(row.on_set) == 'function' then pcall(row.on_set) end
-		end
-	else
-		row.enc2 = default_left_bump
 	end
 
-	if opts.enc3 then
-		row.enc3 = function(d)
+	row.enc3 = function(d)
+		local rc = row.requires_confirmation_right
+		if rc == nil then rc = row.requires_confirmation end
+		if type(rc) == 'function' then rc = rc(row, 'right') end
+		if rc then return default_right_bump(d) end
+		if opts.enc3 then
 			opts.enc3(d)
 			if type(row.on_set) == 'function' then pcall(row.on_set) end
+		else
+			default_right_bump(d)
 		end
-	else
-		row.enc3 = default_right_bump
 	end
 
 	if opts.on_press then

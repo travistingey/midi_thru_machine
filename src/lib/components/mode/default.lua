@@ -211,7 +211,25 @@ function Default:sub_menu(menu, config)
 		menu = menu,
 	}
 
-	if config.default_helper_labels then self.current.context.default_helper_labels = config.default_helper_labels end
+	-- Always provide a default "back" helper label for press_fn_2
+	local existing_labels = config.default_helper_labels
+	self.current.context.default_helper_labels = function()
+		local merged = {}
+		if type(existing_labels) == 'function' then
+			local ok, res = pcall(existing_labels)
+			if ok and type(res) == 'table' then
+				for k, v in pairs(res) do
+					merged[k] = v
+				end
+			end
+		elseif type(existing_labels) == 'table' then
+			for k, v in pairs(existing_labels) do
+				merged[k] = v
+			end
+		end
+		if merged.press_fn_2 == nil then merged.press_fn_2 = '\u{21ba}' end
+		return merged
+	end
 
 	if config.status then self.current.status = config.status end
 
@@ -257,7 +275,12 @@ function Default:track_menu()
 
 	local in_row = Registry.menu.make_combo('track_' .. id .. '_device_in', 'track_' .. id .. '_midi_in', {
 		icon = '\u{2192}',
-		left_label_fn = function() return App.track[id].input_device.abbr end,
+		requires_confirmation = true,
+		has_submenu = true,
+		left_label_fn = function()
+			local val = params:get('track_' .. id .. '_device_in')
+			return (App.device_manager.midi_device_abbrs and App.device_manager.midi_device_abbrs[val]) or 'None'
+		end,
 		on_press = function()
 			self:sub_menu(self:input_settings_menu(), {
 				status = { icon = id, label = 'INPUT' },
@@ -265,19 +288,21 @@ function Default:track_menu()
 			})
 		end,
 		helper_labels = {
-			press_fn_3 = '>',
-			enc2 = 'Dev',
-			enc3 = 'Ch',
+			enc2 = 'device',
+			enc3 = 'ch',
 		},
 	})
 
 	local out_row = Registry.menu.make_combo('track_' .. id .. '_device_out', 'track_' .. id .. '_midi_out', {
 		icon = '\u{2190}',
+		requires_confirmation = true,
+		has_submenu = true,
 		left_label_fn = function()
 			if App.track[id].output_type == 'crow' then
 				return 'Crow'
 			else
-				return App.track[id].output_device.abbr
+				local val = params:get('track_' .. id .. '_device_out')
+				return (App.device_manager.midi_device_abbrs and App.device_manager.midi_device_abbrs[val]) or (App.track[id].output_device and App.track[id].output_device.abbr) or 'None'
 			end
 		end,
 		right_value_fn = function()
@@ -287,13 +312,6 @@ function Default:track_menu()
 				return Registry.menu.format_value('track_' .. id .. '_midi_out')
 			end
 		end,
-		enc3 = function(d)
-			if App.track[id].output_type == 'crow' then
-				Registry.menu.bump('track_' .. id .. '_crow_out', d)
-			else
-				Registry.menu.bump('track_' .. id .. '_midi_out', d)
-			end
-		end,
 		on_press = function()
 			self:sub_menu(self:output_menu(), {
 				status = { icon = id, label = 'OUTPUT' },
@@ -301,16 +319,16 @@ function Default:track_menu()
 			})
 		end,
 		helper_labels = {
-			press_fn_3 = '>',
-			enc2 = 'Dev',
-			enc3 = 'Dest',
+			enc2 = 'device',
+			enc3 = 'ch',
 		},
 	})
 
 	local type_row = Registry.menu.make_item('track_' .. id .. '_input_type', {
+		requires_confirmation = true,
 		label_fn = function() return 'TYPE' end,
-		encoder = 3,
 		can_press = function() return App.track[id].input_type ~= 'midi' end,
+		has_submenu = function() return App.track[id].input_type ~= 'midi' end,
 		on_press = function()
 			if App.track[id].input_type ~= 'midi' then self:sub_menu(self:input_menu(), {
 				status = { icon = id, label = App.track[id].input_type },
@@ -318,17 +336,21 @@ function Default:track_menu()
 			}) end
 		end,
 		helper_labels = {
-			press_fn_3 = '>',
-			enc3 = 'Type',
+			enc3 = 'type',
 		},
 	})
 
 	local scale_row = Registry.menu.make_item('track_' .. id .. '_scale_select', {
+		requires_confirmation = true,
+
 		label_fn = function() return 'SCALE' end,
-		encoder = 3,
 		can_press = function()
 			local sid = params:get('track_' .. id .. '_scale_select')
 			return sid > 0
+		end,
+		has_submenu = function()
+			local sid = params:get('track_' .. id .. '_scale_select')
+			return sid > 0 and true or false
 		end,
 		on_press = function()
 			local sid = params:get('track_' .. id .. '_scale_select')
@@ -339,7 +361,6 @@ function Default:track_menu()
 			}) end
 		end,
 		helper_labels = {
-			press_fn_3 = '>',
 			enc3 = 'Scale',
 		},
 	})
@@ -367,7 +388,7 @@ function Default:track_menu()
 				end, current, 'Track name')
 			end,
 			helper_labels = {
-				press_fn_3 = 'sel',
+				press_fn_3 = 'edit',
 			},
 		})
 	)

@@ -51,6 +51,9 @@ function App:init(o)
 	self.mode = {}
 	self.settings = {}
 
+	-- Unified helper toast timeout (seconds); set to 5 for your target timing
+	self.helper_toast_timeout = 5
+
 	-- Transport/Playback State
 	self.playing = false
 	self.recording = false
@@ -335,6 +338,14 @@ function App:handle_enc(e, d)
 		end
 	end
 	App.mode[App.current_mode]:reset_timeout()
+
+	-- Ensure helper toast reflects latest pending/confirm state and force redraw
+	local mode = self.mode[self.current_mode]
+	if mode then
+		local duration = self.alt_down and false or self.helper_toast_timeout
+		mode:update_helper_toast({ duration = duration })
+		self.screen_dirty = true
+	end
 end
 
 function App:handle_key(k, z)
@@ -344,7 +355,7 @@ function App:handle_key(k, z)
 		local was_alt = self.alt_down
 		self.alt_down = (z == 1)
 		if mode and self.alt_down ~= was_alt then
-			local duration = self.alt_down and false or 2.5
+			local duration = self.alt_down and false or self.helper_toast_timeout
 			mode:update_helper_toast({ duration = duration })
 		end
 	elseif self.alt_down and z == 1 and context['alt_fn_' .. k] then
@@ -361,7 +372,12 @@ function App:handle_key(k, z)
 			elseif k == 3 then
 				handled = mode:confirm_pending_confirmation()
 			end
-			if handled then App.screen_dirty = true end
+			if handled then
+				-- Immediately refresh helper labels/toast so confirm label disappears
+				local duration = App.alt_down and false or self.helper_toast_timeout
+				mode:update_helper_toast({ duration = duration })
+				App.screen_dirty = true
+			end
 		end
 		if not handled then
 			if hold_time > 0.3 and context['long_fn_' .. k] then

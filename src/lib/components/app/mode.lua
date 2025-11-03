@@ -27,7 +27,7 @@ function Mode:set_cursor(d)
 	local visible_indices = self:get_visible_indices()
 	if #visible_indices == 0 then
 		self.cursor = 1
-		self:update_helper_toast({ duration = App.alt_down and false or 2.5 })
+		self:update_helper_toast({ duration = App.alt_down and false or App.helper_toast_timeout })
 		App.screen_dirty = true
 		return
 	end
@@ -64,7 +64,7 @@ function Mode:set_cursor(d)
 
 	self.cursor = next_cursor
 
-	local helper_duration = App.alt_down and false or 2.5
+	local helper_duration = App.alt_down and false or App.helper_toast_timeout
 	self:update_helper_toast({ duration = helper_duration })
 	App.screen_dirty = true
 end
@@ -72,6 +72,9 @@ end
 function Mode:use_menu(ctx, d)
 	local item = self.menu and self.menu[self.cursor]
 	if item and type(item[ctx]) == 'function' then item[ctx](d) end
+	-- Reset helper toast to reflect any state changes (e.g., pending confirmation)
+	local helper_duration = App.alt_down and false or 5
+	self:update_helper_toast({ duration = helper_duration })
 	App.screen_dirty = true
 end
 
@@ -245,8 +248,20 @@ function Mode:clear_pending_confirmation(opts)
 
 	if pending.item then pending.item.pending_confirmation = nil end
 
-	if revert and pending.param_id and pending.original ~= nil and pending.pending ~= nil and pending.pending ~= pending.original then
-		Registry.set(pending.param_id, pending.original, 'menu_bump_revert', pending.callback, true)
+	-- Support multi-entry pending bundles (e.g., combo left/right)
+	if pending.entries and type(pending.entries) == 'table' then
+		if revert then
+			for _, entry in pairs(pending.entries) do
+				if entry.param_id and entry.original ~= nil and entry.pending ~= nil and entry.pending ~= entry.original then
+					Registry.set(entry.param_id, entry.original, 'menu_bump_revert', entry.callback, true)
+				end
+			end
+		end
+	else
+		-- Backward compatibility: single pending value
+		if revert and pending.param_id and pending.original ~= nil and pending.pending ~= nil and pending.pending ~= pending.original then
+			Registry.set(pending.param_id, pending.original, 'menu_bump_revert', pending.callback, true)
+		end
 	end
 
 	self.pending_confirmation = nil
@@ -254,20 +269,35 @@ end
 
 function Mode:confirm_pending_confirmation()
 	local pending = self.pending_confirmation
-	if not pending or not pending.param_id then return false end
+	if not pending then return false end
 
+	-- Multi-entry confirm (combo rows)
+	if pending.entries and type(pending.entries) == 'table' then
+		for _, entry in pairs(pending.entries) do
+			local param_id = entry.param_id
+			local value = entry.pending
+			local callback = entry.callback
+			if value ~= nil then
+				if entry.original ~= nil and entry.original ~= value then params:set(param_id, entry.original, true) end
+				Registry.set(param_id, value, 'menu_bump_confirm', callback)
+			end
+		end
+		if pending.item then pending.item.pending_confirmation = nil end
+		self.pending_confirmation = nil
+		return true
+	end
+
+	-- Single-entry fallback
+	if not pending.param_id then return false end
 	local param_id = pending.param_id
 	local value = pending.pending
 	local callback = pending.callback
-
 	if pending.item then pending.item.pending_confirmation = nil end
 	self.pending_confirmation = nil
-
 	if value ~= nil then
 		if pending.original ~= nil and pending.original ~= value then params:set(param_id, pending.original, true) end
 		Registry.set(param_id, value, 'menu_bump_confirm', callback)
 	end
-
 	return true
 end
 
@@ -277,58 +307,64 @@ function Mode:prepare_pending_confirmation(entry)
 	local pending = self.pending_confirmation
 	local param_id = entry.param_id
 
-	if pending and pending.param_id ~= param_id then
+	-- If there is an existing pending for a different item, revert it
+	if pending and pending.item and entry.item and pending.item ~= entry.item then
 		self:clear_pending_confirmation({ revert = true })
 		pending = nil
 	end
 
+	-- Initialize pending bundle if needed
 	if not pending then
-		pending = {
-			param_id = param_id,
-			original = entry.original_value,
-		}
+		pending = { entries = {} }
 		self.pending_confirmation = pending
-	elseif pending.original == nil then
-		pending.original = entry.original_value
 	end
 
+	-- Attach item reference and index for UI state once
 	if entry.item then
 		pending.item = entry.item
 		entry.item.pending_confirmation = true
-	end
-
-	if pending.item and pending.item_index == nil then
-		for idx, menu_item in ipairs(self.menu or {}) do
-			if menu_item == pending.item then
-				pending.item_index = idx
-				break
+		if pending.item_index == nil then
+			for idx, menu_item in ipairs(self.menu or {}) do
+				if menu_item == pending.item then
+					pending.item_index = idx
+					break
+				end
 			end
 		end
 	end
 
-	pending.pending = entry.new_value
-	pending.callback = entry.callback
-	pending.side = entry.side
+	-- Upsert this param into the bundle
+	local key = param_id
+	local existing = pending.entries[key]
+	if not existing then
+		existing = {
+			param_id = param_id,
+			original = entry.original_value,
+		}
+		pending.entries[key] = existing
+	elseif existing.original == nil then
+		existing.original = entry.original_value
+	end
+	-- Update staged value and metadata
+	existing.pending = entry.new_value
+	existing.callback = entry.callback
+	existing.side = entry.side
 
-	if pending.original ~= nil and pending.pending ~= nil and pending.original == pending.pending then self:clear_pending_confirmation({ revert = false }) end
+	-- If the staged value equals the original, drop this entry
+	if existing.original ~= nil and existing.pending ~= nil and existing.original == existing.pending then pending.entries[key] = nil end
+
+	-- If bundle is empty, clear the pending flag
+	local has_any = false
+	for _, _ in pairs(pending.entries) do
+		has_any = true
+		break
+	end
+	if not has_any then self:clear_pending_confirmation({ revert = false }) end
 end
 
 function Mode:cancel_helper_toast()
-	if self.helper_toast_clock then
-		clock.cancel(self.helper_toast_clock)
-		self.helper_toast_clock = nil
-	end
-
-	if self.helper_layer then
-		for i, layer in ipairs(self.layer) do
-			if layer == self.helper_layer then
-				table.remove(self.layer, i)
-				break
-			end
-		end
-		self.helper_layer = nil
-		App.screen_dirty = true
-	end
+	-- Delegate to the unified toast cancellation
+	self:cancel_toast()
 end
 
 function Mode:show_helper_toast(helper_labels, duration)
@@ -337,40 +373,20 @@ function Mode:show_helper_toast(helper_labels, duration)
 		return
 	end
 
-	self:cancel_helper_toast()
-
+	-- Validate at least once to avoid showing empty helper toasts
 	local resolved = helper_labels
 	if type(resolved) == 'function' then resolved = resolved() end
 	if type(resolved) ~= 'table' then return end
+	if next(resolved) == nil then return end
 
-	local has_entries = false
-	for _ in pairs(resolved) do
-		has_entries = true
-		break
-	end
-	if not has_entries then return end
-
-	local function helper_screen()
-		local draw_labels = helper_labels
-		if type(draw_labels) == 'function' then draw_labels = draw_labels() end
-		UI:draw_helper_toast(draw_labels or resolved)
+	local draw_fn = function(payload)
+		local labels = payload
+		if type(labels) == 'function' then labels = labels() end
+		UI:draw_helper_toast(labels or resolved)
 	end
 
-	self.helper_layer = helper_screen
-	table.insert(self.layer, helper_screen)
-
-	if duration ~= false then
-		local seconds = duration or 2.5
-		self.helper_toast_clock = clock.run(function()
-			clock.sleep(seconds)
-			self.helper_toast_clock = nil
-			self:cancel_helper_toast()
-		end)
-	else
-		self.helper_toast_clock = nil
-	end
-
-	App.screen_dirty = true
+	-- Reuse unified toast system with custom draw function and duration
+	self:toast(helper_labels, { draw_fn = draw_fn, duration = duration })
 end
 
 function Mode:update_helper_toast(opts)
@@ -393,6 +409,37 @@ function Mode:update_helper_toast(opts)
 	if item then
 		add_labels(item.helper_labels_default)
 		add_labels(item.helper_labels)
+	end
+
+	-- Auto-provide default press_fn_3 when submenu is available and active, unless overridden
+	if item and merged.press_fn_3 == nil then
+		-- If pending confirmation, prefer 'confirm' unless explicitly overridden above
+		if item.pending_confirmation then
+			merged.press_fn_3 = 'confirm'
+		else
+			-- Resolve has_submenu (boolean or function)
+			local has_sub = false
+			if type(item.has_submenu) == 'function' then
+				local ok, res = pcall(item.has_submenu, item)
+				has_sub = ok and (res ~= false)
+			else
+				has_sub = (item.has_submenu == true)
+			end
+
+			-- Respect gating via can_press when provided
+			if has_sub then
+				local can_press = true
+				if item.can_press ~= nil then
+					if type(item.can_press) == 'function' then
+						local ok, res = pcall(item.can_press, item)
+						can_press = ok and (res ~= false)
+					else
+						can_press = (item.on_press ~= nil)
+					end
+				end
+				if can_press then merged.press_fn_3 = 'next' end
+			end
+		end
 	end
 
 	if next(merged) then
@@ -640,7 +687,7 @@ function Mode:use_context(context, screen, option)
 	table.insert(self.layer, screen)
 
 	self.context_helper_labels = context.default_helper_labels or self.default_helper_labels
-	local helper_duration = App.alt_down and false or 2.5
+	local helper_duration = App.alt_down and false or App.helper_toast_timeout
 	self:update_helper_toast({ duration = helper_duration })
 
 	App.screen_dirty = true
@@ -657,8 +704,16 @@ function Mode:use_context(context, screen, option)
 	end
 end
 
-function Mode:toast(toast_text, draw_fn)
-	draw_fn = draw_fn or function(t) UI:draw_toast(t) end
+function Mode:toast(toast_text, draw_or_opts)
+	local draw_fn = function(t) UI:draw_toast(t) end
+	local duration = self.timeout
+
+	if type(draw_or_opts) == 'function' then
+		draw_fn = draw_or_opts
+	elseif type(draw_or_opts) == 'table' then
+		if type(draw_or_opts.draw_fn) == 'function' then draw_fn = draw_or_opts.draw_fn end
+		if draw_or_opts.duration ~= nil then duration = draw_or_opts.duration end
+	end
 
 	local function toast_screen() draw_fn(toast_text) end
 
@@ -669,15 +724,19 @@ function Mode:toast(toast_text, draw_fn)
 	self.toast_layer = toast_screen
 	table.insert(self.layer, toast_screen)
 
-	local count = 0
-	self.toast_clock = clock.run(function()
-		while count < self.timeout do
-			clock.sleep(1 / 15)
-			count = count + (1 / 15)
-		end
-		-- Remove the toast layer
-		self:cancel_toast()
-	end)
+	if duration ~= false then
+		local count = 0
+		self.toast_clock = clock.run(function()
+			while count < (duration or self.timeout) do
+				clock.sleep(1 / 15)
+				count = count + (1 / 15)
+			end
+			-- Remove the toast layer
+			self:cancel_toast()
+		end)
+	else
+		self.toast_clock = nil
+	end
 
 	App.screen_dirty = true
 end
