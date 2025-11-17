@@ -27,7 +27,7 @@ function Mode:set_cursor(d)
 	local visible_indices = self:get_visible_indices()
 	if #visible_indices == 0 then
 		self.cursor = 1
-		self:update_helper_toast({ duration = App.alt_down and false or App.helper_toast_timeout })
+		self:update_helper_toast()
 		App.screen_dirty = true
 		return
 	end
@@ -64,8 +64,7 @@ function Mode:set_cursor(d)
 
 	self.cursor = next_cursor
 
-	local helper_duration = App.alt_down and false or App.helper_toast_timeout
-	self:update_helper_toast({ duration = helper_duration })
+	self:update_helper_toast()
 	App.screen_dirty = true
 end
 
@@ -73,8 +72,8 @@ function Mode:use_menu(ctx, d)
 	local item = self.menu and self.menu[self.cursor]
 	if item and type(item[ctx]) == 'function' then item[ctx](d) end
 	-- Reset helper toast to reflect any state changes (e.g., pending confirmation)
-	local helper_duration = App.alt_down and false or 5
-	self:update_helper_toast({ duration = helper_duration })
+	local helper_duration = App.alt_down or 5
+	self:update_helper_toast()
 	App.screen_dirty = true
 end
 
@@ -127,8 +126,13 @@ function Mode:set(o)
 		end
 	end
 
-	self.layer = o.layer or {}
-	self.layer[1] = App.default.screen
+	self.base_layers = o.layer or {}
+	self.base_layers[1] = App.default.screen
+	self.context_layers = {}
+	self.interrupt_layers = {}
+	self.context_layer = nil
+	self.context_layer_is_interrupt = false
+	self.toast_layer = nil
 	self.screen = o.screen or function() end
 
 	-- Stateless UI now; track menu state per mode
@@ -145,6 +149,7 @@ function Mode:set(o)
 	self.helper_layer = nil
 	self.disable_highlight = false
 	self.default_disable_highlight = nil
+	self.context_stack = {}
 
 	-- Create the modes
 	self.grid = Grid:new({
@@ -363,8 +368,13 @@ function Mode:prepare_pending_confirmation(entry)
 end
 
 function Mode:cancel_helper_toast()
-	-- Delegate to the unified toast cancellation
-	self:cancel_toast()
+	if self.helper_toast_clock then
+		clock.cancel(self.helper_toast_clock)
+		self.helper_toast_clock = nil
+	end
+
+	if self.helper_layer then self.helper_layer = nil end
+	App.screen_dirty = true
 end
 
 function Mode:show_helper_toast(helper_labels, duration)
@@ -379,18 +389,40 @@ function Mode:show_helper_toast(helper_labels, duration)
 	if type(resolved) ~= 'table' then return end
 	if next(resolved) == nil then return end
 
-	local draw_fn = function(payload)
-		local labels = payload
-		if type(labels) == 'function' then labels = labels() end
-		UI:draw_helper_toast(labels or resolved)
+	local function resolve_labels()
+		local payload = helper_labels
+		if type(payload) == 'function' then payload = payload() end
+		if type(payload) ~= 'table' or next(payload) == nil then payload = resolved end
+		return payload
 	end
 
-	-- Reuse unified toast system with custom draw function and duration
-	self:toast(helper_labels, { draw_fn = draw_fn, duration = duration })
+	if self.helper_toast_clock then
+		clock.cancel(self.helper_toast_clock)
+		self.helper_toast_clock = nil
+	end
+
+	local effective_duration = duration
+	if effective_duration == nil then effective_duration = self.timeout end
+	if effective_duration == true then effective_duration = self.timeout end
+
+	if effective_duration ~= false and effective_duration ~= nil then
+		local total = effective_duration
+		self.helper_toast_clock = clock.run(function()
+			local elapsed = 0
+			while elapsed < total do
+				clock.sleep(1 / 15)
+				elapsed = elapsed + (1 / 15)
+			end
+			self:cancel_helper_toast()
+		end)
+	end
+
+	self.helper_layer = function() UI:draw_helper_toast(resolve_labels()) end
+
+	App.screen_dirty = true
 end
 
-function Mode:update_helper_toast(opts)
-	opts = opts or {}
+function Mode:update_helper_toast()
 	local item = self.menu and self.menu[self.cursor]
 	local merged = {}
 
@@ -437,13 +469,17 @@ function Mode:update_helper_toast(opts)
 						can_press = (item.on_press ~= nil)
 					end
 				end
-				if can_press then merged.press_fn_3 = 'next' end
+				if can_press then merged.press_fn_3 = '\u{25ba}' end
 			end
 		end
 	end
 
+	local duration = true
+
+	if self:has_pending_confirmation() or self.toast_clock then duration = false end
+
 	if next(merged) then
-		self:show_helper_toast(merged, opts.duration)
+		self:show_helper_toast(merged, duration)
 	else
 		self:cancel_helper_toast()
 	end
@@ -500,27 +536,63 @@ function Mode:refresh()
 end
 
 function Mode:draw()
-	for i, v in pairs(self.layer) do
-		self.layer[i](self)
+	for _, layer in ipairs(self.base_layers) do
+		layer(self)
+	end
+
+	for _, layer in ipairs(self.context_layers) do
+		layer(self)
+	end
+
+	for _, layer in ipairs(self.interrupt_layers) do
+		layer(self)
+	end
+
+	if self.helper_layer then self.helper_layer(self) end
+
+	if self.toast_layer then self.toast_layer(self) end
+end
+
+function Mode:_remove_layer(layers, target)
+	if not layers or not target then return end
+	for i = #layers, 1, -1 do
+		if layers[i] == target then
+			table.remove(layers, i)
+			break
+		end
 	end
 end
 
 -- Added cancel_context method to handle context cleanup
-function Mode:cancel_context()
+function Mode:cancel_context(opts)
+	opts = opts or {}
+	local should_pop = (opts.pop ~= false)
 	if self.context_clock then
 		clock.cancel(self.context_clock)
 		self.context_clock = nil
 	end
 
-	-- Remove the context screen from the layer
+	-- Remove the context screen from the appropriate layer collection
 	if self.context_layer then
-		for i, layer in ipairs(self.layer) do
-			if layer == self.context_layer then
-				table.remove(self.layer, i)
-				break
-			end
+		if self.context_layer_is_interrupt then
+			self:_remove_layer(self.interrupt_layers, self.context_layer)
+		else
+			self:_remove_layer(self.context_layers, self.context_layer)
 		end
-		self.context_layer = nil
+	end
+	self.context_layer = nil
+	self.context_layer_is_interrupt = false
+
+	-- If invoked for timeout/pop semantics, try restoring prior context from stack
+	if should_pop and self.context_stack and #self.context_stack > 0 then
+		local previous = table.remove(self.context_stack)
+		local prev_options = previous.options or {}
+		-- Ensure we restore prior cursor position
+		if previous.cursor ~= nil then prev_options.cursor = previous.cursor end
+		-- Defer to use_context to reapply prior context cleanly
+		-- Prevent recursive pop during this restoration
+		self:use_context(previous.context, previous.screen, prev_options)
+		return
 	end
 
 	-- restore default menu and screen if defined
@@ -540,8 +612,10 @@ function Mode:cancel_context()
 
 	if self.default_screen then
 		-- reapply default screen as context layer
+		self:_remove_layer(self.context_layers, self.default_screen)
 		self.context_layer = self.default_screen
-		table.insert(self.layer, self.context_layer)
+		self.context_layer_is_interrupt = false
+		table.insert(self.context_layers, self.context_layer)
 	end
 
 	self.context_helper_labels = self.default_helper_labels
@@ -552,10 +626,20 @@ function Mode:cancel_context()
 		self.disable_highlight = false
 	end
 
-	-- Reset the context functions to default
+	-- Reset the context functions to default App handlers
+	local restored = {}
 	for binding, func in pairs(self.default) do
-		self.context[binding] = func
+		restored[binding] = func
 	end
+
+	-- Reapply Default-mode baseline bindings (captured when set_default was used)
+	if self.default_bindings then
+		for binding, func in pairs(self.default_bindings) do
+			restored[binding] = func
+		end
+	end
+
+	self.context = restored
 
 	for i, c in pairs(self.components) do
 		local component = c:get_component()
@@ -572,15 +656,7 @@ function Mode:cancel_toast()
 		self.toast_clock = nil
 	end
 
-	if self.toast_layer then
-		for i, layer in ipairs(self.layer) do
-			if layer == self.toast_layer then
-				table.remove(self.layer, i)
-				break
-			end
-		end
-		self.toast_layer = nil
-	end
+	if self.toast_layer then self.toast_layer = nil end
 	App.screen_dirty = true
 end
 
@@ -628,6 +704,7 @@ function Mode:use_context(context, screen, option)
 	local append = false
 	local menu_context = context.menu
 	local cursor = 1
+	local interrupt = false
 	if type(option) == 'table' then
 		timeout = option.timeout
 		callback = option.callback
@@ -635,6 +712,7 @@ function Mode:use_context(context, screen, option)
 		set_default = option.set_default or false
 		append = option.append or false
 		cursor = option.cursor or 1
+		interrupt = option.interrupt == true
 		if timeout == true then timeout = self.timeout end
 	elseif type(option) == 'number' then
 		timeout = option
@@ -644,11 +722,55 @@ function Mode:use_context(context, screen, option)
 		if option then timeout = self.timeout end
 	end
 
-	-- Cancel any existing context
-	self:cancel_context()
+	-- Snapshot current active context (and its cursor) BEFORE we mutate any state,
+	-- so overlays can restore precisely.
+	local prior_snapshot = nil
+	if self.active_context_info then
+		prior_snapshot = {
+			context = self.active_context_info.context,
+			screen = self.active_context_info.screen,
+			options = self.active_context_info.options or {},
+			cursor = self.cursor,
+		}
+	end
 
-	-- Cancel any existing toast when a new context is started
-	self:cancel_toast()
+	-- If this is the same temporary overlay context already active, just
+	-- reset its timeout instead of recreating the context (which would
+	-- continually re-arm and prevent timeout from ever completing)
+	if timeout and self.active_context_info then
+		local is_same_context = (self.active_context_info.context == context) and (self.context_layer == screen)
+		if is_same_context then
+			self:reset_timeout()
+			-- ensure redraw and helper labels refresh when reusing same overlay
+			local duration = false
+			self:update_helper_toast({ duration = duration })
+			App.screen_dirty = true
+			return
+		end
+	end
+
+	-- For interrupt overlays, keep existing context/layers and leave active toast running
+	if not interrupt then
+		-- Cancel any existing context, but do not pop the previous one here
+		-- (we want to preserve it on the stack for overlays)
+		self:cancel_context({ pop = false })
+	end
+
+	-- Compose input routing table for this context:
+	-- - For interrupt overlays: start from current context so underlying controls still work
+	-- - For normal contexts: reset to App defaults; specific bindings will override
+	if interrupt then
+		local composed = {}
+		for k, v in pairs(self.context or {}) do
+			composed[k] = v
+		end
+		self.context = composed
+	else
+		self.context = {}
+		for binding, func in pairs(self.default) do
+			self.context[binding] = func
+		end
+	end
 
 	-- Apply menu context to this mode
 	if menu_context then
@@ -661,7 +783,8 @@ function Mode:use_context(context, screen, option)
 		for _, menu_item in ipairs(menu_context) do
 			table.insert(self.menu, menu_item)
 		end
-		self.cursor = cursor
+		-- For interrupt overlays, do not change the cursor selection
+		if not interrupt then self.cursor = cursor end
 		self.cursor_positions = #self.menu
 	end
 
@@ -674,6 +797,13 @@ function Mode:use_context(context, screen, option)
 		self.default_screen = screen
 		self.default_disable_highlight = context.disable_highlight
 		self.default_helper_labels = context.default_helper_labels
+
+		-- Capture baseline function bindings from this context so we can fully
+		-- restore Default-mode behavior (enc1, press_fn_3, etc.) after overlays
+		self.default_bindings = {}
+		for key, value in pairs(context) do
+			if type(value) == 'function' then self.default_bindings[key] = value end
+		end
 	end
 
 	if context.disable_highlight ~= nil then
@@ -684,52 +814,94 @@ function Mode:use_context(context, screen, option)
 
 	-- Insert the context screen and keep a reference to it
 	self.context_layer = screen
-	table.insert(self.layer, screen)
+	self.context_layer_is_interrupt = interrupt
+	if interrupt then
+		self.interrupt_layers = self.interrupt_layers or {}
+		self:_remove_layer(self.interrupt_layers, screen)
+		table.insert(self.interrupt_layers, screen)
+	else
+		self.context_layers = {}
+		table.insert(self.context_layers, screen)
+	end
 
 	self.context_helper_labels = context.default_helper_labels or self.default_helper_labels
-	local helper_duration = App.alt_down and false or App.helper_toast_timeout
+
+	local helper_duration = false
 	self:update_helper_toast({ duration = helper_duration })
 
 	App.screen_dirty = true
 
 	if timeout then self:context_timeout(timeout, callback) end
 
+	-- Only provide a default back (K2) handler for temporary overlays.
+	if timeout and not context['press_fn_2'] then context['press_fn_2'] = function()
+		self:cancel_context()
+		if callback then callback() end
+	end end
+
 	for binding, func in pairs(context) do
 		if func and type(func) == 'function' then -- Ensure function exists and is callable
 			self.context[binding] = function(a, b)
 				func(a, b)
-				if timeout then self:context_timeout(timeout, callback) end
+				if timeout then self:reset_timeout() end
 			end
 		end
 	end
+
+	-- Track the active context so we can push/pop around temporary overlays
+	local applied_options = {}
+	if type(option) == 'table' then
+		applied_options = option
+	else
+		applied_options = {
+			timeout = timeout,
+			callback = callback,
+			menu_override = menu_override,
+			set_default = set_default,
+			append = append,
+		}
+	end
+	-- Always store the current cursor with the context snapshot
+	applied_options.cursor = self.cursor
+
+	-- If this context is a temporary overlay (timeout set), push the previous active
+	-- context onto a stack so we can restore it on timeout, using the cursor at time of overlay
+	if timeout and prior_snapshot then table.insert(self.context_stack, prior_snapshot) end
+	self.active_context_info = { context = context, screen = screen, options = applied_options, cursor = self.cursor }
 end
 
-function Mode:toast(toast_text, draw_or_opts)
-	local draw_fn = function(t) UI:draw_toast(t) end
+function Mode:toast(toast_text, draw_or_opts, opts)
+	local draw_fn = function(t, d) UI:draw_toast(t, d) end
 	local duration = self.timeout
 
 	if type(draw_or_opts) == 'function' then
 		draw_fn = draw_or_opts
+		if opts and opts.timeout ~= nil then duration = opts.timeout end
 	elseif type(draw_or_opts) == 'table' then
 		if type(draw_or_opts.draw_fn) == 'function' then draw_fn = draw_or_opts.draw_fn end
-		if draw_or_opts.duration ~= nil then duration = draw_or_opts.duration end
+		if draw_or_opts.timeout ~= nil then duration = draw_or_opts.timeout end
 	end
 
-	local function toast_screen() draw_fn(toast_text) end
+	self.completion = 0
+	local function toast_screen()
+		local completion = self.completion
+		draw_fn(toast_text, completion)
+	end
 
 	-- Cancel any existing toast
 	self:cancel_toast()
 
 	-- Insert the new toast screen and keep a reference to it
 	self.toast_layer = toast_screen
-	table.insert(self.layer, toast_screen)
-
 	if duration ~= false then
+		if duration == true then duration = self.timeout end
 		local count = 0
 		self.toast_clock = clock.run(function()
-			while count < (duration or self.timeout) do
+			while count < duration do
 				clock.sleep(1 / 15)
 				count = count + (1 / 15)
+				self.completion = count / duration
+				App.screen_dirty = true
 			end
 			-- Remove the toast layer
 			self:cancel_toast()
@@ -747,10 +919,10 @@ end
 
 -- Methods
 function Mode:register_screens()
-	self.layer = { App.default.screen }
+	self.base_layers = { App.default.screen }
 
 	-- Register screen functions
-	if self.screen and type(self.screen) == 'function' then table.insert(self.layer, self.screen) end
+	if self.screen and type(self.screen) == 'function' then table.insert(self.base_layers, self.screen) end
 end
 
 function Mode:enable()
@@ -788,7 +960,7 @@ end
 
 function Mode:disable()
 	-- Cancel any active context or toast
-	self:cancel_context()
+	self:cancel_context({ pop = false })
 	self:cancel_toast()
 	self.enabled = false
 	-- reset alt
@@ -810,6 +982,16 @@ function Mode:disable()
 
 	self.event_listeners = {}
 	App.screen_dirty = true
+end
+
+function Mode:has_active_menu()
+	local indices = self:get_visible_indices()
+	if #indices == 0 then return false end
+	for _, idx in ipairs(indices) do
+		local it = self.menu[idx]
+		if it and (it.enc2 or it.enc3 or it.is_editable or it.has_press) then return true end
+	end
+	return false
 end
 
 return Mode

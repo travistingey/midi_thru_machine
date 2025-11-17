@@ -493,6 +493,15 @@ function Registry.menu.make_combo(left_id, right_id, opts)
 		row.has_press = true
 	end
 
+	-- Alt and long bindings
+	row.alt_enc1 = opts.alt_enc1 or nil
+	row.alt_enc2 = opts.alt_enc2 or nil
+	row.alt_enc3 = opts.alt_enc3 or nil
+	row.alt_fn_3 = opts.alt_fn_3 or nil
+	row.alt_fn_2 = opts.alt_fn_2 or nil
+	row.long_fn_3 = opts.long_fn_3 or nil
+	row.long_fn_2 = opts.long_fn_2 or nil
+
 	row.is_editable = (row.enc2 ~= nil or row.enc3 ~= nil)
 
 	return row

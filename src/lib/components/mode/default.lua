@@ -49,14 +49,14 @@ function Default:output_menu()
 	local device_item = Registry.menu.make_item('track_' .. tid .. '_device_out', {
 		label_fn = function() return 'DEVICE' end,
 		helper_labels = {
-			enc3 = 'Select device',
+			enc3 = 'select device',
 		},
 	})
 
 	local midi_out_item = Registry.menu.make_item('track_' .. tid .. '_midi_out', {
 		label_fn = function() return 'MIDI OUT' end,
 		helper_labels = {
-			enc3 = 'Select port',
+			enc3 = 'select channel',
 		},
 		can_show = function() return App.track[tid].output_type ~= 'crow' end,
 	})
@@ -64,7 +64,7 @@ function Default:output_menu()
 	local crow_out_item = Registry.menu.make_item('track_' .. tid .. '_crow_out', {
 		label_fn = function() return 'CROW OUT' end,
 		helper_labels = {
-			enc3 = 'Select output',
+			enc3 = 'select output',
 		},
 		can_show = function() return App.track[tid].output_type == 'crow' end,
 	})
@@ -72,7 +72,7 @@ function Default:output_menu()
 	local slew_item = Registry.menu.make_item('track_' .. tid .. '_slew', {
 		label_fn = function() return 'SLEW' end,
 		helper_labels = {
-			enc3 = 'Adjust slew',
+			enc3 = 'adjust slew',
 		},
 		can_show = function() return App.track[tid].output_type == 'crow' end,
 	})
@@ -95,7 +95,7 @@ function Default:input_settings_menu()
 		Registry.menu.make_item('track_' .. tid .. '_device_in', {
 			label_fn = function() return 'DEVICE' end,
 			helper_labels = {
-				enc3 = 'Select device',
+				enc3 = 'select device',
 			},
 		})
 	)
@@ -105,7 +105,7 @@ function Default:input_settings_menu()
 		Registry.menu.make_item('track_' .. tid .. '_midi_in', {
 			label_fn = function() return 'MIDI IN' end,
 			helper_labels = {
-				enc3 = 'Select channel',
+				enc3 = 'select channel',
 			},
 		})
 	)
@@ -115,7 +115,7 @@ function Default:input_settings_menu()
 		Registry.menu.make_item('track_' .. tid .. '_voice', {
 			label_fn = function() return 'VOICE' end,
 			helper_labels = {
-				enc3 = 'Select voice',
+				enc3 = 'select voice',
 			},
 		})
 	)
@@ -198,8 +198,12 @@ This component is intended to be registered as a mode component within the appli
 function Default:sub_menu(menu, config)
 	config = config or {}
 	local previous = self.current
+	local prev_cursor = self.mode and self.mode.cursor or 1
 
 	local setPrevious = function()
+		-- Restore prior cursor position when backing out of submenu
+		previous.options = previous.options or {}
+		previous.options.cursor = prev_cursor
 		self.current = previous
 		self.mode:use_context(previous.context, previous.screen, previous.options)
 	end
@@ -277,19 +281,18 @@ function Default:track_menu()
 		icon = '\u{2192}',
 		requires_confirmation = true,
 		has_submenu = true,
-		left_label_fn = function()
-			local val = params:get('track_' .. id .. '_device_in')
-			return (App.device_manager.midi_device_abbrs and App.device_manager.midi_device_abbrs[val]) or 'None'
-		end,
+		left_label_fn = function() return Registry.menu.format_value('track_' .. id .. '_device_in') end,
 		on_press = function()
 			self:sub_menu(self:input_settings_menu(), {
-				status = { icon = id, label = 'INPUT' },
+				status = { icon = id, label = 'Input' },
 				screen = self:submenu_screen(),
 			})
 		end,
+		alt_fn_3 = function() print('alt fn 3') end,
 		helper_labels = {
 			enc2 = 'device',
 			enc3 = 'ch',
+			alt_fn_3 = 'swap',
 		},
 	})
 
@@ -297,14 +300,7 @@ function Default:track_menu()
 		icon = '\u{2190}',
 		requires_confirmation = true,
 		has_submenu = true,
-		left_label_fn = function()
-			if App.track[id].output_type == 'crow' then
-				return 'Crow'
-			else
-				local val = params:get('track_' .. id .. '_device_out')
-				return (App.device_manager.midi_device_abbrs and App.device_manager.midi_device_abbrs[val]) or (App.track[id].output_device and App.track[id].output_device.abbr) or 'None'
-			end
-		end,
+		left_label_fn = function() return Registry.menu.format_value('track_' .. id .. '_device_out') end,
 		right_value_fn = function()
 			if App.track[id].output_type == 'crow' then
 				return Registry.menu.format_value('track_' .. id .. '_crow_out')
@@ -336,7 +332,7 @@ function Default:track_menu()
 			}) end
 		end,
 		helper_labels = {
-			enc3 = 'type',
+			enc3 = 'select',
 		},
 	})
 
@@ -356,12 +352,12 @@ function Default:track_menu()
 			local sid = params:get('track_' .. id .. '_scale_select')
 
 			if sid > 0 then self:sub_menu(self:scale_menu(), {
-				status = { icon = '\u{266a}', label = 'Scale ' .. sid },
+				status = { icon = '\u{266a}', label = 'scale ' .. sid },
 				screen = self:submenu_screen(),
 			}) end
 		end,
 		helper_labels = {
-			enc3 = 'Scale',
+			enc3 = 'select',
 		},
 	})
 

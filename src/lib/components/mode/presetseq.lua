@@ -45,23 +45,15 @@ function PresetSeq:set(o)
 
 	self.grid:refresh()
 
-	self.test_value = 1
-
 	self.context = {
-		enc1 = function(d)
-			local auto = self:get_component()
-			self.selected_lane_index = (self.selected_lane_index + d - 1) % #self.lanes + 1
-			self.selected_lane = self.lanes[self.selected_lane_index]
-			self:set_grid(auto)
-			self.mode:reset_timeout()
-			App.screen_dirty = true
-		end,
+		press_fn_3 = function() print('press_fn_3') end,
 	}
 
-	self.screen = function()
-		local label = self.selected_lane
-		if self.selected_lane == 'track' then label = 'preset' end
-		UI:draw_tag(1, 36, label, self.last_event)
+	self.screen = function(text, completion)
+		local has_menu = false
+		if self.mode then has_menu = self.mode:has_active_menu() end
+
+		if not has_menu then UI:draw_tag(1, 36, 'step', self.last_event) end
 	end
 end
 
@@ -164,7 +156,11 @@ function PresetSeq:grid_event(component, data)
 
 	-- Overlay this context temporarily; rely on Mode:cancel_context() (triggered by timeout)
 	-- to restore the baseline default context/screen
-	self.mode:use_context(self.context, self.screen, { timeout = true })
+	if self.mode:has_active_menu() then
+		self.mode:toast(self.last_event, self.screen, { timeout = 2 })
+	else
+		self.mode:use_context(self.context, self.screen, { timeout = true, interrupt = true })
+	end
 	self.last_event = self.grid:grid_to_index(data) + self.step_offset
 
 	if data.type == 'pad_long' and data.pad_down and #data.pad_down == 1 then

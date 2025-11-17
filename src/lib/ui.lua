@@ -162,16 +162,20 @@ function UI:draw_intervals(x, y, major)
 	end
 end
 
-function UI:draw_tag(x, y, label, value, style)
+function UI:draw_tag(x, y, label, value, opts)
+	opts = opts or {}
 	local default_style = { color = 15, spacing = 10, stroke = 1, label_font = 1, value_font = 33 }
-	style = self:merge_style(default_style, style)
+	local style = opts.style and self:merge_style(default_style, opts.style) or default_style
+	local completion = opts.completion or 0.5
+
 	local x_pos = x
 	local y_pos = y - style.stroke
 	local width = 30
 	local height = 30 - style.stroke
+	local level = self:out_ease(completion)
 
 	-- rectangle
-	screen.level(style.color)
+	screen.level(level)
 	screen.rect(x_pos, y_pos, width, height)
 	screen.aa(0)
 	screen.line_join('square')
@@ -191,10 +195,83 @@ function UI:draw_tag(x, y, label, value, style)
 	screen.fill()
 end
 
+function UI:draw_tag_small(x, y, label, value, opts)
+	UI:set_font(1)
+	opts = opts or {}
+	local completion = opts.completion or 0.5
+	local level = self:out_ease(completion)
+	screen.aa(0)
+	screen.line_join('square')
+	screen.line_width(1)
+
+	label = label or App.track[App.current_track].name
+	value = value or App.current_track
+
+	-- background
+	screen.level(0)
+	screen.rect(x, y, 52, 10)
+	screen.fill()
+
+	screen.level(level)
+	local width = 52
+	local value_text = value and tostring(value) or ''
+	local text_width = screen.text_extents(value_text) or 0
+	local padded_width = math.ceil(text_width + 4)
+	local min_width = 9
+	local rect_width = min_width
+	if padded_width > 10 then rect_width = padded_width end
+	if rect_width < min_width then rect_width = min_width end
+
+	local value_center_x = (x + width) - (rect_width / 2) - 1
+	local rect_x = math.floor(value_center_x - rect_width / 2 + 0.5)
+
+	screen.rect(rect_x, y + 1, rect_width, 8)
+	screen.stroke()
+
+	-- text
+
+	screen.move(value_center_x, y + 7)
+	screen.text_center(value_text)
+	screen.move(rect_x - 4, y + 7)
+	screen.text_right(label)
+	screen.fill()
+end
+
+function UI:in_out_ease(completion)
+	local value = 0
+	if completion <= 0.125 then
+		local c = completion / 0.125
+		value = math.floor(c * 15)
+	elseif completion >= 0.875 then
+		local c = (1 - completion) / 0.125
+		value = math.floor(c * 15)
+	else
+		value = 15
+	end
+	return value
+end
+
+function UI:out_ease(completion)
+	local value = 0
+
+	if completion >= 0.75 then
+		local c = (1 - completion) / 0.25
+		value = math.floor(c * 15)
+	else
+		value = 15
+	end
+	return value
+end
+
 function UI:draw_toast(toast_text)
+	local beat_level = 5
+	if App.playing then beat_level = 15 - math.floor((App.tick % App.ppqn) / App.ppqn * 16) end
 	screen.level(15)
-	self:set_font(33)
-	screen.move(64, 32)
+	screen.rect(76, 0, 52, 9)
+	screen.fill()
+	screen.level(0)
+	self:set_font(1)
+	screen.move(103, 7)
 	screen.text_center(toast_text)
 	screen.fill()
 end
@@ -203,7 +280,6 @@ function UI:draw_menu(x, y, menu, cursor, opts)
 	menu = menu or {}
 	cursor = cursor or 1
 	opts = opts or {}
-	local default_disable_highlight = opts.disable_highlight
 
 	local visible_indices = {}
 	for index, item in ipairs(menu) do
@@ -216,6 +292,19 @@ function UI:draw_menu(x, y, menu, cursor, opts)
 			end
 		end
 		if show ~= false then table.insert(visible_indices, index) end
+	end
+
+	-- Determine if any visible item is selectable (editable or pressable)
+	local has_any_selectable = false
+	for _, idx in ipairs(visible_indices) do
+		local it = menu[idx]
+		if it then
+			local selectable = (it.enc2 ~= nil) or (it.enc3 ~= nil) or (it.is_editable == true) or (it.has_press == true)
+			if selectable then
+				has_any_selectable = true
+				break
+			end
+		end
 	end
 
 	local total_visible = #visible_indices
@@ -271,9 +360,10 @@ function UI:draw_menu(x, y, menu, cursor, opts)
 
 			local visual_index = pos - start_pos + 1
 			self.current_item = menu_item
-			local item_disable = menu_item.disable_highlight
-			if item_disable == nil then item_disable = default_disable_highlight end
-			self:draw_menu_item(x, y + offset_y + (visual_index - 1) * 10, label, value, icon, is_active, style, item_disable)
+			-- Disable highlight when the item itself is not selectable or when there are no selectable items at all
+			local item_selectable = (menu_item.enc2 ~= nil) or (menu_item.enc3 ~= nil) or (menu_item.is_editable == true) or (menu_item.has_press == true)
+			local disable_highlight = (not item_selectable) or not has_any_selectable
+			self:draw_menu_item(x, y + offset_y + (visual_index - 1) * 10, label, value, icon, is_active, style, disable_highlight)
 			self.current_item = nil
 		end
 	end
@@ -302,15 +392,15 @@ function UI:draw_menu_item(x, y, label, value, icon, is_active, style, disable_h
 
 	self:set_font(style.font)
 
-	-- Precise underlines using 1px rects
+	-- Active highlight
 	if is_active and self.current_item and not disable_highlight then
-		screen.level(1)
-		screen.rect(x, y - 8, style.width, 10)
+		screen.level(0)
+		screen.rect(x, y - 8, style.width, 11)
 		screen.fill()
 		-- Underline label when this is a combo item (enc2 available)
 		if self.current_item.enc2 then
 			local label_x = x + icon_offset
-			screen.level(5)
+			screen.level(8)
 			screen.rect(label_x, y + 1, label_w, 1)
 			screen.fill()
 		end
@@ -318,7 +408,7 @@ function UI:draw_menu_item(x, y, label, value, icon, is_active, style, disable_h
 		-- Underline value when editable (enc3 on item)
 		if self.current_item.enc3 or self.current_item.is_editable then
 			local value_x_left = x + entry_width - value_w
-			screen.level(5)
+			screen.level(8)
 			screen.rect(value_x_left, y + 1, value_w, 1)
 			screen.fill()
 		end
@@ -339,17 +429,17 @@ function UI:draw_menu_item(x, y, label, value, icon, is_active, style, disable_h
 
 	-- Adjust color based on active state
 	if is_active then
-		screen.level(style.color) -- Bright white for active item
+		screen.level(15) -- Bright white for active item
 	else
 		screen.level(style.inactive_color)
 	end
-
+	screen.level(15)
 	screen.move(x + icon_offset, y)
 	screen.text(label)
 
 	screen.move(x + entry_width, y)
 	screen.text_right(value)
-
+	screen.fill()
 	-- Optional right-side press icon when item supports on_press and is enabled to press
 	local current_item = self.current_item
 	local has_pending = current_item and current_item.pending_confirmation
@@ -423,7 +513,7 @@ function UI:draw_tempo()
 	screen.fill()
 
 	screen.move(102, 28)
-	self:set_font(34)
+	self:set_font(37)
 	screen.level(0)
 	screen.text_center(math.floor(clock.get_tempo() + 0.5))
 	screen.fill()
@@ -519,17 +609,17 @@ function UI:draw_helper_toast(helper_labels, y)
 	screen.move(0, pos_y + height - 2)
 	if current and current.pending_confirmation then
 		screen.text('x')
-	elseif helper_labels.alt_press_fn_2 and App.alt_down then
-		screen.text(helper_labels.alt_press_fn_2)
+	elseif helper_labels.alt_fn_2 and App.alt_down then
+		screen.text(helper_labels.alt_fn_2)
 	elseif helper_labels.press_fn_2 then
 		screen.text(helper_labels.press_fn_2)
 	end
 
 	screen.move(30, pos_y + height - 2)
 	if current and current.pending_confirmation then
-		screen.text_center('confirm')
-	elseif helper_labels.alt_press_fn_3 and App.alt_down then
-		screen.text_center(helper_labels.alt_press_fn_3)
+		screen.text_center('\u{2713}')
+	elseif helper_labels.alt_fn_3 and App.alt_down then
+		screen.text_center(helper_labels.alt_fn_3)
 	elseif helper_labels.press_fn_3 then
 		screen.text_center(helper_labels.press_fn_3)
 	end
