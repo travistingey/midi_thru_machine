@@ -163,7 +163,7 @@ function App:init(o)
 	self.device_manager:register_params()
 	-- Create the tracks
 	params:add_separator('tracks', 'Tracks')
-	for i = 1, 5 do
+	for i = 1, 8 do
 		self.track[i] = Track:new({ id = i })
 	end
 

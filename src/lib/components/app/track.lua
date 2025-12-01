@@ -76,7 +76,7 @@ function Track:set(o)
 
 	local track = 'track_' .. self.id .. '_'
 
-	Registry.add('add_group', 'Track ' .. self.id, 23)
+	Registry.add('add_group', 'Track ' .. self.id, 24)
 
 	Registry.add('add_text', track .. 'name', 'Name', self.name)
 	Registry.set_action(track .. 'name', function(d) self.name = d end)
@@ -96,8 +96,13 @@ function Track:set(o)
 	end
 
 	-- Device In/Out
-	local midi_devices = App.device_manager.midi_device_names
-	local midi_abbrs = App.device_manager.midi_device_abbrs
+	local midi_devices = {}
+	local midi_abbrs = {}
+	local port_count = math.max(App.device_manager.midi_port_count or 0, #App.device_manager.midi_device_names)
+	for i = 1, port_count do
+		midi_devices[i] = App.device_manager.midi_device_names[i] or 'None'
+		midi_abbrs[i] = App.device_manager.midi_device_abbrs[i] or midi_devices[i]
+	end
 	-- Extend device_out options to include Crow as a selectable output device
 	local output_devices = {}
 	for i, name in ipairs(midi_devices) do
@@ -110,12 +115,18 @@ function Track:set(o)
 	Registry.add('add_option', track .. 'device_in', 'Device In', midi_abbrs)
 
 	Registry.set_action(track .. 'device_in', function(d)
+		local new_device = App.device_manager:get(d)
+		if not new_device or not new_device.add_trigger then
+			print('Device In set to empty slot ' .. d .. '; ignoring')
+			return
+		end
+
 		self.device_in = d
 
 		-- Remove old input device listeners
 		if self.input_device then self:remove_trigger() end
 
-		self.input_device = App.device_manager:get(d)
+		self.input_device = new_device
 		self:add_trigger()
 		self:load_component(Input)
 		self:enable()
@@ -130,6 +141,12 @@ function Track:set(o)
 	output_devices_abbr[#output_devices_abbr + 1] = 'Crow'
 	Registry.add('add_option', track .. 'device_out', 'Device Out', output_devices_abbr, 2)
 	Registry.set_action(track .. 'device_out', function(d)
+		local new_device = App.device_manager:get(d)
+		if output_devices[d] ~= 'Crow' and (not new_device or not new_device.send) then
+			print('Device Out set to empty slot ' .. d .. '; ignoring')
+			return
+		end
+
 		self.device_out = d
 		if output_devices[d] == 'Crow' then
 			-- Switch to Crow output type
@@ -214,6 +231,19 @@ function Track:set(o)
 		self:enable()
 	end)
 
+	Registry.add('add_trigger', track .. 'device_swap_trigger', 'Swap Devices')
+	Registry.set_action(track .. 'device_swap_trigger', function()
+		local in_device = self.input_device.id
+		local in_channel = self.midi_in
+		local out_device = self.output_device.id
+		local out_channel = self.midi_out
+		print(in_device, in_channel, out_device, out_channel)
+		Registry.set(track .. 'device_in', out_device, 'device_in_select')
+		Registry.set(track .. 'midi_in', out_channel, 'midi_in_select')
+		Registry.set(track .. 'device_out', in_device, 'device_out_select')
+		Registry.set(track .. 'midi_out', in_channel, 'midi_out_select')
+	end)
+
 	-- -- MIDI Thru
 	-- self.midi_thru = o.midi_thru or false
 	-- Registry.add('add_binary', track .. 'midi_thru','MIDI Thru','toggle', 0)
@@ -225,11 +255,14 @@ function Track:set(o)
 	Registry.set_action(track .. 'mixer', function(d)
 		if App.flags.state.initializing then return end
 
-		if d == 0 then
-			App.device_manager.mixer:remove_track(self)
-		else
-			App.device_manager.mixer:add_track(self)
+		local mixer = App.device_manager and App.device_manager.mixer
+		if not mixer then
+			-- Mixer device not available (e.g. device list changed or no LCXL selected)
+			if d > 0 then print('No mixer device available; ignoring mixer toggle for track ' .. self.id) end
+			return
 		end
+
+		if d == 0 then mixer:remove_track(self) else mixer:add_track(self) end
 	end)
 
 	-- Arpeggio

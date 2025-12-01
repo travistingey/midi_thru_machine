@@ -106,31 +106,45 @@ function Track:set(o)
 	end
 
 	-- Device In/Out
-	local midi_devices =  App.device_manager.midi_device_names
+	local midi_devices = {}
+	for i = 1, App.device_manager.midi_port_count or #App.device_manager.midi_device_names do
+		midi_devices[i] = App.device_manager.midi_device_names[i] or 'None'
+	end
 
 	self.device_in = 1
 	params:add_option(track .. "device_in", "Device In", midi_devices)
 	
 	params:set_action(track .. 'device_in',function(d)
 
-		self.device_in = d
+		local new_device = App.device_manager:get(d)
+		if not new_device or not new_device.add_trigger then
+			print('Device In set to empty slot ' .. d .. '; ignoring')
+			return
+		end
 
 		-- Remove old input device listeners
 		if self.input_device then
 			self:remove_trigger()
 		end
 
-		self.input_device = App.device_manager:get(d)
+		self.device_in = d
+		self.input_device = new_device
 		self:add_trigger()
 		self:load_component(Input)
 		self:enable()
 	end)
-	
-	self.device_out = d
+
+	self.device_out = self.device_out or 1
 	params:add_option(track .. "device_out", "Device Out",midi_devices,2)
 	params:set_action(track .. 'device_out',function(d)
+		local new_device = App.device_manager:get(d)
+		if not new_device or not new_device.send then
+			print('Device Out set to empty slot ' .. d .. '; ignoring')
+			return
+		end
+
 		self.device_out = d
-		self.output_device = App.device_manager:get(d)
+		self.output_device = new_device
 		self:load_component(Output)
 		self:enable()
 	end)

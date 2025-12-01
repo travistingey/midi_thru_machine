@@ -324,13 +324,15 @@ function DeviceManager:add(props, methods)
     props = props or {}
     methods = methods or Device
 
+    local id = props.id or (self.next_device_id + 1)
+
     -- Initialize device properties
     local new_device = setmetatable({
         type = props.type or 'none',
         name = props.name or 'None',
         abbr = props.abbr or '',
         manager = self,
-        id = props.id or #self.devices + 1,
+        id = id,
         device = props.device or {
             send = function() end,
             start = function() end,
@@ -342,7 +344,8 @@ function DeviceManager:add(props, methods)
     }, { __index = methods })
 
     -- Add the new device to the devices list
-    table.insert(self.devices, new_device)
+    self.devices[id] = new_device
+    if id > self.next_device_id then self.next_device_id = id end
 
     -- Assign the trimmed name directly based on device.id
     self.device_names[new_device.id] = new_device.name
@@ -366,6 +369,7 @@ function DeviceManager:register_mixer_device(port)
     name = mixer_device.name,
     abbr = 'LCXL',
     port = port,
+    id = port, -- align mixer id to port for consistent lookup
     device = mixer_device,
     trimmed_name = trimmed_name,
   }
@@ -391,9 +395,12 @@ function DeviceManager:new()
     d.virtual = {}
     d.crow = {input = {}, output = {}}
     d.event_listeners = {}
+    d.next_device_id = 0
+    d.midi_port_count = #midi.vports
 
     d.device_names = {} -- Indexed by device.id
     d.midi_device_names = {}
+    d.midi_device_abbrs = {}
     
     print('Registering Devices:')
     -- Register MIDI devices
@@ -420,7 +427,12 @@ function DeviceManager:new()
 end
 
 function DeviceManager:register_params()
-  local midi_devices = self.midi_device_names
+  -- Build contiguous option lists aligned to physical ports
+  local midi_devices = {}
+  for i = 1, self.midi_port_count do
+    midi_devices[i] = self.midi_device_names[i] or 'None'
+  end
+
   params:add_group('DEVICES', 4)
   params:add_option('clock_in', 'Clock Input', midi_devices)
   params:add_option('mixer', 'Mixer', midi_devices)
@@ -543,27 +555,29 @@ function DeviceManager:register_midi_device(port)
     
 
     if not midi_device or midi_device.name == 'none' then
+        -- Ensure the option list stays aligned to physical ports
+        self.midi_device_names[port] = 'None'
+        self.midi_device_abbrs[port] = 'NONE'
+        self.device_names[port] = 'None'
         return -- Skip if no MIDI device is connected
     end
 
     print("PORT " .. port .. "\t\t" .. midi_device.name)
 
     local trimmed_name = util.trim_string_to_width(midi_device.name, 70)
+    local abbr = string.gsub(string.upper(string.sub(midi_device.name, 1,8)), "%s+$", "")
 
-    table.insert( -- register its name:
-		  self.midi_device_names, -- table to insert to
-		  trimmed_name
-		)
-    table.insert( -- register its name:
-        self.device_names, -- table to insert to
-        trimmed_name
-    )
+    -- register names at explicit port index to avoid shifting when ports are empty
+    self.midi_device_names[port] = trimmed_name
+    self.midi_device_abbrs[port] = abbr
+    self.device_names[port] = trimmed_name
 
     local props = {
         type = 'midi',
         name = midi_device.name,
-        abbr = string.gsub(string.upper(string.sub(midi_device.name, 1,8)), "%s+$", ""),
+        abbr = abbr,
         port = port,
+        id = port, -- keep device ids aligned to MIDI port numbers
         device = midi_device,
         trimmed_name = trimmed_name,
     }
@@ -618,7 +632,8 @@ function DeviceManager:register_virtual_device()
         type = 'virtual',
         name = 'Virtual Device',
         abbr = 'VIRTUAL',
-        trimmed_name = 'Virtual'
+        trimmed_name = 'Virtual',
+        id = (self.midi_port_count or 0) + 1,
     }
 
     local device = self:add(props, VirtualDevice)
@@ -638,6 +653,7 @@ function DeviceManager:register_crow_device()
         type = 'crow',
         name = 'Crow',
         device = crow,
+        id = (self.midi_port_count or 0) + 2,
     }
 
     local crow_device = self:add(props,CrowDevice)
