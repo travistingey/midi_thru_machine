@@ -59,6 +59,8 @@ function App:init(o)
 	self.recording = false
 	self.current_mode = 1
 	self.current_track = 1
+	self.key_held = false
+	self.key_held_button = nil
 
 	-- Presets (for tracks and scales)
 	self.preset = {}
@@ -104,11 +106,12 @@ function App:init(o)
 
 	-- Default function bindings
 	self.default = {
-		enc1 = function(d) self.mode[self.current_mode]:set_cursor(d) end,
-		enc2 = function(d) self.mode[self.current_mode]:use_menu('enc2', d) end,
+		-- Scroll with enc2; use enc1 for primary menu actions
+		enc1 = function(d) self.mode[self.current_mode]:use_menu('enc2', d) end,
+		enc2 = function(d) self.mode[self.current_mode]:set_cursor(d) end,
 		enc3 = function(d) self.mode[self.current_mode]:use_menu('enc3', d) end,
-		alt_enc1 = function(d) self.mode[self.current_mode]:use_menu('alt_enc1', d) end,
-		alt_enc2 = function(d) self.mode[self.current_mode]:use_menu('alt_enc2', d) end,
+		alt_enc1 = function(d) self.mode[self.current_mode]:use_menu('alt_enc2', d) end,
+		alt_enc2 = function(d) self.mode[self.current_mode]:use_menu('alt_enc1', d) end,
 		alt_enc3 = function(d) self.mode[self.current_mode]:use_menu('alt_enc3', d) end,
 		long_fn_2 = function() self.mode[self.current_mode]:use_menu('long_fn_2') end,
 		long_fn_3 = function()
@@ -351,6 +354,9 @@ end
 function App:handle_key(k, z)
 	local mode = self.mode[self.current_mode]
 	local context = mode.context
+	local prev_key_held = self.key_held
+	self.key_held = (z == 1)
+	self.key_held_button = (z == 1) and k or nil
 	if k == 1 then
 		local was_alt = self.alt_down
 		self.alt_down = (z == 1)
@@ -387,6 +393,7 @@ function App:handle_key(k, z)
 			end
 		end
 	end
+	if self.key_held ~= prev_key_held then self.screen_dirty = true end
 	mode:reset_timeout()
 end
 

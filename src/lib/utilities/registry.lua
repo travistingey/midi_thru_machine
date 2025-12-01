@@ -388,6 +388,7 @@ function Registry.menu.make_item(id, opts)
 
 	local item = {
 		icon = opts.icon,
+		disable = opts.disable,
 		label = opts.label_fn or opts.label or function() return Registry.menu.label(id) end,
 		value = opts.value_fn or opts.value or function() return Registry.menu.format_value(id) end,
 		style = opts.style,
@@ -413,11 +414,18 @@ function Registry.menu.make_item(id, opts)
 	elseif not opts.disable then
 		item.enc3 = function(d) Registry.menu.bump(id, d, opts.step, item.on_set, item) end
 	end
+	-- Alias enc1 to left edit (for UI/controls expecting enc1)
+	if item.enc2 and not item.enc1 then item.enc1 = item.enc2 end
 
 	if opts.on_press then
 		item.press_fn_3 = opts.on_press
 		item.has_press = true
 	end
+
+	-- Default helper labels: add encoder arrows for enc1/enc3 if present
+	if item.helper_labels_default == nil then item.helper_labels_default = {} end
+	if item.enc1 and not item.helper_labels_default.enc1 then item.helper_labels_default.enc1 = '\u{25c0}\u{25b6}' end
+	if item.enc3 and not item.helper_labels_default.enc3 then item.helper_labels_default.enc3 = '\u{25c0}\u{25b6}' end
 
 	item.is_editable = (not opts.disable) and (item.enc2 ~= nil or item.enc3 ~= nil)
 
@@ -429,6 +437,7 @@ function Registry.menu.make_combo(left_id, right_id, opts)
 	opts = opts or {}
 	local row = {
 		icon = opts.icon,
+		disable = opts.disable,
 		label = opts.left_label_fn or function() return Registry.menu.format_value(left_id) end,
 		value = opts.right_value_fn or function() return Registry.menu.format_value(right_id) end,
 		on_set = opts.on_set,
@@ -492,6 +501,14 @@ function Registry.menu.make_combo(left_id, right_id, opts)
 		row.press_fn_3 = opts.on_press
 		row.has_press = true
 	end
+	-- Alias enc1/alt_enc1 for left side to keep UI consistent
+	if row.enc2 and not row.enc1 then row.enc1 = row.enc2 end
+	if row.alt_enc2 and not row.alt_enc1 then row.alt_enc1 = row.alt_enc2 end
+
+	-- Default helper labels: add encoder arrows for enc1/enc3 if present
+	if row.helper_labels_default == nil then row.helper_labels_default = {} end
+	if row.enc1 and not row.helper_labels_default.enc1 then row.helper_labels_default.enc1 = '\u{25c0}\u{25b6}' end
+	if row.enc3 and not row.helper_labels_default.enc3 then row.helper_labels_default.enc3 = '\u{25c0}\u{25b6}' end
 
 	-- Alt and long bindings
 	row.alt_enc1 = opts.alt_enc1 or nil

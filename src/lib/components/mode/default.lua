@@ -288,10 +288,10 @@ function Default:track_menu()
 				screen = self:submenu_screen(),
 			})
 		end,
-		alt_fn_3 = function() print('alt fn 3') end,
+		alt_fn_3 = function() Registry.set('track_' .. id .. '_device_swap_trigger', 1, 'menu_swap') end,
 		helper_labels = {
-			enc2 = 'device',
-			enc3 = 'ch',
+			enc1 = 'device',
+			enc3 = 'channel',
 			alt_fn_3 = 'swap',
 		},
 	})
@@ -314,9 +314,11 @@ function Default:track_menu()
 				screen = self:submenu_screen(),
 			})
 		end,
+		alt_fn_3 = function() Registry.set('track_' .. id .. '_device_swap_trigger', 1, 'menu_swap') end,
 		helper_labels = {
-			enc2 = 'device',
-			enc3 = 'ch',
+			enc1 = 'device',
+			enc3 = 'channel',
+			alt_fn_3 = 'swap',
 		},
 	})
 
@@ -331,9 +333,6 @@ function Default:track_menu()
 				screen = self:submenu_screen(),
 			}) end
 		end,
-		helper_labels = {
-			enc3 = 'select',
-		},
 	})
 
 	local scale_row = Registry.menu.make_item('track_' .. id .. '_scale_select', {
@@ -356,9 +355,6 @@ function Default:track_menu()
 				screen = self:submenu_screen(),
 			}) end
 		end,
-		helper_labels = {
-			enc3 = 'select',
-		},
 	})
 
 	local items = { in_row, out_row, type_row, scale_row }
@@ -400,9 +396,10 @@ function Default:track_menu()
 			end,
 		})
 	)
+
 	-- step/reset_step are shown in Input menus for applicable types, not here
 	add('program_change', {
-		label_fn = function() return 'PROGRAM' end,
+		label_fn = function() return 'PROGRAM CHANGE' end,
 		requires_confirmation = true,
 	})
 	-- VOICE moved under MIDI input type menu

@@ -266,7 +266,7 @@ end
 function UI:draw_toast(toast_text)
 	local beat_level = 5
 	if App.playing then beat_level = 15 - math.floor((App.tick % App.ppqn) / App.ppqn * 16) end
-	screen.level(15)
+	screen.level(beat_level)
 	screen.rect(76, 0, 52, 9)
 	screen.fill()
 	screen.level(0)
@@ -299,7 +299,7 @@ function UI:draw_menu(x, y, menu, cursor, opts)
 	for _, idx in ipairs(visible_indices) do
 		local it = menu[idx]
 		if it then
-			local selectable = (it.enc2 ~= nil) or (it.enc3 ~= nil) or (it.is_editable == true) or (it.has_press == true)
+			local selectable = (it.enc1 ~= nil) or (it.enc2 ~= nil) or (it.enc3 ~= nil) or (it.is_editable == true) or (it.has_press == true)
 			if selectable then
 				has_any_selectable = true
 				break
@@ -311,8 +311,8 @@ function UI:draw_menu(x, y, menu, cursor, opts)
 	if total_visible == 0 then return end
 
 	local max_visible = self.max_visible_items
-	-- Reserve one row of vertical space at the bottom for helper toast
-	local window_rows = math.max(1, max_visible - 1)
+	-- Render all 5 rows; we’ll clamp scrolling so the active row never sits below row 4
+	local window_rows = max_visible
 	local cursor_position = 1
 	for i, idx in ipairs(visible_indices) do
 		if idx == cursor then
@@ -321,20 +321,26 @@ function UI:draw_menu(x, y, menu, cursor, opts)
 		end
 	end
 
+	-- Track last cursor to infer scroll direction
+	self._last_cursor_pos = self._last_cursor_pos or cursor_position
+	local direction = cursor_position - self._last_cursor_pos
+	self._last_cursor_pos = cursor_position
+
 	local start_pos, end_pos = 1, total_visible
 	if total_visible > window_rows then
-		end_pos = window_rows
-		-- Maintain similar centering behavior but within the reduced window
-		if cursor_position > window_rows - 2 then
-			if cursor_position <= total_visible - 2 then
-				start_pos = cursor_position - 2
-				end_pos = start_pos + window_rows - 1
-			else
-				start_pos = total_visible - window_rows + 1
-				end_pos = total_visible
-			end
+		-- Anchor based on scroll direction: when moving down, keep cursor at visual row 3; when moving up, keep at row 2
+		local anchor_row = (direction < 0) and 2 or 3
+		-- Clamp so the cursor never sits below visual row 4; keep one empty row below the last item
+		local max_start_for_bottom_space = math.max(1, total_visible - 3)
+		if direction == 0 and self._last_start_pos then
+			start_pos = self._last_start_pos
+		else
+			start_pos = util.clamp(cursor_position - (anchor_row - 1), 1, max_start_for_bottom_space)
 		end
+		-- Render items up to visual row 4 (leave row 5 empty)
+		end_pos = math.min(total_visible, start_pos + 4)
 	end
+	self._last_start_pos = start_pos
 
 	local rows = end_pos - start_pos + 1
 	local last_row_y = y + (rows - 2) * 10
@@ -393,25 +399,32 @@ function UI:draw_menu_item(x, y, label, value, icon, is_active, style, disable_h
 	self:set_font(style.font)
 
 	-- Active highlight
-	if is_active and self.current_item and not disable_highlight then
-		screen.level(0)
+	local has_button = self.current_item and (self.current_item.has_press or self.current_item.alt_fn_2 or self.current_item.alt_fn_3 or self.current_item.long_fn_2 or self.current_item.long_fn_3)
+	local knockout = is_active and self.current_item and not disable_highlight and App.key_held and App.key_held_button ~= 2 and has_button
+	if knockout then
+		screen.level(15)
 		screen.rect(x, y - 8, style.width, 11)
 		screen.fill()
-		-- Underline label when this is a combo item (enc2 available)
-		if self.current_item.enc2 then
-			local label_x = x + icon_offset
-			screen.level(8)
-			screen.rect(label_x, y + 1, label_w, 1)
-			screen.fill()
-		end
-
-		-- Underline value when editable (enc3 on item)
-		if self.current_item.enc3 or self.current_item.is_editable then
-			local value_x_left = x + entry_width - value_w
-			screen.level(8)
-			screen.rect(value_x_left, y + 1, value_w, 1)
-			screen.fill()
-		end
+	end
+	-- Underline label only when active & enabled:
+	--   - dual input (enc2 present), or
+	--   - trigger rows (has_press with no enc2/enc3)
+	local left_handler = self.current_item.enc1 or self.current_item.enc2
+	local label_can_edit_left = left_handler and not self.current_item.disable
+	local label_is_trigger = self.current_item.has_press and not left_handler and not self.current_item.enc3 and not self.current_item.disable
+	if is_active and (label_can_edit_left or label_is_trigger) then
+		local label_x = x + icon_offset
+		screen.level(8)
+		screen.rect(label_x, y + 1, label_w, 1)
+		screen.fill()
+	end
+	-- Always underline the value when active and there is a value to show
+	local value_can_edit = self.current_item.enc3 and not self.current_item.disable
+	if is_active and value_can_edit and value_w > 0 then
+		local value_x_left = x + entry_width - value_w
+		screen.level(8)
+		screen.rect(value_x_left, y + 1, value_w, 1)
+		screen.fill()
 	end
 
 	screen.move(x + 5, y)
@@ -419,7 +432,7 @@ function UI:draw_menu_item(x, y, label, value, icon, is_active, style, disable_h
 		-- Icons are bright only when the row is active AND editable; otherwise dim
 		local editable = self.current_item and (self.current_item.enc2 or self.current_item.enc3 or self.current_item.is_editable)
 		if is_active and editable then
-			screen.level(style.icon_color)
+			screen.level(knockout and 0 or style.icon_color)
 		else
 			screen.level(style.icon_inactive_color)
 		end
@@ -429,11 +442,10 @@ function UI:draw_menu_item(x, y, label, value, icon, is_active, style, disable_h
 
 	-- Adjust color based on active state
 	if is_active then
-		screen.level(15) -- Bright white for active item
+		screen.level(knockout and 0 or 15) -- dark on knockout, bright otherwise
 	else
 		screen.level(style.inactive_color)
 	end
-	screen.level(15)
 	screen.move(x + icon_offset, y)
 	screen.text(label)
 
@@ -468,7 +480,7 @@ function UI:draw_menu_item(x, y, label, value, icon, is_active, style, disable_h
 		local next_icon = has_pending and '?' or '\u{25ba}'
 		local press_x = 127
 		if is_active then
-			screen.level(style.icon_color)
+			screen.level(knockout and 0 or style.icon_color)
 		else
 			screen.level(style.icon_inactive_color)
 		end
@@ -512,8 +524,8 @@ function UI:draw_tempo()
 	screen.rect(76, 0, 127, 32)
 	screen.fill()
 
-	screen.move(102, 28)
-	self:set_font(37)
+	screen.move(102, 29)
+	self:set_font(34)
 	screen.level(0)
 	screen.text_center(math.floor(clock.get_tempo() + 0.5))
 	screen.fill()
@@ -582,15 +594,18 @@ function UI:draw_small_tempo()
 end
 
 function UI:draw_helper_toast(helper_labels, y)
-	if not helper_labels then return end
-
-	local order = { 'press_fn_2', 'press_fn_3', 'enc2', 'enc3' }
+	-- Merge default helper labels from the current item with explicit ones
+	local merged = {}
+	local mode = App.mode and App.mode[App.current_mode]
+	local current = mode and mode.menu and mode.menu[mode.cursor]
+	if current and current.helper_labels_default then
+		for k, v in pairs(current.helper_labels_default) do merged[k] = v end
+	end
+	for k, v in pairs(helper_labels or {}) do merged[k] = v end
+	if next(merged) == nil then return end
 
 	local left_text = ''
 	local right_text = ''
-
-	local mode = App.mode and App.mode[App.current_mode]
-	local current = mode and mode.menu and mode.menu[mode.cursor]
 
 	local height = 10
 	local pos_y = y or (64 - height)
@@ -606,36 +621,70 @@ function UI:draw_helper_toast(helper_labels, y)
 	screen.level(15)
 	self:set_font(1)
 
+	-- Button 2 (left)
 	screen.move(0, pos_y + height - 2)
 	if current and current.pending_confirmation then
 		screen.text('x')
-	elseif helper_labels.alt_fn_2 and App.alt_down then
-		screen.text(helper_labels.alt_fn_2)
-	elseif helper_labels.press_fn_2 then
-		screen.text(helper_labels.press_fn_2)
+	elseif merged.alt_fn_2 and App.alt_down then
+		screen.text(merged.alt_fn_2)
+	elseif merged.press_fn_2 then
+		screen.text(merged.press_fn_2)
 	end
 
+	-- Button 3 (center)
 	screen.move(30, pos_y + height - 2)
 	if current and current.pending_confirmation then
 		screen.text_center('\u{2713}')
-	elseif helper_labels.alt_fn_3 and App.alt_down then
-		screen.text_center(helper_labels.alt_fn_3)
-	elseif helper_labels.press_fn_3 then
-		screen.text_center(helper_labels.press_fn_3)
+	elseif merged.alt_fn_3 and App.alt_down then
+		screen.text_center(merged.alt_fn_3)
+	elseif merged.press_fn_3 then
+		screen.text_center(merged.press_fn_3)
 	end
 
-	screen.move(125, pos_y + height - 2)
-	if helper_labels.alt_enc3 and App.alt_down then
-		screen.text_right(helper_labels.alt_enc3)
-	elseif helper_labels.enc3 then
-		screen.text_right(helper_labels.enc3)
+	-- enc3 label (right)
+	local enc3_label = nil
+	if merged.alt_enc3 and App.alt_down then
+		enc3_label = merged.alt_enc3
+	elseif merged.enc3 then
+		enc3_label = merged.enc3
+	end
+	if enc3_label then
+		if not string.find(enc3_label, '\u{25c0}') then enc3_label = enc3_label .. ' \u{25c0}\u{25b6}' end
+		screen.move(125, pos_y + height - 2)
+		screen.text_right(enc3_label)
 	end
 
-	screen.move(81, pos_y + height - 2)
-	if helper_labels.alt_enc2 and App.alt_down then
-		screen.text_center(helper_labels.alt_enc2)
-	elseif helper_labels.enc2 then
-		screen.text_center(helper_labels.enc2)
+	-- enc1 label (top right, its own band)
+	local enc1_label = nil
+	if merged.alt_enc1 and App.alt_down then
+		enc1_label = merged.alt_enc1
+	elseif merged.enc1 then
+		enc1_label = merged.enc1
+	end
+	if enc1_label then
+		if not string.find(enc1_label, '\u{25c0}') then enc1_label = enc1_label .. ' \u{25c0}\u{25b6}' end
+		screen.move(76, 0)
+		screen.level(0)
+		screen.rect(76, 0, 52, 9)
+		screen.fill()
+		screen.level(15)
+		self:set_font(1)
+		screen.move(127, 7)
+		screen.text_right(enc1_label)
+		screen.fill()
+	end
+
+	-- enc2 label (middle right of toast bar, matches pattern)
+	local enc2_label = nil
+	if merged.alt_enc2 and App.alt_down then
+		enc2_label = merged.alt_enc2
+	elseif merged.enc2 then
+		enc2_label = merged.enc2
+	end
+	if enc2_label then
+		if not string.find(enc2_label, '\u{25c0}') then enc2_label = enc2_label .. ' \u{25c0}\u{25b6}' end
+		screen.move(81, pos_y + height - 2)
+		screen.text_center(enc2_label)
 	end
 
 	screen.fill()
