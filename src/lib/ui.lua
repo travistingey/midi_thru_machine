@@ -97,6 +97,165 @@ end
 
 -- Draw Functions
 function UI:draw_chord(select, x, y)
+	-- Render all chord identifications for the current scale, including alternates.
+	x = x or 0
+	y = y or 14
+	local scale = App.scale[select]
+	if not scale or #scale.intervals < 2 then return end
+
+	local bits = scale.bits or 0
+	local primary = musicutil.interval_lookup[bits]
+	if not primary then return end
+
+	local chords = {}
+	local seen = {}
+
+	local function add(ch)
+		local key = (ch.name or '') .. ':' .. tostring(ch.root or 0)
+		if not seen[key] then
+			seen[key] = true
+			table.insert(chords, ch)
+		end
+	end
+
+	add(primary)
+	if primary.alternates then
+		for _, alt in ipairs(primary.alternates) do
+			add(alt)
+		end
+	end
+
+	screen.level(15)
+	UI:set_font(1)
+	local rows_per_col = 6
+	local col_width = 64
+	local max_entries = rows_per_col * 2 -- two columns on 128px wide screen
+	local shown = math.min(#chords, max_entries)
+
+	for i = 1, shown do
+		local ch = chords[i]
+		local root = (scale.root + (ch.root or 0)) % 12
+		local bass = scale.root % 12
+		local label = musicutil.note_num_to_name(root) .. (ch.name or '')
+		if bass ~= root then label = label .. '/' .. musicutil.note_num_to_name(bass) end
+		if ch.voicing then label = label .. ' ' .. ch.voicing end
+
+		local col = math.floor((i - 1) / rows_per_col)
+		local row = (i - 1) % rows_per_col
+		local cx = x + col * col_width
+		local cy = y + row * 8
+
+		screen.move(cx, cy)
+		screen.text(label)
+	end
+
+	if #chords > max_entries then
+		local col = math.floor(shown / rows_per_col)
+		local row = shown % rows_per_col
+		screen.move(x + col * col_width, y + row * 8)
+		screen.text('+' .. (#chords - max_entries) .. ' more')
+	end
+end
+
+function UI:draw_scales(select, x, y)
+	-- Render compatible scales for the current interval set (across all roots/modes).
+	x = x or 0
+	y = y or 62
+	local scale = App.scale[select]
+	-- Require at least three notes before attempting scale identification
+	if not scale or #scale.intervals < 3 then return end
+
+	-- Build absolute note mask from current scale (root + intervals)
+	local note_mask = 0
+	for _, iv in ipairs(scale.intervals) do
+		local note = (scale.root + iv) % 12
+		note_mask = note_mask | (1 << note)
+	end
+
+	-- Find scales (root transposition only, no modal rotation) that fully contain the note mask
+	local root_shift = scale.root % 12
+	local root_exact, mode_exact, root_partial, mode_partial = {}, {}, {}, {}
+	local seen = {}
+	local function transpose_bits(bits, semitones)
+		semitones = semitones % 12
+		if semitones == 0 then return bits end
+		return ((bits << semitones) | (bits >> (12 - semitones))) & 0xFFF
+	end
+
+	for _, s in ipairs(musicutil.SCALES) do
+		if s.intervals then
+			local base_mask = 0
+			for _, iv in ipairs(s.intervals) do
+				base_mask = base_mask | (1 << (iv % 12))
+			end
+			for shift = 0, 11 do
+				local mask = transpose_bits(base_mask, shift)
+				if (mask & note_mask) == note_mask then
+					local entry = { scale = s, shift = shift, mask = mask }
+					if mask == note_mask then
+						if shift == root_shift then
+							root_exact[#root_exact + 1] = entry
+						else
+							mode_exact[#mode_exact + 1] = entry
+						end
+					else
+						local key = (s.name or '') .. ':' .. shift
+						if not seen[key] then
+							seen[key] = true
+							if shift == root_shift then
+								root_partial[#root_partial + 1] = entry
+							else
+								mode_partial[#mode_partial + 1] = entry
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+
+	local ordered = {}
+	for _, e in ipairs(root_exact) do table.insert(ordered, e) end
+	for _, e in ipairs(mode_exact) do table.insert(ordered, e) end
+	for _, e in ipairs(root_partial) do table.insert(ordered, e) end
+	for _, e in ipairs(mode_partial) do table.insert(ordered, e) end
+
+	if #ordered == 0 then return end
+
+	screen.level(15)
+	UI:set_font(1)
+	local rows_per_col = 6
+	local col_width = 64
+	local max_entries = rows_per_col * 2
+	local shown = math.min(#ordered, max_entries)
+
+	for i = 1, shown do
+		local entry = ordered[i]
+		local s = entry.scale or {}
+		local shift = entry.shift or 0
+		local root_note = musicutil.note_num_to_name(shift % 12)
+		local label = root_note .. ' ' .. (s.name or 'scale')
+		if entry.mask == note_mask then label = label .. '*' end
+
+		local col = math.floor((i - 1) / rows_per_col)
+		local row = (i - 1) % rows_per_col
+		local cx = x + col * col_width
+		local cy = y + row * 8
+
+		screen.move(cx, cy)
+		screen.text(label)
+	end
+
+	if #ordered > max_entries then
+		local col = math.floor(shown / rows_per_col)
+		local row = shown % rows_per_col
+		screen.move(x + col * col_width, y + row * 8)
+		screen.text('+' .. (#ordered - max_entries) .. ' more')
+	end
+end
+
+-- Draw Functions
+function UI:draw_chord_large(select, x, y)
 	x = x or 60
 	y = y or 14
 	local scale = App.scale[select]
@@ -142,7 +301,8 @@ function UI:draw_chord_small(select, x, y)
 	end
 end
 
-function UI:draw_intervals(x, y, major)
+function UI:draw_intervals(x, y, sid)
+	sid = sid or 1
 	x = x or 0
 	y = y or 63
 	screen.move(127, 41)
@@ -151,7 +311,7 @@ function UI:draw_intervals(x, y, major)
 
 	self:set_font(1)
 	for i = 1, #interval_names do
-		if App.scale[1].bits & (1 << (i - 1)) > 0 then
+		if App.scale[sid].bits & (1 << (i - 1)) > 0 then
 			screen.level(15)
 		else
 			screen.level(1)
@@ -348,7 +508,8 @@ function UI:draw_menu(x, y, menu, cursor, opts)
 	local max_y = 44
 	local offset_y = 0
 	local is_scrolling = (total_visible > max_visible)
-	if (not is_scrolling) and (last_row_y > max_y) then offset_y = max_y - last_row_y end
+	-- Only nudge upward when we have fewer than the max rows; otherwise keep baseline aligned
+	if (not is_scrolling) and total_visible < max_visible and (last_row_y > max_y) then offset_y = max_y - last_row_y end
 
 	for pos = start_pos, end_pos do
 		local actual_index = visible_indices[pos]
@@ -599,9 +760,13 @@ function UI:draw_helper_toast(helper_labels, y)
 	local mode = App.mode and App.mode[App.current_mode]
 	local current = mode and mode.menu and mode.menu[mode.cursor]
 	if current and current.helper_labels_default then
-		for k, v in pairs(current.helper_labels_default) do merged[k] = v end
+		for k, v in pairs(current.helper_labels_default) do
+			merged[k] = v
+		end
 	end
-	for k, v in pairs(helper_labels or {}) do merged[k] = v end
+	for k, v in pairs(helper_labels or {}) do
+		merged[k] = v
+	end
 	if next(merged) == nil then return end
 
 	local left_text = ''

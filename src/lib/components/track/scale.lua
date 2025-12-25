@@ -14,36 +14,45 @@ local MIDI_LATCH_MODE = 6
 local MIDI_LOCK_MODE = 7
 
 local ALL = musicutil.CHORDS
-local PLAITS = {musicutil.interval_lookup[1],musicutil.interval_lookup[129],musicutil.interval_lookup[161],musicutil.interval_lookup[137],musicutil.interval_lookup[1161],musicutil.interval_lookup[1165],musicutil.interval_lookup[1197],musicutil.interval_lookup[661],musicutil.interval_lookup[1173],musicutil.interval_lookup[2193],musicutil.interval_lookup[145]}	
-
-
+local PLAITS = {
+	musicutil.interval_lookup[1],
+	musicutil.interval_lookup[129],
+	musicutil.interval_lookup[161],
+	musicutil.interval_lookup[137],
+	musicutil.interval_lookup[1161],
+	musicutil.interval_lookup[1165],
+	musicutil.interval_lookup[1197],
+	musicutil.interval_lookup[661],
+	musicutil.interval_lookup[1173],
+	musicutil.interval_lookup[2193],
+	musicutil.interval_lookup[145],
+}
 
 local Scale = {}
 Scale.name = 'scale'
 Scale.__index = Scale
-setmetatable(Scale,{ __index = TrackComponent })
+setmetatable(Scale, { __index = TrackComponent })
 
 function Scale:new(o)
-    o = o or {}
-    setmetatable(o, self)
-    TrackComponent.set(o,o)
-    o:set(o)
+	o = o or {}
+	setmetatable(o, self)
+	TrackComponent.set(o, o)
+	o:set(o)
 	o:register_params()
-    return o
+	return o
 end
 
 function Scale:set(o)
-	
 	if not self.id then error('Scale initialized without ID') end
-	
+
 	self.root = o.root or 0
 	self.bits = o.bits or 0
 	self.follow = o.follow or 0
-	
+
 	self.chord = {
 		index = 1,
 		name = '',
-		root = 0
+		root = 0,
 	}
 
 	self.follow_method = o.follow_method or 1
@@ -56,228 +65,249 @@ function Scale:set(o)
 
 	self.event_listeners = {}
 	self.current_preset = o.preset or 1
-
 end
-
 
 function Scale:register_params()
 	local scale = 'scale_' .. self.id .. '_'
-	params:add_group('Scale ' .. self.id, 5 ) 
+	params:add_group('Scale ' .. self.id, 5)
 
-	Registry.add('add_number', scale .. 'bits', 'Bits',0,4095,0)
+	Registry.add('add_number', scale .. 'bits', 'Bits', 0, 4095, 0)
 	Registry.set_action(scale .. 'bits', function(bits)
 		App.settings[scale .. 'bits'] = bits
 		self:set_scale(bits)
-		
+
 		for i = 1, 3 do
 			App.scale[i]:follow_scale()
 		end
 		self:emit('scale_changed', 'bits')
 	end)
-	
-	Registry.add('add_number', scale .. 'root', 'Root',-24,24,0)
+
+	Registry.add('add_number', scale .. 'root', 'Root', -24, 24, 0)
 	Registry.set_action(scale .. 'root', function(root)
 		App.settings[scale .. 'root'] = root
 		self.root = root
 
-		for i = 1, 3 do 
+		for i = 1, 3 do
 			App.scale[i]:follow_scale()
 		end
 
 		self:emit('scale_changed', 'root')
 	end)
 
-	Registry.add('add_number', scale .. 'follow', 'Follow',0,16,0)
+	Registry.add('add_number', scale .. 'follow', 'Follow', 0, 16, 0, function(param)
+		local v = param:get() or 0
+		if v == 0 then return 'off' end
+		local method = self.follow_method or 0
+
+		if method > CHORD_MODE then
+			return 'Track ' .. v
+		else
+			return 'Scale ' .. v
+		end
+	end)
 	Registry.set_action(scale .. 'follow', function(d)
 		App.settings[scale .. 'follow'] = d
 		self.follow = d
-		
-		if self.follow_method <= CHORD_MODE then
-			self.follow = util.clamp(self.follow,1,3)	
-		end
-		if d > 0 then
-			for i = 1, 3 do 
+
+		if d > 0 and self.follow_method <= CHORD_MODE then self.follow = util.clamp(self.follow, 1, 3) end
+
+		if self.follow > 0 then
+			for i = 1, 3 do
 				App.scale[i]:follow_scale()
 			end
 		end
-		
+
 		self:emit('scale_changed', 'follow')
 	end)
 
-	Registry.add('add_option', scale .. 'follow_method', 'Follow Method',{'transpose','scale degree','pentatonic','chord','midi on', 'midi latch','midi lock'},1)
+	Registry.add('add_option', scale .. 'follow_method', 'Follow Method', { 'transpose', 'scale degree', 'pentatonic', 'chord', 'midi on', 'midi latch', 'midi lock' }, 1)
 	Registry.set_action(scale .. 'follow_method', function(d)
 		App.settings[scale .. 'follow_method'] = d
 		self.follow_method = d
 
-		if d <= CHORD_MODE then
-			self.follow = util.clamp(self.follow,1,3)	
-		end
+		if d <= CHORD_MODE and self.follow > 0 then self.follow = util.clamp(self.follow, 1, 3) end
 
-		for i = 1, 3 do 
+		for i = 1, 3 do
 			App.scale[i]:follow_scale()
 		end
 
 		self:emit('scale_changed', 'follow_method')
 	end)
 
-	Registry.add('add_option', scale .. 'chord_set', 'Chord Set', {'All', 'Plaits', 'EO'}, 1)
-	Registry.set_action(scale .. 'chord_set', function(d) 
+	Registry.add('add_option', scale .. 'chord_set', 'Chord Set', { 'All', 'Plaits', 'Presets' }, 1)
+	Registry.set_action(scale .. 'chord_set', function(d)
 		App.settings[scale .. 'chord_set'] = d
-		
+
 		if d == 1 then
 			self.chord_set = musicutil.CHORDS
 		elseif d == 2 then
 			self.chord_set = PLAITS
 		elseif d == 3 then
-			self.chord_set = {1} -- Insert EO logic
+			-- Build a chord set from the current preset bank for this scale
+			local preset_bank = App.preset or {}
+			local collected = {}
+
+			for pid = 1, #preset_bank do
+				local root_key = 'scale_' .. self.id .. '_root'
+				local bits_key = 'scale_' .. self.id .. '_bits'
+				local root = preset_bank[pid][root_key]
+				local bits = preset_bank[pid][bits_key]
+
+				if root ~= nil and bits ~= nil then
+					local info = musicutil.interval_lookup[bits]
+					if info and info.bits then
+						local chord = {
+							name = info.name or ('Preset ' .. pid),
+							intervals = info.intervals or musicutil.bits_to_intervals(info.bits),
+							bits = info.bits,
+							root = info.root or 0,
+						}
+						table.insert(collected, chord)
+					else
+						-- Fallback: derive from bits directly
+						table.insert(collected, {
+							name = 'Preset ' .. pid,
+							intervals = musicutil.bits_to_intervals(bits),
+							bits = bits,
+							root = 0,
+						})
+					end
+				end
+			end
+
+			if #collected > 0 then
+				self.chord_set = collected
+			else
+				-- Fallback to All if nothing was found
+				self.chord_set = musicutil.CHORDS
+				Registry.set(scale .. 'chord_set', 1, 'chord_set_fallback')
+			end
 		end
 	end)
 
-
 	local function lock_event(data)
-
 		local scale = self
-		
+
 		if scale.follow_method > CHORD_MODE then
-			
 			local track = App.track[scale.follow]
 
 			if data.ch == track.midi_in then
-				
-					scale.lock = (data.val == 127)
+				scale.lock = (data.val == 127)
 
-					if scale.lock then
-						scale.reset_latch = true
-						scale.latch_notes = {}
+				if scale.lock then
+					scale.reset_latch = true
+					scale.latch_notes = {}
 
-						for k,v in pairs(track.note_on) do
-							scale.latch_notes[k] = v
-						end
-
-						scale:follow_scale(scale.latch_notes)
+					for k, v in pairs(track.note_on) do
+						scale.latch_notes[k] = v
 					end
+
+					scale:follow_scale(scale.latch_notes)
+				end
 			end
 		end
-		
 	end
-
 end
-
 
 function Scale:set_scale(bits)
 	-- Store the old bits
-    local old_bits = self.bits or 0
-    local new_bits = bits
+	local old_bits = self.bits or 0
+	local new_bits = bits
 
-    -- Identify changed bits using XOR
-    local changed_bits = old_bits ~ new_bits
+	-- Identify changed bits using XOR
+	local changed_bits = old_bits ~ new_bits
 	local changed_notes = musicutil.bits_to_intervals(changed_bits)
 
 	-- for i, note in ipairs(changed_notes) do
 	-- 	changed_notes[i] = (note + self.root) % 12
 	-- end
 
-	
-	
-
 	self.bits = bits
 	self.intervals = musicutil.bits_to_intervals(bits)
 	self.notes = {}
 
-	Registry.set('scale_'..self.id..'_bits', bits, 'scale_bits_update')
+	Registry.set('scale_' .. self.id .. '_bits', bits, 'scale_bits_update')
 
 	local i = 0
-	for oct=1,10 do
+	for oct = 1, 10 do
 		-- Create a list of notes that changed in scale change
-		for i=1,#self.intervals do
-			self.notes[(oct - 1) * #self.intervals + i] = self.intervals[i] + (oct-1) * 12
+		for i = 1, #self.intervals do
+			self.notes[(oct - 1) * #self.intervals + i] = self.intervals[i] + (oct - 1) * 12
 		end
 	end
 
-	if #self.intervals > 2 then
-		self.chord = self:chord_id()
-	end
+	if #self.intervals > 2 then self.chord = self:chord_id() end
 
 	-- Send interrupt request to stop changed notes
 	self:emit('interrupt', changed_notes)
 end
 
 function Scale:shift_scale_to_note(n)
-	n = util.clamp(n,-24,24)
+	n = util.clamp(n, -24, 24)
 	local scale = musicutil.shift_scale(self.bits, n - self.root)
 	self.root = n
 
 	self:set_scale(scale)
-	Registry.set('scale_'..self.id..'_root', n, 'scale_root_note_set')
+	Registry.set('scale_' .. self.id .. '_root', n, 'scale_root_note_set')
 end
 
-
 function count_bits(n)
-    -- Efficiently count bits using Kernighan's algorithm
-    local count = 0
-    while n > 0 do
-        n = n & (n - 1)
-        count = count + 1
-    end
-    return count
+	-- Efficiently count bits using Kernighan's algorithm
+	local count = 0
+	while n > 0 do
+		n = n & (n - 1)
+		count = count + 1
+	end
+	return count
 end
 
 -- Precompute bit counts for all 12-bit numbers (0 to 4095)
 local bit_counts = {}
 for i = 0, 4095 do
-    bit_counts[i] = count_bits(i)
+	bit_counts[i] = count_bits(i)
 end
-
-
 
 function Scale:chord_id(bits)
-    local best = {index = nil, score = -1}
+	local best = { index = nil, score = -1 }
 	bits = bits or self.bits
-	
-    bits = bits & 0xFFF  -- Ensure bits are in 12-bit range
+
+	bits = bits & 0xFFF -- Ensure bits are in 12-bit range
 	local bits_count = bit_counts[bits]
-	
-	
-    for i = 1, #self.chord_set do
-		
-        local set_bits = self.chord_set[i].bits & 0xFFF
-        local set_bits_count = bit_counts[set_bits]
-        local matching_bits = bits & set_bits
-        local matching_bits_count = bit_counts[matching_bits]
 
-        -- Compute the Dice coefficient
-        local score = (2 * matching_bits_count) / (bits_count + set_bits_count)
+	for i = 1, #self.chord_set do
+		local set_bits = self.chord_set[i].bits & 0xFFF
+		local set_bits_count = bit_counts[set_bits]
+		local matching_bits = bits & set_bits
+		local matching_bits_count = bit_counts[matching_bits]
 
-        if best.score and score > best.score or not best.score then
-            best = {index = i, score = score}
-        end
+		-- Compute the Dice coefficient
+		local score = (2 * matching_bits_count) / (bits_count + set_bits_count)
+
+		if best.score and score > best.score or not best.score then best = { index = i, score = score } end
 
 		-- tab.print(self.intervals)
-    end
+	end
 
-    if best.index then
+	if best.index then
 		local chord = {}
-		for k,v in pairs(self.chord_set[best.index]) do
+		for k, v in pairs(self.chord_set[best.index]) do
 			chord[k] = v
 		end
-		
+
 		chord.index = best.index
 
-        return chord
-    end
+		return chord
+	end
 end
-
 
 function Scale:follow_scale(notes)
 	local scale = 'scale_' .. self.id .. '_'
-	
+
 	if self.follow > 0 then
 		local other = App.scale[self.follow]
 
-		if other.lock and other.follow > 0 and not  App.scale[other.follow].lock then
-			other = App.scale[other.follow]
-		end
-		
+		if other.lock and other.follow > 0 and not App.scale[other.follow].lock then other = App.scale[other.follow] end
+
 		if self.follow_method == TRANSPOSE_MODE and not self.lock then
 			-- Transpose
 			self.root = other.root
@@ -288,8 +318,8 @@ function Scale:follow_scale(notes)
 			Registry.set(scale .. 'root', other.root, 'scale_follow_degree')
 		elseif self.follow_method == PENTATONIC_MODE and not self.lock then
 			-- Pentatonic
-			local major = musicutil.intervals_to_bits({0,4})
-			local minor = musicutil.intervals_to_bits({0,3})
+			local major = musicutil.intervals_to_bits({ 0, 4 })
+			local minor = musicutil.intervals_to_bits({ 0, 3 })
 
 			if other.bits & major == major then
 				self:set_scale(661)
@@ -305,51 +335,43 @@ function Scale:follow_scale(notes)
 				Registry.set(scale .. 'root', other.root, 'scale_follow_pentatonic_other')
 			end
 		elseif self.follow_method == CHORD_MODE and not self.lock then
-				if #other.intervals > 2 then
-					self.root = other.root
-					self.chord = self:chord_id(other.bits)
-					self:set_scale(self.chord.bits)
-									self.root = other.root + self.chord.root
+			if #other.intervals > 2 then
+				self.root = other.root
+				self.chord = self:chord_id(other.bits)
+				self:set_scale(self.chord.bits)
+				self.root = other.root + self.chord.root
 				Registry.set(scale .. 'root', other.root + self.chord.root, 'scale_follow_chord')
-				end
+			end
 		elseif self.follow_method > CHORD_MODE and notes then
 			-- MIDI controlled
 			local n = {}
 			local min = nil
 
 			for note in pairs(notes) do
-				if not min or note < min then
-					min = note
-				end
+				if not min or note < min then min = note end
 				n[#n + 1] = note
 			end
 
-			for i= 1, #n do
+			for i = 1, #n do
 				n[i] = (n[i] - min) % 12
 			end
-			
+
 			local s = musicutil.intervals_to_bits(n)
-			if s > 0 then
-				self.root = min % 12
-			end
+			if s > 0 then self.root = min % 12 end
 			Registry.set(scale .. 'root', self.root, 'scale_follow_midi')
-			
+
 			self:set_scale(s)
 		end
 	end
 end
 
-function Scale:transport_event(data,track)
-	if data.type == 'start' then
-		self.reset_latch = false
-	end
+function Scale:transport_event(data, track)
+	if data.type == 'start' then self.reset_latch = false end
 
 	return data
 end
 
 function Scale:quantize_note(data)
-
-
 	if self.bits == 0 then
 		data.new_note = data.note + self.root
 		return data
@@ -362,47 +384,39 @@ function Scale:quantize_note(data)
 	end
 end
 
-function Scale:midi_event(data, track)    
+function Scale:midi_event(data, track)
 	if data.note then
-
 		if track.input_type == 'chord' and data.type == 'note_on' then
-
-			
 			data.index = self.chord.index
 			data.new_note = self.root + 36
-			
+
 			return data
 		elseif self.follow_method == MIDI_ON_MODE and (data.type == 'note_on' or data.type == 'note_off') and track.id == self.follow then
-			
 			if self.lock and data.type == 'note_on' then
-				for k,v in pairs(track.note_on) do
+				for k, v in pairs(track.note_on) do
 					self.latch_notes[k] = v
 				end
 
 				self:follow_scale(self.latch_notes)
-
 			elseif not self.lock then
 				self:follow_scale(track.note_on)
 			end
 
 			return data
-		
-		elseif self.follow_method == MIDI_LOCK_MODE  and (data.type == 'note_on' or data.type == 'note_off') and track.id == self.follow then
-			
+		elseif self.follow_method == MIDI_LOCK_MODE and (data.type == 'note_on' or data.type == 'note_off') and track.id == self.follow then
 			if self.lock and data.type == 'note_on' then
-				for k,v in pairs(track.note_on) do
+				for k, v in pairs(track.note_on) do
 					self.latch_notes[k] = v
 				end
 
 				self:follow_scale(self.latch_notes)
-
 			elseif not self.lock then
 				local notes = {}
-				for k,v in pairs(track.note_on) do
+				for k, v in pairs(track.note_on) do
 					notes[k] = v
 				end
 
-				for k,v in pairs(self.latch_notes) do
+				for k, v in pairs(self.latch_notes) do
 					notes[k] = v
 				end
 
@@ -413,18 +427,17 @@ function Scale:midi_event(data, track)
 		elseif self.follow_method == MIDI_LATCH_MODE and (data.type == 'note_on' or data.type == 'note_off') and track.id == self.follow then
 			local count = 0
 			if self.lock and data.type == 'note_on' then
-				for k,v in pairs(track.note_on) do
+				for k, v in pairs(track.note_on) do
 					self.latch_notes[k] = v
 					count = count + 1
 				end
 
 				self:follow_scale(self.latch_notes)
-
 			elseif not self.lock then
-				for n in pairs(track.note_on) do 
+				for n in pairs(track.note_on) do
 					count = count + 1
 				end
-	
+
 				if data.type == 'note_off' and count == 0 then
 					self.reset_latch = true
 				elseif data.type == 'note_on' then
@@ -434,19 +447,15 @@ function Scale:midi_event(data, track)
 					end
 					self.latch_notes[data.note] = data
 					self:follow_scale(self.latch_notes)
-					
 				end
 			end
-			
-			return data
 
+			return data
 		else
 			return self:quantize_note(data)
 		end
-		
-  	else
-		
-		  return data
+	else
+		return data
 	end
 end
 

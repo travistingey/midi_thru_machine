@@ -5,7 +5,6 @@ local UI = require(path_name .. 'ui')
 local Registry = require(path_name .. 'utilities/registry')
 local textentry = require('textentry')
 local Input = require(path_name .. 'components/track/input')
-
 --[[
 Default Mode Component
 
@@ -163,8 +162,7 @@ function Default:submenu_screen()
 	return function()
 		screen.clear()
 		UI:draw_small_tempo()
-		UI:draw_chord(1, 80, 45)
-		UI:draw_chord_small(2)
+
 		if self.current and self.current.status then
 			UI:draw_status(self.current.status.icon, self.current.status.label)
 		else
@@ -417,37 +415,57 @@ end
 function Default:scale_menu(sid)
 	local tid = App.current_track
 	sid = sid or App.track[tid].scale_select or 0
-	local root = (App.scale[sid].root + 1) % 12 - 1
-	local octave = math.floor(App.scale[sid].root / 12)
+	local function get_root_param() return util.clamp(params:get('scale_' .. sid .. '_root'), -24, 24) end
+	local function format_root(val)
+		val = util.clamp(val, -24, 24)
+		local base = ((val % 12) + 12) % 12
+		local octave = math.floor(val / 12)
+		local note = musicutil.note_num_to_name(base)
+		-- Only show octave when outside 0–12; include negative octaves.
+		if val < 0 or val > 12 then return note .. tostring(octave) end
+		return note
+	end
 
 	local items = {
 		-- Root selection remains available
 		Registry.menu.make_item('scale_' .. sid .. '_root', {
 			label_fn = function() return 'ROOT' end,
-			value_fn = function() return musicutil.note_num_to_name(root) end,
+			value_fn = function() return format_root(get_root_param()) end,
 			enc3 = function(d)
-				root = util.wrap(d + root, 0, 12)
-				Registry.set('scale_' .. sid .. '_root', root + octave * 12, 'scale_root_nav')
+				local pid = 'scale_' .. sid .. '_root'
+				local p = params:lookup_param(pid)
+				if p then
+					local next_val = util.clamp(p:get() + d, p.min or -24, p.max or 24)
+					params:set(pid, next_val)
+				end
 			end,
 		}),
 
 		-- Scale selection via param (no bit stepping UI)
-		Registry.menu.make_item('track_' .. tid .. '_scale_select', {
+		Registry.menu.make_item('scale_' .. sid .. '_bits', {
 			icon = '\u{266a}',
 			label_fn = function() return 'SCALE' end,
 			value_fn = function()
-				local cur = params:get('track_' .. tid .. '_scale_select')
+				local cur = params:get('scale_' .. sid .. '_bits')
 				local label = 'OFF'
-				if cur > 0 and App.scale[cur] and App.scale[cur].name then
-					label = App.scale[cur].name
-				elseif cur > 0 then
-					label = 'Scale ' .. cur
+				if cur == 0 then
+					label = 'NONE'
+				else
+					local chord = musicutil.interval_lookup[cur]
+
+					if chord then
+						label = chord.name
+					else
+						label = 'b' .. cur
+					end
 				end
 				return label
 			end,
 		}),
 
-		Registry.menu.make_item('scale_' .. sid .. '_follow', { label_fn = function() return 'FOLLOW' end }),
+		Registry.menu.make_item('scale_' .. sid .. '_follow', {
+			label_fn = function() return 'FOLLOW' end,
+		}),
 		Registry.menu.make_item('scale_' .. sid .. '_follow_method', { label_fn = function() return 'METHOD' end }),
 		Registry.menu.make_item('scale_' .. sid .. '_chord_set', { label_fn = function() return 'CHORDS' end }),
 	}
@@ -483,8 +501,7 @@ end
 function Default:default_screen()
 	return function()
 		UI:draw_tempo()
-		UI:draw_chord(1, 80, 45)
-		UI:draw_chord_small(2)
+
 		if self.current.status then
 			UI:draw_status(self.current.status.icon, self.current.status.label)
 		else

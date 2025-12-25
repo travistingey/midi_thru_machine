@@ -62,6 +62,7 @@ function ScaleGrid:enable_event()
 	-- Define the listener function
 	self.scale_changed_listener = function()
 		self:set_grid(scale)
+		App.screen_dirty = true
 	end
 	-- Attach the listener to the Scale component
 	scale:on('scale_changed', self.scale_changed_listener)
@@ -114,6 +115,7 @@ function ScaleGrid:grid_event (scale, data)
 			for i = 1, 3 do
 				App.scale[i]:follow_scale()
 			end
+			App.screen_dirty = true
 
 		end
     end

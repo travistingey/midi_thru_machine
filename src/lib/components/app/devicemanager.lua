@@ -148,6 +148,9 @@ end
 function MIDIDevice:kill() self.manager:emit(self.id, 'kill') end
 
 function MIDIDevice:process_midi(event)
+	-- Any MIDI activity should trigger a redraw
+	if App then App.screen_dirty = true end
+
 	local send = true
 	local midi_tracks = {}
 

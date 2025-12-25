@@ -95,6 +95,10 @@ function Track:set(o)
 		end
 	end
 
+	-- Keep an updated cache of held notes for follow modes that rely on note_on state
+	self:on('midi_event', input_event)
+	self:on('midi_trigger', input_event)
+
 	-- Device In/Out
 	local midi_devices = {}
 	local midi_abbrs = {}

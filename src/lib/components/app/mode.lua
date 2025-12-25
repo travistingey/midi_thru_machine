@@ -2,9 +2,6 @@ local path_name = 'Foobar/lib/'
 local Grid = require(path_name .. 'grid')
 local utilities = require(path_name .. 'utilities')
 
-local Input = require(path_name .. 'components/track/input')
-local Seq = require(path_name .. 'components/track/seq')
-local Output = require(path_name .. 'components/track/output')
 local UI = require(path_name .. 'ui')
 local Registry = require(path_name .. 'utilities/registry')
 
