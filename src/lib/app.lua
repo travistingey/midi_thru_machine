@@ -27,6 +27,7 @@ local UI = require(path_name .. 'ui')
 local flags = require(path_name .. 'utilities/flags')
 local trace = require(path_name .. 'utilities/trace_cli')
 local Registry = require(path_name .. 'utilities/registry')
+local Persistence = require(path_name .. 'utilities/persistence')
 local LATCH_CC = 64
 
 --==============================================================================
@@ -115,9 +116,8 @@ function App:init(o)
 		alt_enc3 = function(d) self.mode[self.current_mode]:use_menu('alt_enc3', d) end,
 		long_fn_2 = function() self.mode[self.current_mode]:use_menu('long_fn_2') end,
 		long_fn_3 = function()
-			self.recording = not self.recording
+			self:set_recording(not self.recording)
 			print('Recording: ' .. tostring(self.recording))
-			self.screen_dirty = true
 		end,
 		alt_fn_2 = function() self.mode[self.current_mode]:use_menu('alt_fn_2') end,
 		alt_fn_3 = function() self.mode[self.current_mode]:use_menu('alt_fn_3') end,
@@ -162,7 +162,9 @@ function App:init(o)
 	----------------------------------------------------------------------------
 	-- Register Parameters, Tracks, Scales, Outputs, etc.
 	----------------------------------------------------------------------------
-
+	params:add_group('App', 5)
+	params:add_binary('recording', 'Recording', 'momentary', 0)
+	params:set_action('recording', function(state) self:set_recording(state == 1) end)
 	self.device_manager:register_params()
 	-- Create the tracks
 	params:add_separator('tracks', 'Tracks')
@@ -183,6 +185,29 @@ function App:init(o)
 	print('params:default')
 	App.flags.state.set('initializing', false)
 	params:default()
+
+	----------------------------------------------------------------------------
+	-- Register PSET save/load/delete callbacks for table data persistence
+	----------------------------------------------------------------------------
+	params.action_write = function(filename, name, pset_number)
+		Persistence.save(pset_number)
+	end
+
+	params.action_read = function(filename, silent, pset_number)
+		Persistence.load(pset_number)
+		-- Reload current preset to reflect loaded state
+		local current = self.track[1] and self.track[1].current_preset or 1
+		if self.preset[current] then
+			self:load_preset(current)
+		end
+	end
+
+	params.action_delete = function(filename, name, pset_number)
+		Persistence.delete(pset_number)
+	end
+
+	-- Attempt to load default PSET data (slot 1) if it exists
+	Persistence.load(1)
 end
 
 --==============================================================================
@@ -227,6 +252,12 @@ function App:on_start(continue)
 			App.screen_dirty = true
 		end
 	end) end
+end
+
+function App:set_recording(state)
+	self.recording = state
+	self:emit('recording', state)
+	self.screen_dirty = true
 end
 
 function App:on_stop()

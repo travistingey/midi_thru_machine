@@ -405,7 +405,6 @@ function DeviceManager:register_params()
 	for i = 1, max_index do
 		midi_devices[i] = self.midi_device_names[i] or 'None'
 	end
-	params:add_group('DEVICES', 4)
 
 	params:add_option('clock_in', 'Clock Input', midi_devices)
 	params:set_action('clock_in', function(x)

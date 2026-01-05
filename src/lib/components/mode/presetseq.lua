@@ -300,8 +300,8 @@ function PresetSeq:set_grid(component)
 
 		local color = 123
 
-		if pad & (OUTSIDE | VALUE) == (OUTSIDE | VALUE) then
-			color = { 2, 2, 2 } -- draw division lines
+		if pad & (OUTSIDE | VALUE) == (OUTSIDE | VALUE) and pad & BLINK == 0 then
+			color = grid.rainbow_off[(seq_value - 1) % 16 + 1] -- Draw steps with values outside the loop
 		elseif pad & (BLINK | VALUE | STEP) == 0 or pad == BLINK then
 			color = 0 -- empty
 		elseif pad & STEP > 0 and pad & (BLINK | VALUE) == 0 or pad == (BLINK | STEP) then
@@ -310,11 +310,17 @@ function PresetSeq:set_grid(component)
 		elseif pad & VALUE > 0 and pad & (BLINK | STEP) == 0 or pad == (BLINK | VALUE) then
 			-- LOW Color
 			color = grid.rainbow_off[(seq_value - 1) % 16 + 1]
-		elseif pad & (BLINK | STEP) > 0 and pad & VALUE == 0 then
-			-- HIGH White
-			color = 1
-		elseif pad & (VALUE | STEP) > 0 or pad & (BLINK | VALUE) > 0 and pad & STEP == 0 then
+		elseif pad & VALUE > 0 and pad & STEP > 0 then
 			color = grid.rainbow_on[(seq_value - 1) % 16 + 1]
+		elseif pad & (BLINK | OUTSIDE) == (BLINK | OUTSIDE) and pad & VALUE > 0 then
+			-- Value steps outside the loop during blink
+			color = { 6, 0, 0 }
+		elseif pad & (BLINK | OUTSIDE) == (BLINK | OUTSIDE) and pad & VALUE == 0 then
+			-- Blink empty steps outside the loop
+			color = 0
+		elseif pad & LOOP_END > 0 then
+			-- Loop end points
+			color = { 5, 5, 5 }
 		end
 
 		s.led[x][y] = color

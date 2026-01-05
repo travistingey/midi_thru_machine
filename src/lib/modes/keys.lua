@@ -21,7 +21,6 @@ local function keys_default_menu(self)
 	local tid = App.current_track
 	local items = {}
 	local sid_param = 'track_' .. tid .. '_scale_select'
-	local style = { inactive_color = 15, icon_inactive_color = 5, width = 80 }
 
 	table.insert(
 		items,
@@ -32,21 +31,31 @@ local function keys_default_menu(self)
 				if v == 0 then return 'off' end
 				return v
 			end,
-			disable = true,
-			style = style,
+			can_press = function() return params:get(sid_param) > 0 end,
+			has_submenu = function() return params:get(sid_param) > 0 end,
+			on_press = function()
+				local sid = params:get(sid_param)
+				if sid > 0 then
+					local config = {
+						status = { icon = '\u{266a}', label = 'scale ' .. sid },
+						options = { timeout = false },
+						screen = self:submenu_screen(),
+					}
+					self:sub_menu(self:scale_menu(sid), config)
+				end
+			end,
 		})
 	)
 
 	table.insert(
 		items,
 		Registry.menu.make_item('track_' .. tid .. '_root_display', {
+			disable = true,
 			label_fn = function() return 'ROOT' end,
 			value_fn = function()
 				local sid = params:get(sid_param)
 				return format_root_note(sid)
 			end,
-			disable = true,
-			style = style,
 		})
 	)
 
@@ -55,22 +64,6 @@ end
 
 local function keys_default_context(self)
 	local ctx = Default.default_context(self)
-	-- Encoder 1 switches scales (skip 0/off)
-	ctx.enc1 = function(d)
-		if d == 0 then return end
-		local tid = App.current_track
-		local sid_param = 'track_' .. tid .. '_scale_select'
-		local p = params:lookup_param(sid_param)
-		if not p then return end
-		local max = (p.options and #p.options) or p.max or 1
-		if max < 1 then return end
-		local cur = params:get(sid_param)
-		local next_sid = util.clamp(cur + d, 1, max)
-		if next_sid ~= cur then
-			Registry.set(sid_param, next_sid, 'keys_enc1')
-			App.screen_dirty = true
-		end
-	end
 	-- Jump directly to scale menu when opening menu
 	ctx.press_fn_3 = function()
 		local sid = params:get('track_' .. App.current_track .. '_scale_select')
@@ -83,8 +76,8 @@ local function keys_default_context(self)
 			self:sub_menu(self:scale_menu(sid), config)
 		end
 	end
-	-- Menu rows are informational only
-	ctx.disable_highlight = true
+	-- Enable highlight since menu rows are interactive in Keys mode
+	ctx.disable_highlight = false
 	return ctx
 end
 
