@@ -25,6 +25,19 @@ function Input:set(o)
 	end
 end
 
+-- Override midi_event to check for input muting when buffer playback is active
+function Input:midi_event(data, track)
+	-- Check if input should be muted when buffer playback is active
+	if track.auto and track.auto.buffer_playback and track.auto.mute_input_on_playback then
+		-- Mute input - return nil to stop the processing chain
+		-- This prevents input from going to output, but recording still happens via input_event listener
+		return nil
+	end
+
+	-- Default behavior: pass through
+	return data
+end
+
 function Input:transport_event(data)
 	if self.track.step > 0 and self.track.input_type ~= 'midi' then self:clock_trigger(data, self.process) end
 	return data

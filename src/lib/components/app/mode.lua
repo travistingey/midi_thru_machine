@@ -529,7 +529,7 @@ function Mode:refresh()
 	for i, c in ipairs(self.components) do
 		if c.set_grid ~= nil then c:set_grid() end
 	end
-	screen_dirty = true
+	App.screen_dirty = true
 end
 
 function Mode:draw()
@@ -562,6 +562,7 @@ end
 
 -- Added cancel_context method to handle context cleanup
 function Mode:cancel_context(opts)
+	print('cancel_context')
 	opts = opts or {}
 	local should_pop = (opts.pop ~= false)
 	if self.context_clock then
@@ -952,7 +953,7 @@ function Mode:enable()
 	if self.arrow_event ~= nil then self:on('arrow', self.arrow_event) end
 
 	self:emit('enable')
-	screen_dirty = true
+	App.screen_dirty = true
 end
 
 function Mode:disable()

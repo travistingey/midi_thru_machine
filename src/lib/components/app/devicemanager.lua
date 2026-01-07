@@ -145,7 +145,10 @@ function MIDIDevice:send(data)
 	self.device:send(send)
 end
 
-function MIDIDevice:kill() self.manager:emit(self.id, 'kill') end
+function MIDIDevice:kill()
+	print('KILLING DEVICE ' .. self.id)
+	self.manager:emit(self.id, 'kill')
+end
 
 function MIDIDevice:process_midi(event)
 	-- Any MIDI activity should trigger a redraw
@@ -458,6 +461,8 @@ function DeviceManager:reportEvents(device_id)
 			report[event_name] = #listeners
 		end
 	end
+	print('--------------------------------')
+	print('REPORTING EVENTS')
 	for event_name, count in pairs(report) do
 		print('Event \'' .. event_name .. '\' has ' .. count .. ' listener(s) queued.')
 	end

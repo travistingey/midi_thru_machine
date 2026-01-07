@@ -18,7 +18,7 @@ function PresetSeq:set(o)
 	self.index = nil
 	self.component = 'auto'
 
-	self.lanes = { 'track', 'scale', 'cc' } -- List of lanes
+	self.lanes = { 'track', 'scale', 'cc', 'buffer' } -- List of lanes
 	self.selected_lane_index = 1 -- Index of the selected lane
 	self.selected_lane = self.lanes[self.selected_lane_index]
 	self.step_length = o.step_length or 24
@@ -83,6 +83,9 @@ function PresetSeq:set_select(value)
 		self.select = { type = 'track', value = track.current_preset }
 	elseif self.selected_lane == 'cc' then
 		self.select = { type = 'cc', value = track.current_preset }
+	elseif self.selected_lane == 'buffer' then
+		-- Buffer lane doesn't use value selection like other lanes
+		self.select = { type = 'buffer', value = nil }
 	end
 end
 
@@ -280,8 +283,18 @@ function PresetSeq:set_grid(component)
 		-- Iterate over the tick range corresponding to the global step
 		for j = (global_step - 1) * self.step_length, global_step * self.step_length - 1 do
 			if auto.seq[j] and auto.seq[j][lane] then
-				seq_value = auto.seq[j][lane].value
-				break
+				if lane == 'buffer' then
+					-- Buffer lane contains array of events
+					local events = auto.seq[j][lane]
+					if events and #events > 0 then
+						-- Use event count as a pseudo-value for color variation
+						seq_value = #events
+						break
+					end
+				else
+					seq_value = auto.seq[j][lane].value
+					break
+				end
 			end
 		end
 
@@ -345,11 +358,15 @@ function PresetSeq:alt_event(data)
 		self:start_blink()
 		local auto = self:get_component()
 		self:set_grid(auto)
-		local cleanup = self:on('alt_reset', function()
+		local cleanup_holder = {}
+		cleanup_holder.fn = self:on('alt_reset', function()
 			self:end_blink()
 			local auto = self:get_component()
 			self:set_grid(auto)
-			cleanup()
+			if cleanup_holder.fn then
+				cleanup_holder.fn()
+				cleanup_holder.fn = nil
+			end
 		end)
 	elseif data.state then
 		self:end_blink()

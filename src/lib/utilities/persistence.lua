@@ -60,11 +60,21 @@ function Persistence.collect_state()
 			}
 
 			-- Deep copy seq table (nested structure: tick -> lane -> value)
+			-- Buffer lane is special: it's an array of event tables
 			if auto.seq then
 				for tick, lanes in pairs(auto.seq) do
 					state.automation[i].seq[tick] = {}
 					for lane, data in pairs(lanes) do
-						if type(data) == 'table' then
+						if lane == 'buffer' and type(data) == 'table' then
+							-- Buffer is an array of event tables
+							state.automation[i].seq[tick][lane] = {}
+							for idx, event in ipairs(data) do
+								state.automation[i].seq[tick][lane][idx] = {}
+								for k, v in pairs(event) do
+									state.automation[i].seq[tick][lane][idx][k] = v
+								end
+							end
+						elseif type(data) == 'table' then
 							state.automation[i].seq[tick][lane] = {}
 							for k, v in pairs(data) do
 								state.automation[i].seq[tick][lane][k] = v
@@ -123,12 +133,22 @@ function Persistence.restore_state(state)
 				local auto = App.track[i].auto
 
 				-- Restore seq table
+				-- Buffer lane is special: it's an array of event tables
 				if state.automation[i].seq then
 					auto.seq = {}
 					for tick, lanes in pairs(state.automation[i].seq) do
 						auto.seq[tick] = {}
 						for lane, data in pairs(lanes) do
-							if type(data) == 'table' then
+							if lane == 'buffer' and type(data) == 'table' then
+								-- Buffer is an array of event tables
+								auto.seq[tick][lane] = {}
+								for idx, event in ipairs(data) do
+									auto.seq[tick][lane][idx] = {}
+									for k, v in pairs(event) do
+										auto.seq[tick][lane][idx][k] = v
+									end
+								end
+							elseif type(data) == 'table' then
 								auto.seq[tick][lane] = {}
 								for k, v in pairs(data) do
 									auto.seq[tick][lane][k] = v

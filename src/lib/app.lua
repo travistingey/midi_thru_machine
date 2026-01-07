@@ -96,6 +96,17 @@ function App:init(o)
 	self.swing = 0.5
 	self.swing_div = 6 -- 1/16 note swing
 
+	-- Buffer recording length (in ticks). Start small for validation.
+	-- 384 ticks = 16 beats at 24ppqn = 4 bars
+	self.BUFFER_LENGTH = 192
+
+	-- Buffer recording mode settings (app-level)
+	self.buffer_overdub = true -- true = overdub (layer), false = overwrite (replace)
+	self.buffer_loop = true -- true = continuous loop recording, false = one-shot (disarm after loop)
+	self.buffer_mute_on_arm = false -- true = mute buffer playback while armed, false = play while recording
+	self.buffer_playback = true -- true = buffer playback enabled, false = buffer muted
+	self.buffer_scrub_loop = true -- true = loop scrub range, false = play through once
+
 	-- Tick and transport timing (times in beats)
 	self.tick = 0
 	self.start_time = 0
@@ -162,9 +173,25 @@ function App:init(o)
 	----------------------------------------------------------------------------
 	-- Register Parameters, Tracks, Scales, Outputs, etc.
 	----------------------------------------------------------------------------
-	params:add_group('App', 5)
+	params:add_group('App', 10)
 	params:add_binary('recording', 'Recording', 'momentary', 0)
 	params:set_action('recording', function(state) self:set_recording(state == 1) end)
+
+	-- Buffer recording mode parameters
+	params:add_binary('buffer_playback', 'Buffer Playback', 'toggle', 1)
+	params:set_action('buffer_playback', function(d) self.buffer_playback = (d > 0) end)
+
+	params:add_binary('buffer_overdub', 'Buffer Overdub', 'toggle', 1)
+	params:set_action('buffer_overdub', function(d) self.buffer_overdub = (d > 0) end)
+
+	params:add_binary('buffer_loop', 'Buffer Loop Rec', 'toggle', 1)
+	params:set_action('buffer_loop', function(d) self.buffer_loop = (d > 0) end)
+
+	params:add_binary('buffer_mute_on_arm', 'Mute on Arm', 'toggle', 0)
+	params:set_action('buffer_mute_on_arm', function(d) self.buffer_mute_on_arm = (d > 0) end)
+
+	params:add_binary('buffer_scrub_loop', 'Scrub Loop', 'toggle', 1)
+	params:set_action('buffer_scrub_loop', function(d) self.buffer_scrub_loop = (d > 0) end)
 	self.device_manager:register_params()
 	-- Create the tracks
 	params:add_separator('tracks', 'Tracks')
@@ -189,22 +216,16 @@ function App:init(o)
 	----------------------------------------------------------------------------
 	-- Register PSET save/load/delete callbacks for table data persistence
 	----------------------------------------------------------------------------
-	params.action_write = function(filename, name, pset_number)
-		Persistence.save(pset_number)
-	end
+	params.action_write = function(filename, name, pset_number) Persistence.save(pset_number) end
 
 	params.action_read = function(filename, silent, pset_number)
 		Persistence.load(pset_number)
 		-- Reload current preset to reflect loaded state
 		local current = self.track[1] and self.track[1].current_preset or 1
-		if self.preset[current] then
-			self:load_preset(current)
-		end
+		if self.preset[current] then self:load_preset(current) end
 	end
 
-	params.action_delete = function(filename, name, pset_number)
-		Persistence.delete(pset_number)
-	end
+	params.action_delete = function(filename, name, pset_number) Persistence.delete(pset_number) end
 
 	-- Attempt to load default PSET data (slot 1) if it exists
 	Persistence.load(1)

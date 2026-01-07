@@ -76,7 +76,7 @@ function Track:set(o)
 
 	local track = 'track_' .. self.id .. '_'
 
-	Registry.add('add_group', 'Track ' .. self.id, 24)
+	Registry.add('add_group', 'Track ' .. self.id, 25)
 
 	Registry.add('add_text', track .. 'name', 'Name', self.name)
 	Registry.set_action(track .. 'name', function(d) self.name = d end)
@@ -92,6 +92,12 @@ function Track:set(o)
 			-- if self.midi_in > 0 and data.ch == self.midi_in then
 			-- 	self:emit('cc_event', data)
 			-- end
+		end
+
+		-- Record to buffer if track is armed and transport is playing
+		-- This happens regardless of muting settings (recording should always work)
+		if self.armed and App.playing and self.auto then
+			if data.type == 'note_on' or data.type == 'note_off' then self.auto:record_buffer(data) end
 		end
 	end
 
@@ -266,7 +272,11 @@ function Track:set(o)
 			return
 		end
 
-		if d == 0 then mixer:remove_track(self) else mixer:add_track(self) end
+		if d == 0 then
+			mixer:remove_track(self)
+		else
+			mixer:add_track(self)
+		end
 	end)
 
 	-- Arpeggio
@@ -473,6 +483,36 @@ function Track:set(o)
 			self.mono = true
 		end
 	end)
+
+	-- Armed for buffer recording
+	self.armed = o.armed or false
+	Registry.add('add_binary', track .. 'armed', 'Armed', 'toggle', 0)
+	Registry.set_action(track .. 'armed', function(d)
+		local was_armed = self.armed
+		self.armed = (d > 0)
+		if self.armed then
+			print('Track ' .. self.id .. ' armed for buffer recording')
+			-- Reset step-based clearing tracking when arming for new recording pass
+			if self.auto and not App.buffer_overdub then
+				self.auto.cleared_steps = {}
+				self.auto.last_recorded_step = nil
+			end
+		end
+	end)
+
+	-- Buffer playback (per-track)
+	if self.auto then
+		Registry.add('add_binary', track .. 'buffer_playback', 'Buffer Playback', 'toggle', 1)
+		Registry.set_action(track .. 'buffer_playback', function(d)
+			if self.auto then self.auto.buffer_playback = (d > 0) end
+		end)
+
+		-- Mute input when buffer playback is active
+		Registry.add('add_binary', track .. 'mute_input_on_playback', 'Mute Input on Playback', 'toggle', 1)
+		Registry.set_action(track .. 'mute_input_on_playback', function(d)
+			if self.auto then self.auto.mute_input_on_playback = (d > 0) end
+		end)
+	end
 end
 
 -- Updates current settings using an object.
