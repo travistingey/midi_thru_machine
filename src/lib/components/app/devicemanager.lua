@@ -145,10 +145,7 @@ function MIDIDevice:send(data)
 	self.device:send(send)
 end
 
-function MIDIDevice:kill()
-	print('KILLING DEVICE ' .. self.id)
-	self.manager:emit(self.id, 'kill')
-end
+function MIDIDevice:kill() self.manager:emit(self.id, 'kill', { type = 'kill' }) end
 
 function MIDIDevice:process_midi(event)
 	-- Any MIDI activity should trigger a redraw

@@ -67,7 +67,7 @@ function PresetSeq:enable_event()
 		self:set_select(selection.value)
 		if App.recording then
 			local auto = self:get_component()
-			local step = math.floor((auto.step + (self.step_length / 2)) / self.step_length) + 1
+			local step = math.floor((auto.tick + (self.step_length / 2)) / self.step_length) + 1
 			self:set_step(step, selection)
 		end
 	end)
@@ -277,7 +277,7 @@ function PresetSeq:set_grid(component)
 
 		-- Determine the global step index for this LED pad based on the display offset
 		local global_step = i + self.step_offset
-		local current_step = math.floor(auto.step / self.step_length) + 1
+		local current_step = math.floor(auto.tick / self.step_length) + 1
 		local seq_value
 
 		-- Iterate over the tick range corresponding to the global step
@@ -343,9 +343,9 @@ end
 
 function PresetSeq:transport_event(auto, data)
 	if App.recording then
-		if auto.step % self.step_length == 0 then
+		if auto.tick % self.step_length == 0 then
 			self:set_select()
-			self:set_step(math.floor(auto.step / self.step_length) + 1, self.select)
+			self:set_step(math.floor(auto.tick / self.step_length) + 1, self.select)
 		end
 	end
 	self:set_grid(auto)

@@ -76,7 +76,7 @@ function Track:set(o)
 
 	local track = 'track_' .. self.id .. '_'
 
-	Registry.add('add_group', 'Track ' .. self.id, 25)
+	Registry.add('add_group', 'Track ' .. self.id, 27)
 
 	Registry.add('add_text', track .. 'name', 'Name', self.name)
 	Registry.set_action(track .. 'name', function(d) self.name = d end)
@@ -95,9 +95,15 @@ function Track:set(o)
 		end
 
 		-- Record to buffer if track is armed and transport is playing
-		-- This happens regardless of muting settings (recording should always work)
+		-- In overwrite mode: only record when playback is disabled (silent recording)
+		-- In overdub mode: record even when playback is enabled (layering)
 		if self.armed and App.playing and self.auto then
-			if data.type == 'note_on' or data.type == 'note_off' then self.auto:record_buffer(data) end
+			local should_record = true
+			-- In overwrite mode, don't record if playback is enabled (silent recording only)
+			if not App.buffer_overdub and self.auto.buffer_playback then should_record = false end
+			-- Don't record during scrub playback (grid-triggered)
+			if self.auto.scrub_mode then should_record = false end
+			if should_record and (data.type == 'note_on' or data.type == 'note_off') then self.auto:record_buffer(data) end
 		end
 	end
 
@@ -492,27 +498,24 @@ function Track:set(o)
 		self.armed = (d > 0)
 		if self.armed then
 			print('Track ' .. self.id .. ' armed for buffer recording')
-			-- Reset step-based clearing tracking when arming for new recording pass
-			if self.auto and not App.buffer_overdub then
-				self.auto.cleared_steps = {}
-				self.auto.last_recorded_step = nil
-			end
+			-- Reset overwrite tracking when arming for new recording pass
+			if self.auto and not App.buffer_overdub then self.auto.overwrite_cleared_steps = {} end
 		end
 	end)
 
 	-- Buffer playback (per-track)
-	if self.auto then
-		Registry.add('add_binary', track .. 'buffer_playback', 'Buffer Playback', 'toggle', 1)
-		Registry.set_action(track .. 'buffer_playback', function(d)
-			if self.auto then self.auto.buffer_playback = (d > 0) end
-		end)
+	-- Following the pattern: parameter registered here, initial value set in Auto:set(),
+	-- then params:default() will call set_action to sync parameter value to component
+	Registry.add('add_binary', track .. 'buffer_playback', 'Buffer Playback', 'toggle', 0)
+	Registry.set_action(track .. 'buffer_playback', function(d)
+		if self.auto then self.auto.buffer_playback = (d > 0) end
+	end)
 
-		-- Mute input when buffer playback is active
-		Registry.add('add_binary', track .. 'mute_input_on_playback', 'Mute Input on Playback', 'toggle', 1)
-		Registry.set_action(track .. 'mute_input_on_playback', function(d)
-			if self.auto then self.auto.mute_input_on_playback = (d > 0) end
-		end)
-	end
+	-- Mute input when buffer playback is active (default enabled)
+	Registry.add('add_binary', track .. 'mute_input_on_playback', 'Mute Input on Playback', 'toggle', 1)
+	Registry.set_action(track .. 'mute_input_on_playback', function(d)
+		if self.auto then self.auto.mute_input_on_playback = (d > 0) end
+	end)
 end
 
 -- Updates current settings using an object.

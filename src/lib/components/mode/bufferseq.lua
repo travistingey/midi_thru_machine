@@ -168,7 +168,7 @@ function BufferSeq:start_scrub(pad_index)
 	local start_tick, end_tick = self:pad_to_tick_range(pad_index)
 
 	-- Save current playback state
-	self.scrub_saved_step = auto.step
+	self.scrub_saved_tick = auto.tick
 	self.scrub_saved_seq_start = auto.seq_start
 	self.scrub_saved_seq_length = auto.seq_length
 
@@ -183,19 +183,54 @@ function BufferSeq:start_scrub(pad_index)
 	print('Scrub started: ' .. start_tick .. '-' .. end_tick .. (App.buffer_scrub_loop and ' (loop)' or ' (play-through)'))
 end
 
--- Extend scrub range when holding multiple pads
-function BufferSeq:extend_scrub(pad_index)
+-- Recalculate scrub range from all currently held pads
+-- This ensures the loop is always based on currently held pads, not additive
+function BufferSeq:recalculate_scrub_from_held_pads()
 	local auto = self:get_component()
-	local start_tick, end_tick = self:pad_to_tick_range(pad_index)
 
-	-- Extend scrub range to include new pad
-	self.scrub_start_tick = math.min(self.scrub_start_tick, start_tick)
-	self.scrub_end_tick = math.max(self.scrub_end_tick, end_tick)
+	-- Find min and max pad indices from held pads
+	local min_pad = nil
+	local max_pad = nil
 
-	-- Update scrub playback range
-	auto:update_scrub(self.scrub_start_tick, self.scrub_end_tick)
+	for pad_index, _ in pairs(self.held_pads) do
+		if min_pad == nil or pad_index < min_pad then min_pad = pad_index end
+		if max_pad == nil or pad_index > max_pad then max_pad = pad_index end
+	end
 
-	print('Scrub extended: ' .. self.scrub_start_tick .. '-' .. self.scrub_end_tick)
+	-- If no pads are held, stop scrub
+	if min_pad == nil or max_pad == nil then
+		self:stop_scrub()
+		return
+	end
+
+	-- Calculate tick range from min to max pad
+	local start_tick, _ = self:pad_to_tick_range(min_pad)
+	local _, end_tick = self:pad_to_tick_range(max_pad)
+
+	-- Update scrub range
+	if self.scrub_active then
+		-- Update existing scrub with new range
+		self.scrub_start_tick = start_tick
+		self.scrub_end_tick = end_tick
+		auto:update_scrub(start_tick, end_tick)
+		print('Scrub recalculated: ' .. start_tick .. '-' .. end_tick)
+	else
+		-- Start new scrub with full range (min to max)
+		-- Save current playback state
+		self.scrub_saved_tick = auto.tick
+		self.scrub_saved_seq_start = auto.seq_start
+		self.scrub_saved_seq_length = auto.seq_length
+
+		-- Set scrub range
+		self.scrub_start_tick = start_tick
+		self.scrub_end_tick = end_tick
+		self.scrub_active = true
+
+		-- Start scrub playback (will loop if App.buffer_scrub_loop is true)
+		auto:start_scrub(start_tick, end_tick, App.buffer_scrub_loop)
+
+		print('Scrub started: ' .. start_tick .. '-' .. end_tick .. (App.buffer_scrub_loop and ' (loop)' or ' (play-through)'))
+	end
 end
 
 -- Stop scrub playback and restore normal playback
@@ -205,12 +240,12 @@ function BufferSeq:stop_scrub()
 	local auto = self:get_component()
 
 	-- Stop scrub and restore previous state
-	auto:stop_scrub(self.scrub_saved_step, self.scrub_saved_seq_start, self.scrub_saved_seq_length)
+	auto:stop_scrub(self.scrub_saved_tick, self.scrub_saved_seq_start, self.scrub_saved_seq_length)
 
 	self.scrub_active = false
 	self.scrub_start_tick = nil
 	self.scrub_end_tick = nil
-	self.scrub_saved_step = nil
+	self.scrub_saved_tick = nil
 	self.scrub_saved_seq_start = nil
 	self.scrub_saved_seq_length = nil
 
@@ -230,44 +265,30 @@ function BufferSeq:grid_event(component, data)
 	end
 	self.last_event = pad_index
 
-	-- Handle pad press (start scrub)
-	if data.type == 'pad' and data.state then
+	-- Handle pad press (start/update scrub)
+	-- Only handle pad presses when not in alt mode (alt mode is for loop setting)
+	if data.type == 'pad' and data.state and not self.mode.alt then
 		-- Track held pad
 		self.held_pads[pad_index] = true
 
-		-- Count held pads
-		local held_count = 0
-		for _ in pairs(self.held_pads) do
-			held_count = held_count + 1
-		end
-
-		if held_count == 1 then
-			-- First pad: start scrub
-			self:start_scrub(pad_index)
-		else
-			-- Additional pad: extend scrub range
-			self:extend_scrub(pad_index)
-		end
+		-- Recalculate scrub from all currently held pads
+		-- This ensures the loop is always based on currently held pads, not additive
+		self:recalculate_scrub_from_held_pads()
 	end
 
 	-- Handle pad release
-	if data.type == 'pad' and not data.state then
+	-- Only handle pad releases when not in alt mode
+	if data.type == 'pad' and not data.state and not self.mode.alt then
 		-- Remove from held pads
 		self.held_pads[pad_index] = nil
 
-		-- Count remaining held pads
-		local held_count = 0
-		for _ in pairs(self.held_pads) do
-			held_count = held_count + 1
-		end
-
-		if held_count == 0 then
-			-- All pads released: stop scrub
-			self:stop_scrub()
-		end
+		-- Recalculate scrub from remaining held pads
+		-- If no pads remain, this will stop scrub and return to normal playback
+		self:recalculate_scrub_from_held_pads()
 	end
 
 	-- Handle long press for loop point setting (alt mode)
+	-- This works the same as presetseq: long press two pads to set loop boundaries
 	if data.type == 'pad_long' and data.pad_down and #data.pad_down == 1 and self.mode.alt then
 		local pad_1 = self.grid:grid_to_index(data) + self.step_offset
 		local pad_2 = self.grid:grid_to_index(data.pad_down[1]) + self.step_offset
@@ -305,7 +326,7 @@ function BufferSeq:set_grid(component)
 
 		-- Determine the global step index for this LED pad based on the display offset
 		local global_step = i + self.step_offset
-		local current_step = math.floor(auto.step / step_length) + 1
+		local current_step = math.floor(auto.tick / step_length) + 1
 		local seq_value
 
 		-- Check if this pad is in the scrub range
@@ -380,6 +401,11 @@ function BufferSeq:alt_event(data)
 		self.index = nil
 		self.mode:cancel_context()
 		self:start_blink()
+		-- Clear any held pads and stop scrub when entering alt mode
+		if self.scrub_active then
+			self:stop_scrub()
+			self.held_pads = {}
+		end
 		local auto = self:get_component()
 		self:set_grid(auto)
 		local cleanup_holder = {}
