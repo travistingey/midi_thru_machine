@@ -105,14 +105,16 @@ function BufferSeq:increase_step_length()
 	local current_display_offset = self.display_offset * current_step_length
 
 	if current_step_length < max_step_length then
+		local new_length
 		if current_step_length == 1 then
-			auto.buffer_step_length = 3
+			new_length = 3
 		else
-			auto.buffer_step_length = current_step_length * 2
+			new_length = current_step_length * 2
 		end
+		-- Use set_buffer_step_length to trigger re-swap
+		-- auto:set_buffer_step_length(new_length)
 		self:recalculate_display(current_display_offset)
 		self:set_grid(auto)
-		print('Buffer step length: ' .. auto.buffer_step_length .. ' ticks')
 	end
 end
 
@@ -123,16 +125,18 @@ function BufferSeq:decrease_step_length()
 	local current_step_length = auto.buffer_step_length or 24
 	local current_display_offset = self.display_offset * current_step_length
 
+	local new_length
 	if current_step_length > min_step_length then
-		auto.buffer_step_length = current_step_length / 2
-		self:recalculate_display(current_display_offset)
-		self:set_grid(auto)
-		print('Buffer step length: ' .. auto.buffer_step_length .. ' ticks')
+		new_length = current_step_length / 2
 	elseif current_step_length <= min_step_length then
-		auto.buffer_step_length = 1
+		new_length = 1
+	end
+
+	if new_length then
+		-- Use set_buffer_step_length to trigger re-swap
+		-- auto:set_buffer_step_length(new_length)
 		self:recalculate_display(current_display_offset)
 		self:set_grid(auto)
-		print('Buffer step length: ' .. auto.buffer_step_length .. ' ticks')
 	end
 end
 
@@ -167,8 +171,7 @@ function BufferSeq:start_scrub(pad_index)
 	local auto = self:get_component()
 	local start_tick, end_tick = self:pad_to_tick_range(pad_index)
 
-	-- Save current playback state
-	self.scrub_saved_tick = auto.tick
+	-- Save loop boundaries (auto.tick continues updating automatically)
 	self.scrub_saved_seq_start = auto.seq_start
 	self.scrub_saved_seq_length = auto.seq_length
 
@@ -178,9 +181,9 @@ function BufferSeq:start_scrub(pad_index)
 	self.scrub_active = true
 
 	-- Start scrub playback
-	auto:start_scrub(start_tick, end_tick, App.buffer_scrub_loop)
+	auto:start_scrub(start_tick, end_tick, App.buffer_scrub_mode == 'loop')
 
-	print('Scrub started: ' .. start_tick .. '-' .. end_tick .. (App.buffer_scrub_loop and ' (loop)' or ' (play-through)'))
+	print('Scrub started: ' .. start_tick .. '-' .. end_tick .. ' (' .. App.buffer_scrub_mode .. ')')
 end
 
 -- Recalculate scrub range from all currently held pads
@@ -216,8 +219,7 @@ function BufferSeq:recalculate_scrub_from_held_pads()
 		print('Scrub recalculated: ' .. start_tick .. '-' .. end_tick)
 	else
 		-- Start new scrub with full range (min to max)
-		-- Save current playback state
-		self.scrub_saved_tick = auto.tick
+		-- Save loop boundaries (auto.tick continues updating automatically)
 		self.scrub_saved_seq_start = auto.seq_start
 		self.scrub_saved_seq_length = auto.seq_length
 
@@ -226,11 +228,37 @@ function BufferSeq:recalculate_scrub_from_held_pads()
 		self.scrub_end_tick = end_tick
 		self.scrub_active = true
 
-		-- Start scrub playback (will loop if App.buffer_scrub_loop is true)
-		auto:start_scrub(start_tick, end_tick, App.buffer_scrub_loop)
+		-- Start scrub playback (will loop if App.buffer_scrub_mode is 'loop')
+		auto:start_scrub(start_tick, end_tick, App.buffer_scrub_mode == 'loop')
 
-		print('Scrub started: ' .. start_tick .. '-' .. end_tick .. (App.buffer_scrub_loop and ' (loop)' or ' (play-through)'))
+		print('Scrub started: ' .. start_tick .. '-' .. end_tick .. ' (' .. App.buffer_scrub_mode .. ')')
 	end
+end
+
+-- Jump buffer playback to a specific tick (play-through mode)
+function BufferSeq:jump_to_tick(tick)
+	local auto = self:get_component()
+
+	-- If in scrub mode, set scrub_tick; otherwise set auto.tick
+	if auto.scrub_mode then
+		auto.scrub_tick = tick
+		print('Scrub playback jumped to tick: ' .. tick)
+	else
+		auto.tick = tick
+		print('Buffer playback jumped to tick: ' .. tick)
+	end
+end
+
+-- Resync buffer playback with app tick (play-through mode)
+function BufferSeq:resync_with_app()
+	local auto = self:get_component()
+
+	-- Calculate loop-aware position from App.tick
+	-- App.tick is a global counter, but auto.tick must respect loop boundaries
+	-- Convert App.tick to position within loop: (App.tick % seq_length) + seq_start
+	auto.tick = (App.tick % auto.seq_length) + auto.seq_start
+
+	print('Buffer playback resynced with app tick: ' .. App.tick .. ' -> auto.tick: ' .. auto.tick)
 end
 
 -- Stop scrub playback and restore normal playback
@@ -240,12 +268,12 @@ function BufferSeq:stop_scrub()
 	local auto = self:get_component()
 
 	-- Stop scrub and restore previous state
-	auto:stop_scrub(self.scrub_saved_tick, self.scrub_saved_seq_start, self.scrub_saved_seq_length)
+	-- Note: auto.tick is already at the correct position (it's been updating in the background)
+	auto:stop_scrub(nil, self.scrub_saved_seq_start, self.scrub_saved_seq_length)
 
 	self.scrub_active = false
 	self.scrub_start_tick = nil
 	self.scrub_end_tick = nil
-	self.scrub_saved_tick = nil
 	self.scrub_saved_seq_start = nil
 	self.scrub_saved_seq_length = nil
 
@@ -271,9 +299,15 @@ function BufferSeq:grid_event(component, data)
 		-- Track held pad
 		self.held_pads[pad_index] = true
 
-		-- Recalculate scrub from all currently held pads
-		-- This ensures the loop is always based on currently held pads, not additive
-		self:recalculate_scrub_from_held_pads()
+		-- Check if we're in play-through mode
+		if App.buffer_scrub_mode == 'play_through' then
+			-- Play-through mode: jump buffer playback to the first tick of this step
+			local start_tick, _ = self:pad_to_tick_range(pad_index)
+			self:jump_to_tick(start_tick)
+		else
+			-- Loop mode: use standard scrub behavior
+			self:recalculate_scrub_from_held_pads()
+		end
 	end
 
 	-- Handle pad release
@@ -282,9 +316,20 @@ function BufferSeq:grid_event(component, data)
 		-- Remove from held pads
 		self.held_pads[pad_index] = nil
 
-		-- Recalculate scrub from remaining held pads
-		-- If no pads remain, this will stop scrub and return to normal playback
-		self:recalculate_scrub_from_held_pads()
+		-- Handle play-through mode release behavior
+		if App.buffer_scrub_mode == 'play_through' then
+			-- In play-through mode, pad releases don't do anything
+			-- The buffer continues playing at its current offset
+		else
+			-- Loop mode: use standard scrub behavior
+			self:recalculate_scrub_from_held_pads()
+		end
+	end
+
+	-- Handle long press in play-through mode (resync with app)
+	if data.type == 'pad_long' and not self.mode.alt and App.buffer_scrub_mode == 'play_through' then
+		-- Long press in play-through mode: resync buffer playback with app
+		self:resync_with_app()
 	end
 
 	-- Handle long press for loop point setting (alt mode)
@@ -337,12 +382,25 @@ function BufferSeq:set_grid(component)
 		end
 
 		-- Iterate over the tick range corresponding to the global step
+		-- Buffer lane reads from auto.buffer_read, not auto.seq
 		for j = (global_step - 1) * step_length, global_step * step_length - 1 do
-			if auto.seq[j] and auto.seq[j][lane] then
-				local events = auto.seq[j][lane]
-				if events and #events > 0 then
-					seq_value = #events
-					break
+			if lane == 'buffer' then
+				-- Buffer events are stored in buffer_read
+				if auto.buffer_read[j] then
+					local events = auto.buffer_read[j]
+					if events and #events > 0 then
+						seq_value = #events
+						break
+					end
+				end
+			else
+				-- Other lanes (preset, scale, cc) still in seq
+				if auto.seq[j] and auto.seq[j][lane] then
+					local events = auto.seq[j][lane]
+					if events and #events > 0 then
+						seq_value = #events
+						break
+					end
 				end
 			end
 		end
@@ -394,7 +452,12 @@ function BufferSeq:set_grid(component)
 	grid:refresh('BufferSeq:set_grid')
 end
 
-function BufferSeq:transport_event(auto, data) self:set_grid(auto) end
+function BufferSeq:transport_event(auto, data)
+	-- Play-through mode doesn't need special transport handling
+	-- The buffer just plays from wherever it was jumped to
+
+	self:set_grid(auto)
+end
 
 function BufferSeq:alt_event(data)
 	if data.state and self.mode.alt then

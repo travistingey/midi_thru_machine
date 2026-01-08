@@ -245,22 +245,6 @@ function BufferDefault:buffer_menu()
 		})
 	)
 
-	-- Mute Input on Playback (per-track)
-	table.insert(
-		items,
-		Registry.menu.make_item('track_' .. track_id .. '_mute_input_on_playback', {
-			label_fn = function() return 'MUTE INPUT' end,
-			value_fn = function()
-				local track = App.track[App.current_track]
-				local mute = track and track.auto and track.auto.mute_input_on_playback
-				return mute and 'yes' or 'no'
-			end,
-			helper_labels = {
-				enc3 = 'toggle',
-			},
-		})
-	)
-
 	-- Overdub vs Overwrite
 	table.insert(
 		items,
@@ -285,24 +269,12 @@ function BufferDefault:buffer_menu()
 		})
 	)
 
-	-- Mute on Arm
+	-- Scrub Mode (loop vs play-through)
 	table.insert(
 		items,
-		Registry.menu.make_item('buffer_mute_on_arm', {
-			label_fn = function() return 'MUTE ON ARM' end,
-			value_fn = function() return App.buffer_mute_on_arm and 'yes' or 'no' end,
-			helper_labels = {
-				enc3 = 'toggle',
-			},
-		})
-	)
-
-	-- Scrub Loop mode
-	table.insert(
-		items,
-		Registry.menu.make_item('buffer_scrub_loop', {
+		Registry.menu.make_item('buffer_scrub_mode', {
 			label_fn = function() return 'SCRUB MODE' end,
-			value_fn = function() return App.buffer_scrub_loop and 'loop' or 'play-thru' end,
+			value_fn = function() return App.buffer_scrub_mode == 'loop' and 'loop' or 'play-thru' end,
 			helper_labels = {
 				enc3 = 'toggle',
 			},

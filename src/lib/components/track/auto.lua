@@ -22,7 +22,7 @@ end
 function Auto:set(o)
 	self.id = o.id or 1
 	self.seq = o.seq or {}
-	self.seq_start = o.seq_start or 0
+	self.seq_start = o.seq_start or 1
 	self.seq_length = App.ppqn * 16
 	self.tick = o.tick or 0 -- Current playback position in ticks (renamed from 'step')
 	self.playing = false
@@ -34,19 +34,40 @@ function Auto:set(o)
 
 	-- Buffer for live MIDI recording
 	-- Note: buffer_length is kept for backwards compatibility but buffer now follows seq_length
-	self.buffer_length = App.BUFFER_LENGTH or (App.ppqn * 16)
+	self.buffer_length = o.buffer_length or (App.ppqn * 16)
 
 	-- Buffer step length (in ticks) - defines duration of one "step"
-	-- Defaults to track's step_length converted to ticks, or 24 ticks (1 beat at 24ppqn)
-	self.buffer_step_length = o.buffer_step_length or (self.track and self.track.step_length and (self.track.step_length * App.ppqn / 4) or 24)
+	self.buffer_step_length = o.buffer_step_length or 6
 
 	-- Buffer playback settings (defaults - will be overridden by params)
 	self.buffer_playback = o.buffer_playback or false -- Default off for silent recording
-	self.mute_input_on_playback = o.mute_input_on_playback ~= nil and o.mute_input_on_playback or true -- Default enabled
+
+	-- Double buffer architecture for recording/playback separation
+	-- buffer_write: Always record to this buffer
+	-- buffer_read: Always playback from this buffer
+	-- Swap happens at step boundaries (not loop boundaries) for immediate feedback
+	self.buffer_write = {} -- Buffer being recorded to
+	self.buffer_read = {} -- Buffer being played back
+	self.last_step_index = nil -- Track step transitions for swap timing
+
+	-- Migrate existing buffer data if present (backward compatibility)
+	if o.seq then
+		for tick, lanes in pairs(o.seq) do
+			if lanes.buffer then
+				-- Migrate to both read and write buffers
+				self.buffer_write[tick] = lanes.buffer
+				self.buffer_read[tick] = lanes.buffer
+			end
+		end
+	end
 
 	-- Overwrite mode tracking: tracks which steps have been cleared in current loop iteration
 	-- Key: step_index (step number within loop), Value: true
 	self.overwrite_cleared_steps = {}
+
+	-- Scrub tick: separate tick counter for scrub mode playback
+	-- auto.tick continues updating normally even during scrub mode
+	self.scrub_tick = nil
 
 	self:on('record_event', function(data)
 		local tick = self.tick
@@ -56,14 +77,10 @@ function Auto:set(o)
 end
 
 -- Helper: Get current step index (0-based) from current tick
-function Auto:get_current_step_index()
-	return math.floor(self.tick / self.buffer_step_length)
-end
+function Auto:get_current_step_index() return math.floor(self.tick / self.buffer_step_length) end
 
 -- Helper: Convert tick to step index (0-based)
-function Auto:tick_to_step_index(tick)
-	return math.floor(tick / self.buffer_step_length)
-end
+function Auto:tick_to_step_index(tick) return math.floor(tick / self.buffer_step_length) end
 
 -- Helper: Convert step index to tick range (returns start_tick, end_tick inclusive)
 function Auto:step_index_to_tick_range(step_index)
@@ -73,56 +90,113 @@ function Auto:step_index_to_tick_range(step_index)
 end
 
 -- Helper: Convert step index to start tick
-function Auto:step_index_to_start_tick(step_index)
-	return step_index * self.buffer_step_length
+function Auto:step_index_to_start_tick(step_index) return step_index * self.buffer_step_length end
+
+-- Swap buffer step: Copy buffer_write to buffer_read for a single step
+-- Called on step transitions to provide immediate feedback (within one step)
+-- Only swaps ticks within both step boundaries and loop boundaries
+function Auto:swap_buffer_step(step_index)
+	if not self.track.armed then return end
+	local start_tick, end_tick = self:step_index_to_tick_range(step_index)
+
+	-- Clamp to loop boundaries
+	local loop_start = self.seq_start
+	local loop_end = self.seq_start + self.seq_length - 1
+	start_tick = math.max(start_tick, loop_start)
+	end_tick = math.min(end_tick, loop_end)
+
+	-- Clear old read data for this step
+	for tick = start_tick, end_tick do
+		self.buffer_read[tick] = nil
+	end
+
+	-- Copy write to read for this step (shallow copy - tables share event references)
+	for tick = start_tick, end_tick do
+		if self.buffer_write[tick] then self.buffer_read[tick] = self.buffer_write[tick] end
+	end
 end
 
--- Record a MIDI event to the buffer lane at the current tick
+-- -- Set buffer step length and invalidate/re-swap if changed
+-- -- Called when user changes step length in bufferseq
+-- function Auto:set_buffer_step_length(new_length)
+-- 	local old_length = self.buffer_step_length
+-- 	self.buffer_step_length = new_length
+
+-- 	if old_length ~= new_length then
+-- 		-- Invalidate and re-swap with new step boundaries
+-- 		self:invalidate_and_reswap()
+-- 	end
+-- end
+
+-- -- Invalidate buffer_read and re-swap all steps with current step length
+-- -- Called when buffer_step_length changes
+-- function Auto:invalidate_and_reswap()
+-- 	-- Clear read buffer
+-- 	self.buffer_read = {}
+
+-- 	-- Re-swap all steps within current loop
+-- 	local loop_start = self.seq_start
+-- 	local loop_end = self.seq_start + self.seq_length - 1
+-- 	local first_step = self:tick_to_step_index(loop_start)
+-- 	local last_step = self:tick_to_step_index(loop_end)
+
+-- 	for step_idx = first_step, last_step do
+-- 		self:swap_buffer_step(step_idx)
+-- 	end
+
+-- 	-- Reset step tracking
+-- 	self.last_step_index = nil
+
+-- 	print('Buffer re-swapped with new step length: ' .. self.buffer_step_length .. ' ticks')
+-- end
+
+-- Record a MIDI event to the buffer write lane at the current tick
 -- Events wrap around within the auto loop boundaries (seq_start to seq_start + seq_length)
 -- Overwrite mode clearing is handled in transport_event when entering new steps
+-- Records to buffer_write only - buffer_read is updated via step-based swapping
 function Auto:record_buffer(midi_event)
+	if not self.track.armed then return end
+
+	if midi_event.tick == self.tick then return end
+
 	-- Wrap tick within the auto loop boundaries
 	local relative_tick = self.tick - self.seq_start
 	local tick = self.seq_start + (relative_tick % self.seq_length)
 
-	if not self.seq[tick] then self.seq[tick] = {} end
-	if not self.seq[tick].buffer then self.seq[tick].buffer = {} end
+	-- Initialize buffer_write table for this tick if needed
+	if not self.buffer_write[tick] then self.buffer_write[tick] = {} end
+
+	midi_event.buffer_sent = nil
+	midi_event.tick = self.tick
 
 	-- Store the event (multiple events can exist at same tick)
-	table.insert(self.seq[tick].buffer, {
-		type = midi_event.type,
-		note = midi_event.note,
-		vel = midi_event.vel,
-		ch = midi_event.ch,
-	})
+	table.insert(self.buffer_write[tick], midi_event)
 end
 
 -- Clear buffer events for a single tick (used for overwrite mode)
+-- Only clears buffer_write (not buffer_read, which continues playing)
 function Auto:clear_buffer_tick(tick)
-	if self.seq[tick] and self.seq[tick].buffer then self.seq[tick].buffer = {} end
+	if self.buffer_write[tick] then self.buffer_write[tick] = nil end
 end
 
 -- Clear buffer events for an entire step range (all ticks in a step)
 -- Used for overwrite mode when entering a new step
+-- Only clears buffer_write (not buffer_read, which continues playing)
 function Auto:clear_buffer_step(step_index)
 	-- Calculate the step boundaries within the loop
 	local step_start = self.seq_start + (step_index * self.buffer_step_length)
 	local step_end = math.min(step_start + self.buffer_step_length - 1, self.seq_start + self.seq_length - 1)
 
-	-- Clear all ticks in this step range
+	-- Clear all ticks in this step range from write buffer
 	for tick = step_start, step_end do
-		if self.seq[tick] and self.seq[tick].buffer then self.seq[tick].buffer = {} end
+		if self.buffer_write[tick] then self.buffer_write[tick] = nil end
 	end
 end
 
--- Clear the buffer lane
+-- Clear both buffer_write and buffer_read
 function Auto:clear_buffer()
-	for tick, lanes in pairs(self.seq) do
-		if lanes.buffer then lanes.buffer = nil end
-		-- Clean up empty tick entries
-		if next(lanes) == nil then self.seq[tick] = nil end
-	end
-	print('Buffer cleared for track ' .. self.track.id)
+	self.buffer_write = {}
+	self.buffer_read = {}
 end
 
 function Auto:get_action(step, lane)
@@ -194,7 +268,7 @@ end
 function Auto:transport_event(data)
 	if data.type == 'start' then
 		self.playing = true
-		self.tick = 0
+		self.tick = 1
 		self.active_cc = nil
 		-- Clear any lingering buffer notes from previous playback
 		self:kill_notes()
@@ -204,88 +278,111 @@ function Auto:transport_event(data)
 		if self.seq[self.tick] then self:run_events(self.seq[self.tick]) end
 	elseif data.type == 'stop' then
 		self.playing = false
-		self.tick = 0
+		self.tick = 1
 		-- Kill all active buffer notes to prevent stuck notes
 		self:kill_notes()
 		if self.seq[self.tick] then self:run_events(self.seq[self.tick]) end
 	elseif data.type == 'clock' and self.playing then
 		self:update_cc()
+
+		-- Detect step transitions for buffer swapping
+		local current_step_index = self:tick_to_step_index(self.tick)
+
+		-- Swap on step exit (when entering new step, swap the completed step)
+		if self.last_step_index and current_step_index ~= self.last_step_index then
+			if not self.scrub_mode then
+				self:swap_buffer_step(self.last_step_index)
+			elseif self.last_step_index < self:tick_to_step_index(self.scrub_start) or self.last_step_index > self:tick_to_step_index(self.scrub_end) then
+				self:swap_buffer_step(self.last_step_index)
+			end
+		end
+
+		-- Update last_step_index for next iteration
+		self.last_step_index = current_step_index
+
 		-- Offset run ticks ahead of current tick
-		local run_offset = 2
+		local run_offset = 1
 
 		if self.tick < run_offset then
 			if self.seq[self.tick] then self:run_events(self.seq[self.tick]) end
 		end
 
-		-- Calculate the next tick
+		-- Calculate the next tick for normal playback
 		local next_tick = self.tick + run_offset
 
-		-- Handle scrub mode separately
+		-- Always update auto.tick based on normal playback rules (even during scrub mode)
+		-- This ensures playback can seamlessly resume when scrub stops
+		if next_tick >= self.seq_start + self.seq_length then
+			-- Handle buffer recording modes at loop boundary
+			if self.track.armed then
+				-- One-shot mode: disarm track after completing loop
+				if not App.buffer_loop then
+					self.track.armed = false
+					Registry.set('track_' .. self.track.id .. '_armed', 0, 'buffer_oneshot')
+					print('Track ' .. self.track.id .. ' disarmed (one-shot complete)')
+				end
+			end
+
+			-- Reset overwrite tracking for new loop iteration
+			-- This allows overwrite mode to clear events again on the next loop
+			self.overwrite_cleared_steps = {}
+
+			-- Emit loop boundary event
+			self:emit('loop_boundary')
+
+			next_tick = self.seq_start
+			self.tick = self.seq_start
+		else
+			self.tick = self.tick + 1
+		end
+
+		-- Handle overwrite mode step clearing after handling loop boundary
+		-- In overwrite mode, when entering a new step and track is armed, clear that step
+		if not App.buffer_overdub and not self.buffer_playback then
+			-- Calculate which step index we're entering (within the loop)
+			local relative_next_tick = next_tick - self.seq_start
+			-- Ensure we're within bounds (should always be after loop boundary handling)
+			if relative_next_tick >= 0 and relative_next_tick < self.seq_length then
+				local step_index = math.floor(relative_next_tick / self.buffer_step_length)
+
+				-- Clear the step if we haven't cleared it in this loop iteration
+				if not self.overwrite_cleared_steps[step_index] then
+					self:clear_buffer_step(step_index)
+					self.overwrite_cleared_steps[step_index] = true
+				end
+			end
+		end
+
+		-- Handle scrub mode separately from normal playback
 		if self.scrub_mode then
-			if next_tick > self.scrub_end then
+			-- Update scrub_tick for scrub playback
+			local next_scrub_tick = (self.scrub_tick or self.scrub_start) + run_offset
+
+			if next_scrub_tick > self.scrub_end then
 				if self.scrub_loop then
 					-- Loop back to scrub start
 					self:kill_notes()
-					next_tick = self.scrub_start
-					self.tick = self.scrub_start
+					next_scrub_tick = self.scrub_start
+					self.scrub_tick = self.scrub_start
 				else
-					-- Play-through mode: stay at end (will be restored when scrub stops)
-					next_tick = self.scrub_end
-					self.tick = self.scrub_end
+					-- Play-through mode: stay at end
+					next_scrub_tick = self.scrub_end
+					self.scrub_tick = self.scrub_end
 				end
 			else
-				self.tick = self.tick + 1
+				self.scrub_tick = next_scrub_tick
 			end
 
-			-- Only run buffer events during scrub
-			local actions = self.seq[next_tick]
-			if actions and actions.buffer then self:run_buffer(actions.buffer) end
+			-- Only run buffer events during scrub (from buffer_read, using scrub_tick)
+			if self.buffer_read[self.scrub_tick] then self:run_buffer(self.buffer_read[self.scrub_tick]) end
 		else
-			-- Normal playback mode
-			if next_tick >= self.seq_start + self.seq_length then
-				-- Handle buffer recording modes at loop boundary
-				if self.track.armed then
-					-- One-shot mode: disarm track after completing loop
-					if not App.buffer_loop then
-						self.track.armed = false
-						Registry.set('track_' .. self.track.id .. '_armed', 0, 'buffer_oneshot')
-						print('Track ' .. self.track.id .. ' disarmed (one-shot complete)')
-					end
-				end
+			if not self.buffer_playback then self.track:emit('mute_input', false) end
 
-				-- Reset overwrite tracking for new loop iteration
-				-- This allows overwrite mode to clear events again on the next loop
-				self.overwrite_cleared_steps = {}
-
-				-- Emit loop boundary event
-				self:emit('loop_boundary')
-
-				next_tick = self.seq_start
-				self.tick = self.seq_start
-			else
-				self.tick = self.tick + 1
-			end
-
-			-- Handle overwrite mode step clearing after handling loop boundary
-			-- In overwrite mode, when entering a new step and track is armed, clear that step
-			if not App.buffer_overdub and self.track.armed then
-				-- Calculate which step index we're entering (within the loop)
-				local relative_next_tick = next_tick - self.seq_start
-				-- Ensure we're within bounds (should always be after loop boundary handling)
-				if relative_next_tick >= 0 and relative_next_tick < self.seq_length then
-					local step_index = math.floor(relative_next_tick / self.buffer_step_length)
-
-					-- Clear the step if we haven't cleared it in this loop iteration
-					if not self.overwrite_cleared_steps[step_index] then
-						self:clear_buffer_step(step_index)
-						self.overwrite_cleared_steps[step_index] = true
-					end
-				end
-			end
-
+			-- Run automation events (presets, scales, cc)
 			local actions = self.seq[next_tick]
-
 			if actions then self:run_events(actions) end
+
+			if self.buffer_read[next_tick] then self:run_buffer(self.buffer_read[next_tick]) end
 		end
 	end
 
@@ -303,43 +400,42 @@ function Auto:run_events(actions)
 		elseif action_type == 'cc' and action_data then
 			self:run_cc(action_data)
 			self:emit('cc_change', action_data)
-		elseif action_type == 'buffer' and action_data then
-			self:run_buffer(action_data)
 		end
+		-- Note: 'buffer' is no longer in seq[tick] - it's now in buffer_read/buffer_write
 	end
 end
 
 -- Playback buffer events directly to output (bypasses processing chain)
--- Respects per-track buffer_playback param, scrub mode, and App.buffer_mute_on_arm settings
+-- Respects per-track buffer_playback param, scrub mode settings
 function Auto:run_buffer(events)
 	if not self.track.output_device then return end
-
 	-- Check if buffer playback is enabled for this track (via param)
 	-- OR if scrub mode is active (grid-triggered playback)
 	local playback_enabled = false
-	if self.scrub_mode then
+
+	if self.scrub_mode or self.buffer_playback then
 		-- Scrub mode always allows playback (grid-triggered)
+		self.track:emit('mute_input', true)
 		playback_enabled = true
-	elseif self.buffer_playback then
-		-- Param-based automatic playback
+	elseif App.buffer_overdub and self.track.armed then
+		self.track:emit('mute_input', false)
 		playback_enabled = true
 	end
 
 	if not playback_enabled then return end
 
-	-- Check if buffer should be muted because track is armed
-	if App.buffer_mute_on_arm and self.track.armed then return end
-
 	for _, event in ipairs(events) do
 		local ch = event.ch or self.track.midi_out
-		local midi_msg = {
-			type = event.type,
-			note = event.note,
-			vel = event.vel,
-			ch = ch,
-		}
 
-		self.track.output_device:send(midi_msg)
+		local midi_msg = {}
+
+		for k, v in pairs(event) do
+			midi_msg[k] = v
+		end
+
+		midi_msg.buffer_sent = App.tick
+
+		self.track:send_input(midi_msg)
 	end
 end
 
@@ -449,23 +545,29 @@ function Auto:start_scrub(start_tick, end_tick, loop_mode)
 	self.scrub_length = end_tick - start_tick + 1
 
 	-- Jump to scrub start position
-	self.tick = start_tick
+	self.scrub_tick = start_tick
 end
 
 -- Update scrub range (for multi-pad selection)
+-- If current tick is outside new range, jump to stay within boundaries
 function Auto:update_scrub(start_tick, end_tick)
 	if not self.scrub_mode then return end
 
 	-- Kill notes to prevent stuck notes when range changes
 	self:kill_notes()
 
+	-- Update scrub boundaries
 	self.scrub_start = start_tick
 	self.scrub_end = end_tick
 	self.scrub_length = end_tick - start_tick + 1
+
+	-- If current scrub_tick is now outside the new scrub range, jump to scrub start
+	if not self.scrub_tick or self.scrub_tick < start_tick or self.scrub_tick > end_tick then self.scrub_tick = start_tick end
 end
 
 -- Stop scrub and restore normal playback
 function Auto:stop_scrub(saved_tick, saved_seq_start, saved_seq_length)
+	self.track:emit('mute_input', false)
 	if not self.scrub_mode then return end
 
 	-- Kill any scrub notes
@@ -477,9 +579,10 @@ function Auto:stop_scrub(saved_tick, saved_seq_start, saved_seq_length)
 	self.scrub_start = nil
 	self.scrub_end = nil
 	self.scrub_length = nil
+	self.scrub_tick = nil
 
-	-- Restore playback position and loop points
-	if saved_tick then self.tick = saved_tick end
+	-- Restore loop points if they were changed
+	-- Note: auto.tick is already at the correct position (it's been updating in the background)
 	if saved_seq_start then self.seq_start = saved_seq_start end
 	if saved_seq_length then self.seq_length = saved_seq_length end
 end

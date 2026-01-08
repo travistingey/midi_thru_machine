@@ -59,6 +59,7 @@ function Track:set(o)
 	self.name = 'Track ' .. o.id
 	self.input_device = o.input_device or App.device_manager:get(1)
 	self.input_type = o.input_type or Input.options[1]
+	self.mute_input = false
 
 	self.output_device = o.output_device or App.device_manager:get(2)
 	self.output_type = o.output_type or Output.options[1]
@@ -93,23 +94,15 @@ function Track:set(o)
 			-- 	self:emit('cc_event', data)
 			-- end
 		end
-
-		-- Record to buffer if track is armed and transport is playing
-		-- In overwrite mode: only record when playback is disabled (silent recording)
-		-- In overdub mode: record even when playback is enabled (layering)
-		if self.armed and App.playing and self.auto then
-			local should_record = true
-			-- In overwrite mode, don't record if playback is enabled (silent recording only)
-			if not App.buffer_overdub and self.auto.buffer_playback then should_record = false end
-			-- Don't record during scrub playback (grid-triggered)
-			if self.auto.scrub_mode then should_record = false end
-			if should_record and (data.type == 'note_on' or data.type == 'note_off') then self.auto:record_buffer(data) end
-		end
 	end
 
 	-- Keep an updated cache of held notes for follow modes that rely on note_on state
 	self:on('midi_event', input_event)
 	self:on('midi_trigger', input_event)
+	self:on('mute_input', function(state) self.mute_input = state end)
+	self:on('record_buffer', function(data, tick)
+		if self.armed and App.playing and self.auto then self.auto:record_buffer(data, tick) end
+	end)
 
 	-- Device In/Out
 	local midi_devices = {}
@@ -497,8 +490,7 @@ function Track:set(o)
 		local was_armed = self.armed
 		self.armed = (d > 0)
 		if self.armed then
-			print('Track ' .. self.id .. ' armed for buffer recording')
-			-- Reset overwrite tracking when arming for new recording pass
+			self.auto.buffer_playback = false
 			if self.auto and not App.buffer_overdub then self.auto.overwrite_cleared_steps = {} end
 		end
 	end)
@@ -508,13 +500,11 @@ function Track:set(o)
 	-- then params:default() will call set_action to sync parameter value to component
 	Registry.add('add_binary', track .. 'buffer_playback', 'Buffer Playback', 'toggle', 0)
 	Registry.set_action(track .. 'buffer_playback', function(d)
-		if self.auto then self.auto.buffer_playback = (d > 0) end
-	end)
-
-	-- Mute input when buffer playback is active (default enabled)
-	Registry.add('add_binary', track .. 'mute_input_on_playback', 'Mute Input on Playback', 'toggle', 1)
-	Registry.set_action(track .. 'mute_input_on_playback', function(d)
-		if self.auto then self.auto.mute_input_on_playback = (d > 0) end
+		local buffer_playback = (d > 0)
+		if self.auto then
+			self.auto.buffer_playback = buffer_playback
+			self.armed = not buffer_playback
+		end
 	end)
 end
 

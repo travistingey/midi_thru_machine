@@ -96,16 +96,11 @@ function App:init(o)
 	self.swing = 0.5
 	self.swing_div = 6 -- 1/16 note swing
 
-	-- Buffer recording length (in ticks). Start small for validation.
-	-- 384 ticks = 16 beats at 24ppqn = 4 bars
-	self.BUFFER_LENGTH = 192
-
 	-- Buffer recording mode settings (app-level)
-	self.buffer_overdub = true -- true = overdub (layer), false = overwrite (replace)
+	self.buffer_overdub = false -- true = overdub (layer), false = overwrite (replace)
 	self.buffer_loop = true -- true = continuous loop recording, false = one-shot (disarm after loop)
-	self.buffer_mute_on_arm = false -- true = mute buffer playback while armed, false = play while recording
 	self.buffer_playback = true -- true = buffer playback enabled, false = buffer muted
-	self.buffer_scrub_loop = true -- true = loop scrub range, false = play through once
+	self.buffer_scrub_mode = 'loop' -- 'loop' = loop scrub range, 'play_through' = play through once
 
 	-- Tick and transport timing (times in beats)
 	self.tick = 0
@@ -190,8 +185,8 @@ function App:init(o)
 	params:add_binary('buffer_mute_on_arm', 'Mute on Arm', 'toggle', 0)
 	params:set_action('buffer_mute_on_arm', function(d) self.buffer_mute_on_arm = (d > 0) end)
 
-	params:add_binary('buffer_scrub_loop', 'Scrub Loop', 'toggle', 1)
-	params:set_action('buffer_scrub_loop', function(d) self.buffer_scrub_loop = (d > 0) end)
+	params:add_option('buffer_scrub_mode', 'Scrub Mode', { 'loop', 'play_through' }, 1)
+	params:set_action('buffer_scrub_mode', function(d) self.buffer_scrub_mode = d == 1 and 'loop' or 'play_through' end)
 	self.device_manager:register_params()
 	-- Create the tracks
 	params:add_separator('tracks', 'Tracks')

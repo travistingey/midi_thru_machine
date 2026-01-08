@@ -130,19 +130,14 @@ function MIDIDevice:send(data)
 		end
 	end
 
-	local send = {}
-	for key, value in pairs(data) do
-		send[key] = value
+	if data.new_note then data.note = data.new_note end
+
+	if data.type == 'cc' then
+		data.note = nil
+		data.vel = nil
 	end
 
-	if data.new_note then send.note = data.new_note end
-
-	if send.type == 'cc' then
-		send.note = nil
-		send.vel = nil
-	end
-
-	self.device:send(send)
+	self.device:send(data)
 end
 
 function MIDIDevice:kill() self.manager:emit(self.id, 'kill', { type = 'kill' }) end
