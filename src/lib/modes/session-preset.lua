@@ -1,23 +1,26 @@
 local Grid = require('Foobar/lib/grid')
 local utilities = require('Foobar/lib/utilities')
-local ParamTrace = require('Foobar/lib/utilities/paramtrace')
+local Registry = require('Foobar/lib/utilities/registry')
 local path_name = 'Foobar/lib/components/mode/'
 
 local MuteGrid = require('Foobar/lib/components/mode/mutegrid') 
 local PresetGrid = require('Foobar/lib/components/mode/presetgrid')
 local PresetSeq = require('Foobar/lib/components/mode/presetseq')
+local Default = require('Foobar/lib/components/mode/default')   
 
 local Mode = require('Foobar/lib/components/app/mode')
 
 local presetseq = PresetSeq:new({track=1})
 local mutegrid = MuteGrid:new({track=1})
 local presetgrid = PresetGrid:new({track=1, param_type='track'})
+local default = Default:new({})
 
 local SessionMode = Mode:new({
     id = 1,
     track = 1,
     cursor = 1,
     components = {
+        default,
         presetseq,
         mutegrid,
         presetgrid

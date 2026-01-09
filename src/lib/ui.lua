@@ -1,195 +1,261 @@
-require('Foobar/lib/musicutil-extended')
+local musicutil = require('Foobar/lib/musicutil-extended')
 
 local UI = {
-    cursor = 1,
-    cursor_positions = 1,
-    current_font = 1,
-    menu = {},
-    max_visible_items = 5,
-    fonts = {
-		{ name = "04B_03", face = 1, size = 8 },        -- 1
-		{ name = "ALEPH", face = 2, size = 8 },         -- 2   
-		{ name = "tom-thumb", face = 25, size = 6 },    -- 3
-		{ name = "creep", face = 26, size = 16 },       -- 4
-		{ name = "ctrld", face = 27, size = 10 },       -- 5
-		{ name = "ctrld", face = 28, size = 10 },       -- 6
-		{ name = "ctrld", face = 29, size = 13 },       -- 7 
-		{ name = "ctrld", face = 30, size = 13 },       -- 8
-		{ name = "ctrld", face = 31, size = 13 },       -- 9
-		{ name = "ctrld", face = 32, size = 13 },       -- 10
-		{ name = "ctrld", face = 33, size = 16 },       -- 11
-		{ name = "ctrld", face = 34, size = 16 },       -- 12
-		{ name = "ctrld", face = 35, size = 16 },       -- 13 
-		{ name = "ctrld", face = 36, size = 16 },       -- 14
-		{ name = "scientifica", face = 37, size = 11 }, -- 15
-		{ name = "scientifica", face = 38, size = 11 }, -- 16
-		{ name = "scientifica", face = 39, size = 11 }, -- 17
-		{ name = "ter", face = 40, size = 12 },         -- 18
-		{ name = "ter", face = 41, size = 12 },         -- 19
-		{ name = "ter", face = 42, size = 14 },         -- 20
-		{ name = "ter", face = 43, size = 14 },         -- 21
-		{ name = "ter", face = 44, size = 14 },         -- 22
-		{ name = "ter", face = 45, size = 16 },         -- 23
-		{ name = "ter", face = 46, size = 16 },         -- 24
-		{ name = "ter", face = 47, size = 16 },         -- 25
-		{ name = "ter", face = 48, size = 18 },         -- 26
-		{ name = "ter", face = 49, size = 18 },         -- 27
-		{ name = "ter", face = 50, size = 20 },         -- 28
-		{ name = "ter", face = 51, size = 20 },         -- 29
-		{ name = "ter", face = 52, size = 22 },         -- 30
-		{ name = "ter", face = 53, size = 22 },         -- 31
-		{ name = "ter", face = 54, size = 24 },         -- 32
-		{ name = "ter", face = 55, size = 24 },         -- 33
-		{ name = "ter", face = 56, size = 28 },         -- 34
-		{ name = "ter", face = 57, size = 28 },         -- 35
-		{ name = "ter", face = 58, size = 32 },         -- 36
-		{ name = "ter", face = 59, size = 32 },         -- 37
-		{ name = "unscii", face = 60, size = 16 },      -- 38
-		{ name = "unscii", face = 61, size = 16 },      -- 39
-		{ name = "unscii", face = 62, size = 8 },       -- 40
-		{ name = "unscii", face = 63, size = 8 },       -- 41
-		{ name = "unscii", face = 64, size = 8 },       -- 42
-		{ name = "unscii", face = 65, size = 8 },       -- 43
-		{ name = "unscii", face = 66, size = 16 },      -- 44
-		{ name = "unscii", face = 67, size = 8 }        -- 45
-    },
-    default = {
-        style = {
-            color = 15,
-            background = 0,
-            spacing = 10,
-            font = 1,
-            align = 'left',
-            stroke = 1,
-            aa = 0,
-            line_join = 'square',
-            line_width = 1,
-        },
-        menu = {}
-    }
+	current_font = 1,
+	max_visible_items = 5,
+	fonts = {
+		{ name = '04B_03', face = 1, size = 8 }, -- 1
+		{ name = 'ALEPH', face = 2, size = 8 }, -- 2
+		{ name = 'tom-thumb', face = 25, size = 6 }, -- 3
+		{ name = 'creep', face = 26, size = 16 }, -- 4
+		{ name = 'ctrld', face = 27, size = 10 }, -- 5
+		{ name = 'ctrld', face = 28, size = 10 }, -- 6
+		{ name = 'ctrld', face = 29, size = 13 }, -- 7
+		{ name = 'ctrld', face = 30, size = 13 }, -- 8
+		{ name = 'ctrld', face = 31, size = 13 }, -- 9
+		{ name = 'ctrld', face = 32, size = 13 }, -- 10
+		{ name = 'ctrld', face = 33, size = 16 }, -- 11
+		{ name = 'ctrld', face = 34, size = 16 }, -- 12
+		{ name = 'ctrld', face = 35, size = 16 }, -- 13
+		{ name = 'ctrld', face = 36, size = 16 }, -- 14
+		{ name = 'scientifica', face = 37, size = 11 }, -- 15
+		{ name = 'scientifica', face = 38, size = 11 }, -- 16
+		{ name = 'scientifica', face = 39, size = 11 }, -- 17
+		{ name = 'ter', face = 40, size = 12 }, -- 18
+		{ name = 'ter', face = 41, size = 12 }, -- 19
+		{ name = 'ter', face = 42, size = 14 }, -- 20
+		{ name = 'ter', face = 43, size = 14 }, -- 21
+		{ name = 'ter', face = 44, size = 14 }, -- 22
+		{ name = 'ter', face = 45, size = 16 }, -- 23
+		{ name = 'ter', face = 46, size = 16 }, -- 24
+		{ name = 'ter', face = 47, size = 16 }, -- 25
+		{ name = 'ter', face = 48, size = 18 }, -- 26
+		{ name = 'ter', face = 49, size = 18 }, -- 27
+		{ name = 'ter', face = 50, size = 20 }, -- 28
+		{ name = 'ter', face = 51, size = 20 }, -- 29
+		{ name = 'ter', face = 52, size = 22 }, -- 30
+		{ name = 'ter', face = 53, size = 22 }, -- 31
+		{ name = 'ter', face = 54, size = 24 }, -- 32
+		{ name = 'ter', face = 55, size = 24 }, -- 33
+		{ name = 'ter', face = 56, size = 28 }, -- 34
+		{ name = 'ter', face = 57, size = 28 }, -- 35
+		{ name = 'ter', face = 58, size = 32 }, -- 36
+		{ name = 'ter', face = 59, size = 32 }, -- 37
+		{ name = 'unscii', face = 60, size = 16 }, -- 38
+		{ name = 'unscii', face = 61, size = 16 }, -- 39
+		{ name = 'unscii', face = 62, size = 8 }, -- 40
+		{ name = 'unscii', face = 63, size = 8 }, -- 41
+		{ name = 'unscii', face = 64, size = 8 }, -- 42
+		{ name = 'unscii', face = 65, size = 8 }, -- 43
+		{ name = 'unscii', face = 66, size = 16 }, -- 44
+		{ name = 'unscii', face = 67, size = 8 }, -- 45
+	},
+	default = {
+		style = {
+			color = 15,
+			background = 0,
+			spacing = 10,
+			font = 1,
+			align = 'left',
+			stroke = 1,
+			aa = 0,
+			line_join = 'square',
+			line_width = 1,
+		},
+	},
 }
 
--- Menu Functions
-function UI:set_cursor(d)
-    self.cursor = util.clamp (self.cursor + d, 1, self.cursor_positions)
-    App.screen_dirty = true
-end
+-- UI Helper Functions
 
--- Add a menu item to the end of the menu
-function UI:add_menu_item(menu_item, default)
-    table.insert(self.menu, menu_item)
-    self.cursor_positions = #self.menu
-
-    if default then
-        table.insert(self.default.menu, menu_item)
-    end
-end
-
--- Add a menu item to the end of the menu
-function UI:next_menu()
-    table.insert(self.menu, menu_item)
-    self.cursor_positions = #self.menu
-
-    if default then
-        table.insert(self.default.menu, menu_item)
-    end
-end
-
--- set a table of menu items
-function UI:set_menu(menu, override)
-    self.cursor = 1
-    self.cursor_positions = #self.menu
-    self.menu = {}
-
-    -- Override skipts the default menu
-    if not override then
-        for i, menu_item in ipairs(self.default.menu) do
-            self:add_menu_item(menu_item)
-        end
-    end
-        
-    if menu then
-        for _, menu_item in ipairs(menu) do
-            self:add_menu_item(menu_item)
-        end
-    end
-end
-
-
--- Use a menu item, selected by context key and cursor position
-function UI:use_menu(ctx, d)
-    if type(self.menu[self.cursor][ctx]) == "function" then
-        self.menu[self.cursor][ctx](d)
-    end
-    App.screen_dirty = true
-end
-
--- Set font and size to avoid aliasing
+-- Sets font to correct size to avoid aliasing
 function UI:set_font(n)
-    self.current_font = n
+	self.current_font = n
 	screen.font_face(self.fonts[n].face)
 	screen.font_size(self.fonts[n].size)
 end
 
-function UI:get_font_size()
-    return self.fonts[self.current_font].size
-end
+-- Returns the size of the current font
+function UI:get_font_size() return self.fonts[self.current_font].size end
 
 -- Merge style tables, with override taking precedence
 function UI:merge_style(default_style, override_style)
-    if not override_style then
-        return default_style
-    end
-    
-    local merged = {}
-    -- Start with default style
-    for key, value in pairs(default_style) do
-        merged[key] = value
-    end
-    
-    -- Override with provided style values
-    for key, value in pairs(override_style) do
-        merged[key] = value
-    end
-    
-    return merged
+	if not override_style then return default_style end
+
+	local merged = {}
+	-- Start with default style
+	for key, value in pairs(default_style) do
+		merged[key] = value
+	end
+
+	-- Override with provided style values
+	for key, value in pairs(override_style) do
+		merged[key] = value
+	end
+
+	return merged
 end
 
--- Calculate which menu items should be visible based on cursor position
-function UI:get_visible_menu_range()
-    local total_items = #self.menu
-    local max_visible = self.max_visible_items
-    
-    -- If we have 5 or fewer items, show all
-    if total_items <= max_visible then
-        return 1, total_items
-    end
-    
-    -- Calculate scroll behavior
-    local start_index = 1
-    local end_index = max_visible
-    
-    if self.cursor > max_visible - 2 then
-        -- We're in the scrolling zone
-        if self.cursor <= total_items - 2 then
-            -- Middle scrolling: cursor stays in position 3, menu scrolls
-            start_index = self.cursor - 2
-            end_index = self.cursor + 2
-        else
-            -- End scrolling: cursor moves normally for last 2 positions
-            start_index = total_items - max_visible + 1
-            end_index = total_items
-        end
-    end
-    
-    return start_index, end_index
-end
-
-
-
--- Draws
-
+-- Draw Functions
 function UI:draw_chord(select, x, y)
+	-- Render all chord identifications for the current scale, including alternates.
+	x = x or 0
+	y = y or 14
+	local scale = App.scale[select]
+	if not scale or #scale.intervals < 2 then return end
+
+	local bits = scale.bits or 0
+	local primary = musicutil.interval_lookup[bits]
+	if not primary then return end
+
+	local chords = {}
+	local seen = {}
+
+	local function add(ch)
+		local key = (ch.name or '') .. ':' .. tostring(ch.root or 0)
+		if not seen[key] then
+			seen[key] = true
+			table.insert(chords, ch)
+		end
+	end
+
+	add(primary)
+	if primary.alternates then
+		for _, alt in ipairs(primary.alternates) do
+			add(alt)
+		end
+	end
+
+	screen.level(15)
+	UI:set_font(1)
+	local rows_per_col = 6
+	local col_width = 64
+	local max_entries = rows_per_col * 2 -- two columns on 128px wide screen
+	local shown = math.min(#chords, max_entries)
+
+	for i = 1, shown do
+		local ch = chords[i]
+		local root = (scale.root + (ch.root or 0)) % 12
+		local bass = scale.root % 12
+		local label = musicutil.note_num_to_name(root) .. (ch.name or '')
+		if bass ~= root then label = label .. '/' .. musicutil.note_num_to_name(bass) end
+		if ch.voicing then label = label .. ' ' .. ch.voicing end
+
+		local col = math.floor((i - 1) / rows_per_col)
+		local row = (i - 1) % rows_per_col
+		local cx = x + col * col_width
+		local cy = y + row * 8
+
+		screen.move(cx, cy)
+		screen.text(label)
+	end
+
+	if #chords > max_entries then
+		local col = math.floor(shown / rows_per_col)
+		local row = shown % rows_per_col
+		screen.move(x + col * col_width, y + row * 8)
+		screen.text('+' .. (#chords - max_entries) .. ' more')
+	end
+end
+
+function UI:draw_scales(select, x, y)
+	-- Render compatible scales for the current interval set (across all roots/modes).
+	x = x or 0
+	y = y or 62
+	local scale = App.scale[select]
+	-- Require at least three notes before attempting scale identification
+	if not scale or #scale.intervals < 3 then return end
+
+	-- Build absolute note mask from current scale (root + intervals)
+	local note_mask = 0
+	for _, iv in ipairs(scale.intervals) do
+		local note = (scale.root + iv) % 12
+		note_mask = note_mask | (1 << note)
+	end
+
+	-- Find scales (root transposition only, no modal rotation) that fully contain the note mask
+	local root_shift = scale.root % 12
+	local root_exact, mode_exact, root_partial, mode_partial = {}, {}, {}, {}
+	local seen = {}
+	local function transpose_bits(bits, semitones)
+		semitones = semitones % 12
+		if semitones == 0 then return bits end
+		return ((bits << semitones) | (bits >> (12 - semitones))) & 0xFFF
+	end
+
+	for _, s in ipairs(musicutil.SCALES) do
+		if s.intervals then
+			local base_mask = 0
+			for _, iv in ipairs(s.intervals) do
+				base_mask = base_mask | (1 << (iv % 12))
+			end
+			for shift = 0, 11 do
+				local mask = transpose_bits(base_mask, shift)
+				if (mask & note_mask) == note_mask then
+					local entry = { scale = s, shift = shift, mask = mask }
+					if mask == note_mask then
+						if shift == root_shift then
+							root_exact[#root_exact + 1] = entry
+						else
+							mode_exact[#mode_exact + 1] = entry
+						end
+					else
+						local key = (s.name or '') .. ':' .. shift
+						if not seen[key] then
+							seen[key] = true
+							if shift == root_shift then
+								root_partial[#root_partial + 1] = entry
+							else
+								mode_partial[#mode_partial + 1] = entry
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+
+	local ordered = {}
+	for _, e in ipairs(root_exact) do table.insert(ordered, e) end
+	for _, e in ipairs(mode_exact) do table.insert(ordered, e) end
+	for _, e in ipairs(root_partial) do table.insert(ordered, e) end
+	for _, e in ipairs(mode_partial) do table.insert(ordered, e) end
+
+	if #ordered == 0 then return end
+
+	screen.level(15)
+	UI:set_font(1)
+	local rows_per_col = 6
+	local col_width = 64
+	local max_entries = rows_per_col * 2
+	local shown = math.min(#ordered, max_entries)
+
+	for i = 1, shown do
+		local entry = ordered[i]
+		local s = entry.scale or {}
+		local shift = entry.shift or 0
+		local root_note = musicutil.note_num_to_name(shift % 12)
+		local label = root_note .. ' ' .. (s.name or 'scale')
+		if entry.mask == note_mask then label = label .. '*' end
+
+		local col = math.floor((i - 1) / rows_per_col)
+		local row = (i - 1) % rows_per_col
+		local cx = x + col * col_width
+		local cy = y + row * 8
+
+		screen.move(cx, cy)
+		screen.text(label)
+	end
+
+	if #ordered > max_entries then
+		local col = math.floor(shown / rows_per_col)
+		local row = shown % rows_per_col
+		screen.move(x + col * col_width, y + row * 8)
+		screen.text('+' .. (#ordered - max_entries) .. ' more')
+	end
+end
+
+-- Draw Functions
+function UI:draw_chord_large(select, x, y)
 	x = x or 60
 	y = y or 14
 	local scale = App.scale[select]
@@ -212,7 +278,7 @@ function UI:draw_chord(select, x, y)
 
 		if bass ~= root then
 			screen.move(name_offset, y + 12)
-			screen.text("/" .. musicutil.note_num_to_name(bass))
+			screen.text('/' .. musicutil.note_num_to_name(bass))
 		end
 	end
 end
@@ -235,16 +301,17 @@ function UI:draw_chord_small(select, x, y)
 	end
 end
 
-function UI:draw_intervals(x, y, major)
+function UI:draw_intervals(x, y, sid)
+	sid = sid or 1
 	x = x or 0
 	y = y or 63
 	screen.move(127, 41)
-    
-	local interval_names = { "\u{2160}", "\u{2171}", "\u{2161}", "\u{2172}", "\u{2162}", "\u{2163}", "\u{2174}", "\u{2164}", "\u{2175}", "\u{2165}", "\u{2176}", "\u{2166}" }
-    
+
+	local interval_names = { '\u{2160}', '\u{2171}', '\u{2161}', '\u{2172}', '\u{2162}', '\u{2163}', '\u{2174}', '\u{2164}', '\u{2175}', '\u{2165}', '\u{2176}', '\u{2166}' }
+
 	self:set_font(1)
 	for i = 1, #interval_names do
-		if App.scale[1].bits & (1 << (i - 1)) > 0 then
+		if App.scale[sid].bits & (1 << (i - 1)) > 0 then
 			screen.level(15)
 		else
 			screen.level(1)
@@ -255,125 +322,357 @@ function UI:draw_intervals(x, y, major)
 	end
 end
 
-function UI:draw_tag(x, y, label, value, style)
-    local default_style = {color = 15, spacing = 10, stroke = 1, label_font = 1, value_font = 33}
-    style = self:merge_style(default_style, style)
-    local x_pos = x
-    local y_pos = y - style.stroke
-    local width = 30
-    local height = 30 - style.stroke
-    
-    -- rectangle
-    screen.level(style.color)
-    screen.rect(x_pos, y_pos, width, height)
-    screen.aa(0)
-    screen.line_join('square')
-    screen.line_width(style.stroke)
-    screen.stroke()           
+function UI:draw_tag(x, y, label, value, opts)
+	opts = opts or {}
+	local default_style = { color = 15, spacing = 10, stroke = 1, label_font = 1, value_font = 33 }
+	local style = opts.style and self:merge_style(default_style, opts.style) or default_style
+	local completion = opts.completion or 0.5
 
-    -- label
-    screen.move(x_pos + width / 2, y_pos + self:get_font_size() - style.stroke)
-    UI:set_font(style.label_font)
-    screen.text_center(label)
+	local x_pos = x
+	local y_pos = y - style.stroke
+	local width = 30
+	local height = 30 - style.stroke
+	local level = self:out_ease(completion)
 
-    -- value
-    screen.move(x_pos + width / 2, y_pos + (height - self:get_font_size()) + 4)
-    self:set_font(style.value_font)
-    screen.text_center(value)
+	-- rectangle
+	screen.level(level)
+	screen.rect(x_pos, y_pos, width, height)
+	screen.aa(0)
+	screen.line_join('square')
+	screen.line_width(style.stroke)
+	screen.stroke()
 
-    screen.fill()
+	-- label
+	screen.move(x_pos + width / 2, y_pos + self:get_font_size() - style.stroke)
+	UI:set_font(style.label_font)
+	screen.text_center(label)
+
+	-- value
+	screen.move(x_pos + width / 2, y_pos + (height - self:get_font_size()) + 4)
+	self:set_font(style.value_font)
+	screen.text_center(value)
+
+	screen.fill()
+end
+
+function UI:draw_tag_small(x, y, label, value, opts)
+	UI:set_font(1)
+	opts = opts or {}
+	local completion = opts.completion or 0.5
+	local level = self:out_ease(completion)
+	screen.aa(0)
+	screen.line_join('square')
+	screen.line_width(1)
+
+	label = label or App.track[App.current_track].name
+	value = value or App.current_track
+
+	-- background
+	screen.level(0)
+	screen.rect(x, y, 52, 10)
+	screen.fill()
+
+	screen.level(level)
+	local width = 52
+	local value_text = value and tostring(value) or ''
+	local text_width = screen.text_extents(value_text) or 0
+	local padded_width = math.ceil(text_width + 4)
+	local min_width = 9
+	local rect_width = min_width
+	if padded_width > 10 then rect_width = padded_width end
+	if rect_width < min_width then rect_width = min_width end
+
+	local value_center_x = (x + width) - (rect_width / 2) - 1
+	local rect_x = math.floor(value_center_x - rect_width / 2 + 0.5)
+
+	screen.rect(rect_x, y + 1, rect_width, 8)
+	screen.stroke()
+
+	-- text
+
+	screen.move(value_center_x, y + 7)
+	screen.text_center(value_text)
+	screen.move(rect_x - 4, y + 7)
+	screen.text_right(label)
+	screen.fill()
+end
+
+function UI:in_out_ease(completion)
+	local value = 0
+	if completion <= 0.125 then
+		local c = completion / 0.125
+		value = math.floor(c * 15)
+	elseif completion >= 0.875 then
+		local c = (1 - completion) / 0.125
+		value = math.floor(c * 15)
+	else
+		value = 15
+	end
+	return value
+end
+
+function UI:out_ease(completion)
+	local value = 0
+
+	if completion >= 0.75 then
+		local c = (1 - completion) / 0.25
+		value = math.floor(c * 15)
+	else
+		value = 15
+	end
+	return value
 end
 
 function UI:draw_toast(toast_text)
-    screen.level(15)
-    self:set_font(33)
-    screen.move(64,32)
-    screen.text_center(toast_text)
-    screen.fill()
+	local beat_level = 5
+	if App.playing then beat_level = 15 - math.floor((App.tick % App.ppqn) / App.ppqn * 16) end
+	screen.level(beat_level)
+	screen.rect(76, 0, 52, 9)
+	screen.fill()
+	screen.level(0)
+	self:set_font(1)
+	screen.move(103, 7)
+	screen.text_center(toast_text)
+	screen.fill()
 end
 
-function UI:draw_menu(x,y)
-    local start_index, end_index = self:get_visible_menu_range()
-    
-    for i = start_index, end_index do
-        local menu_item = self.menu[i]
-        if menu_item then
-            local icon = menu_item.icon or ""
-            local label = menu_item.label or ""
-            local value = menu_item.value or ""
-            local style = menu_item.style
-            local is_active = (i == self.cursor)
+function UI:draw_menu(x, y, menu, cursor, opts)
+	menu = menu or {}
+	cursor = cursor or 1
+	opts = opts or {}
 
-            if type(menu_item.label) == "function" then
-                label = menu_item.label()
-            end
+	local visible_indices = {}
+	for index, item in ipairs(menu) do
+		local show = true
+		if item and item.can_show ~= nil then
+			if type(item.can_show) == 'function' then
+				show = item.can_show(item)
+			else
+				show = item.can_show
+			end
+		end
+		if show ~= false then table.insert(visible_indices, index) end
+	end
 
-            if type(menu_item.value) == "function" then
-                value = menu_item.value()
-            end
+	-- Determine if any visible item is selectable (editable or pressable)
+	local has_any_selectable = false
+	for _, idx in ipairs(visible_indices) do
+		local it = menu[idx]
+		if it then
+			local selectable = (it.enc1 ~= nil) or (it.enc2 ~= nil) or (it.enc3 ~= nil) or (it.is_editable == true) or (it.has_press == true)
+			if selectable then
+				has_any_selectable = true
+				break
+			end
+		end
+	end
 
-            -- Calculate visual position (1-based for display)
-            local visual_index = i - start_index + 1
-            self:draw_menu_item(x, y + (visual_index - 1) * 10, label, value, icon, is_active, style)
-        end
-    end
+	local total_visible = #visible_indices
+	if total_visible == 0 then return end
+
+	local max_visible = self.max_visible_items
+	-- Render all 5 rows; we’ll clamp scrolling so the active row never sits below row 4
+	local window_rows = max_visible
+	local cursor_position = 1
+	for i, idx in ipairs(visible_indices) do
+		if idx == cursor then
+			cursor_position = i
+			break
+		end
+	end
+
+	-- Track last cursor to infer scroll direction
+	self._last_cursor_pos = self._last_cursor_pos or cursor_position
+	local direction = cursor_position - self._last_cursor_pos
+	self._last_cursor_pos = cursor_position
+
+	local start_pos, end_pos = 1, total_visible
+	if total_visible > window_rows then
+		-- Anchor based on scroll direction: when moving down, keep cursor at visual row 3; when moving up, keep at row 2
+		local anchor_row = (direction < 0) and 2 or 3
+		-- Clamp so the cursor never sits below visual row 4; keep one empty row below the last item
+		local max_start_for_bottom_space = math.max(1, total_visible - 3)
+		if direction == 0 and self._last_start_pos then
+			start_pos = self._last_start_pos
+		else
+			start_pos = util.clamp(cursor_position - (anchor_row - 1), 1, max_start_for_bottom_space)
+		end
+		-- Render items up to visual row 4 (leave row 5 empty)
+		end_pos = math.min(total_visible, start_pos + 4)
+	end
+	self._last_start_pos = start_pos
+
+	local rows = end_pos - start_pos + 1
+	local last_row_y = y + (rows - 2) * 10
+	-- Keep menu rows within the area above helper toast bar (10px height)
+	local max_y = 44
+	local offset_y = 0
+	local is_scrolling = (total_visible > max_visible)
+	-- Only nudge upward when we have fewer than the max rows; otherwise keep baseline aligned
+	if (not is_scrolling) and total_visible < max_visible and (last_row_y > max_y) then offset_y = max_y - last_row_y end
+
+	for pos = start_pos, end_pos do
+		local actual_index = visible_indices[pos]
+		local menu_item = menu[actual_index]
+		if menu_item then
+			local icon = menu_item.icon
+			local label = menu_item.label or ''
+			local value = menu_item.value or ''
+			local style = menu_item.style
+			local is_active = (actual_index == cursor)
+
+			if type(menu_item.label) == 'function' then label = menu_item.label() end
+
+			if type(menu_item.value) == 'function' then value = menu_item.value() end
+
+			local visual_index = pos - start_pos + 1
+			self.current_item = menu_item
+			-- Disable highlight when the item itself is not selectable or when there are no selectable items at all
+			local item_selectable = (menu_item.enc2 ~= nil) or (menu_item.enc3 ~= nil) or (menu_item.is_editable == true) or (menu_item.has_press == true)
+			local disable_highlight = (not item_selectable) or not has_any_selectable
+			self:draw_menu_item(x, y + offset_y + (visual_index - 1) * 10, label, value, icon, is_active, style, disable_highlight)
+			self.current_item = nil
+		end
+	end
 end
 
-function UI:draw_menu_item(x, y, label, value, icon, is_active, style)
-    local default_style = {
-        color = 15, stroke = 1, font = 1, width = 60, inactive_color = 5, icon_color = 15, icon_inactive_color = 5}
-    style = self:merge_style(default_style, style)
+-- Draws a single menu item (row)
+function UI:draw_menu_item(x, y, label, value, icon, is_active, style, disable_highlight)
+	local default_style = {
+		color = 15,
+		stroke = 1,
+		font = 1,
+		width = 127,
+		inactive_color = 5,
+		icon_color = 15,
+		icon_inactive_color = 5,
+	}
+	style = self:merge_style(default_style, style)
 
-    
-    
-    self:set_font(style.font)
+	local icon_offset = 15
+	local submenu_offset = 8
+	local entry_width = style.width - submenu_offset
+	local show_next = false
+	-- Measure text widths for icon, label, and value
+	local label_w = screen.text_extents(label) or 0
+	local value_w = screen.text_extents(value) or 0
 
-	screen.move(x, y)
-    if icon then
-        if is_active then
-            screen.level(style.icon_color)
-        else
-            screen.level(style.icon_inactive_color)
-        end
-        screen.text(icon)
-    end
-    screen.fill()
+	self:set_font(style.font)
 
-    -- Adjust color based on active state
-    if is_active then
-        screen.level(style.color) -- Bright white for active item
-    else
-        screen.level(style.inactive_color)
-    end
+	-- Active highlight
+	local has_button = self.current_item and (self.current_item.has_press or self.current_item.alt_fn_2 or self.current_item.alt_fn_3 or self.current_item.long_fn_2 or self.current_item.long_fn_3)
+	local knockout = is_active and self.current_item and not disable_highlight and App.key_held and App.key_held_button ~= 2 and has_button
+	if knockout then
+		screen.level(15)
+		screen.rect(x, y - 8, style.width, 11)
+		screen.fill()
+	end
+	-- Underline label only when active & enabled:
+	--   - dual input (enc2 present), or
+	--   - trigger rows (has_press with no enc2/enc3)
+	local left_handler = self.current_item.enc1 or self.current_item.enc2
+	local label_can_edit_left = left_handler and not self.current_item.disable
+	local label_is_trigger = self.current_item.has_press and not left_handler and not self.current_item.enc3 and not self.current_item.disable
+	if is_active and (label_can_edit_left or label_is_trigger) then
+		local label_x = x + icon_offset
+		screen.level(8)
+		screen.rect(label_x, y + 1, label_w, 1)
+		screen.fill()
+	end
+	-- Always underline the value when active and there is a value to show
+	local value_can_edit = self.current_item.enc3 and not self.current_item.disable
+	if is_active and value_can_edit and value_w > 0 then
+		local value_x_left = x + entry_width - value_w
+		screen.level(8)
+		screen.rect(value_x_left, y + 1, value_w, 1)
+		screen.fill()
+	end
 
-    screen.move(x + 6, y)
-    screen.text(label)
+	screen.move(x + 5, y)
+	if icon then
+		-- Icons are bright only when the row is active AND editable; otherwise dim
+		local editable = self.current_item and (self.current_item.enc2 or self.current_item.enc3 or self.current_item.is_editable)
+		if is_active and editable then
+			screen.level(knockout and 0 or style.icon_color)
+		else
+			screen.level(style.icon_inactive_color)
+		end
+		screen.text_center(icon)
+	end
+	screen.fill()
 
-    screen.move(x + style.width, y)
-    screen.text_right(value)
-    
-    screen.fill()
+	-- Adjust color based on active state
+	if is_active then
+		screen.level(knockout and 0 or 15) -- dark on knockout, bright otherwise
+	else
+		screen.level(style.inactive_color)
+	end
+	screen.move(x + icon_offset, y)
+	screen.text(label)
+
+	screen.move(x + entry_width, y)
+	screen.text_right(value)
+	screen.fill()
+	-- Optional right-side press icon when item supports on_press and is enabled to press
+	local current_item = self.current_item
+	local has_pending = current_item and current_item.pending_confirmation
+
+	if has_pending then
+		show_next = true
+	elseif current_item.has_press then
+		-- Only show "next" when the item actually opens a submenu.
+		-- Prefer explicit flag; fallback to label convention ('\u{25ba}') used for submenus.
+		local opens_submenu = false
+		if current_item.has_submenu and type(current_item.has_submenu) == 'function' then
+			opens_submenu = current_item.has_submenu()
+		else
+			opens_submenu = current_item.has_submenu == true
+		end
+
+		if opens_submenu then
+			show_next = true
+			if current_item.can_press ~= nil then
+				if type(current_item.can_press) == 'function' then show_next = current_item.can_press() end
+			end
+		end
+	end
+
+	if show_next then
+		local next_icon = has_pending and '?' or '\u{25ba}'
+		local press_x = 127
+		if is_active then
+			screen.level(knockout and 0 or style.icon_color)
+		else
+			screen.level(style.icon_inactive_color)
+		end
+		screen.move(press_x, y)
+		screen.text_right(next_icon)
+		screen.fill()
+	end
+
+	-- Optional per-item draw hooks
+	if self.current_item and self.current_item.draw then pcall(self.current_item.draw, self.current_item, x, y, is_active) end
+
+	if self.current_item and self.current_item.draw_buttons then pcall(self.current_item.draw_buttons, self.current_item, x, y, is_active) end
 end
 
-function UI:draw_status()
-    -- Track number
+function UI:draw_status(icon, label)
+	icon = icon or App.current_track
+	label = label or App.track[App.current_track].name
+
 	self:set_font(1)
 	screen.level(15)
 	screen.rect(0, 0, 10, 9)
 	screen.fill()
 	screen.level(0)
 	screen.move(5, 7)
-	screen.text_center(App.current_track)
+	screen.text_center(icon)
 	screen.fill()
-    -- track name
 	screen.level(15)
 	screen.move(15, 7)
-	screen.text(App.track[App.current_track].name)
-
-    self:draw_menu(0, 20)
-
+	screen.text(label)
+	screen.fill()
 end
-
 
 function UI:draw_tempo()
 	if App.playing then
@@ -386,35 +685,174 @@ function UI:draw_tempo()
 	screen.rect(76, 0, 127, 32)
 	screen.fill()
 
-	screen.move(102, 28)
+	screen.move(102, 29)
 	self:set_font(34)
 	screen.level(0)
 	screen.text_center(math.floor(clock.get_tempo() + 0.5))
 	screen.fill()
 
 	screen.level(0)
-    self:set_font(1)
+	self:set_font(1)
 
-	if App.playing then
-		screen.move(124, 7)
-		screen.text_right("\u{23f5}") -- play
-	else
-		screen.move(124, 7)
-		screen.text_right("\u{23f8}") -- pause
-	end
-
-	screen.move(79, 7)
+	-- MEASURE AND BEAT COUNTER
+	screen.move(125, 7)
 	local quarter = math.floor(App.tick / App.ppqn)
 	local measure = math.floor(quarter / 4) + 1
 	local count = math.floor(quarter % 4) + 1
-	screen.text(measure .. ":" .. count)
+	screen.text_right(measure .. ':' .. count)
 	screen.fill()
 
+	-- RECORD BUTTON
+	local record_offset = 0
+	local left_position = 79
+
 	if App.recording then
-		screen.move(85, 7)
-		screen.text("\u{23fa}") -- record
+		record_offset = 8
+		screen.move(left_position, 7)
+		screen.text('\u{23fa}') -- record
 		screen.fill()
 	end
+
+	-- PLAY/PAUSE BUTTON
+	if App.playing then
+		screen.move(left_position + record_offset, 7)
+		screen.text('\u{23f5}') -- play
+	else
+		screen.move(left_position + record_offset, 7)
+		screen.text('\u{23f8}') -- pause
+	end
+end
+
+function UI:draw_small_tempo()
+	if App.playing then
+		local beat = 15 - math.floor((App.tick % App.ppqn) / App.ppqn * 16)
+		screen.level(beat)
+	else
+		screen.level(5)
+	end
+
+	screen.fill()
+	self:set_font(1)
+
+	-- RECORD BUTTON
+	local record_offset = 8
+	local right_position = 127
+
+	if App.recording then
+		screen.move(right_position - record_offset, 7)
+		screen.text_right('\u{23fa}') -- record
+		screen.fill()
+	end
+
+	-- PLAY/PAUSE BUTTON
+	if App.playing then
+		screen.move(right_position, 7)
+		screen.text_right('\u{23f5}') -- play
+	else
+		screen.move(right_position, 7)
+		screen.text_right('\u{23f8}') -- pause
+	end
+end
+
+function UI:draw_helper_toast(helper_labels, y)
+	-- Merge default helper labels from the current item with explicit ones
+	local merged = {}
+	local mode = App.mode and App.mode[App.current_mode]
+	local current = mode and mode.menu and mode.menu[mode.cursor]
+	if current and current.helper_labels_default then
+		for k, v in pairs(current.helper_labels_default) do
+			merged[k] = v
+		end
+	end
+	for k, v in pairs(helper_labels or {}) do
+		merged[k] = v
+	end
+	if next(merged) == nil then return end
+
+	local left_text = ''
+	local right_text = ''
+
+	local height = 10
+	local pos_y = y or (64 - height)
+
+	screen.level(0)
+	screen.rect(0, pos_y, 128, height)
+	screen.fill()
+
+	screen.level(5)
+	screen.rect(0, pos_y, 128, 1)
+	screen.fill()
+
+	screen.level(15)
+	self:set_font(1)
+
+	-- Button 2 (left)
+	screen.move(0, pos_y + height - 2)
+	if current and current.pending_confirmation then
+		screen.text('x')
+	elseif merged.alt_fn_2 and App.alt_down then
+		screen.text(merged.alt_fn_2)
+	elseif merged.press_fn_2 then
+		screen.text(merged.press_fn_2)
+	end
+
+	-- Button 3 (center)
+	screen.move(30, pos_y + height - 2)
+	if current and current.pending_confirmation then
+		screen.text_center('\u{2713}')
+	elseif merged.alt_fn_3 and App.alt_down then
+		screen.text_center(merged.alt_fn_3)
+	elseif merged.press_fn_3 then
+		screen.text_center(merged.press_fn_3)
+	end
+
+	-- enc3 label (right)
+	local enc3_label = nil
+	if merged.alt_enc3 and App.alt_down then
+		enc3_label = merged.alt_enc3
+	elseif merged.enc3 then
+		enc3_label = merged.enc3
+	end
+	if enc3_label then
+		if not string.find(enc3_label, '\u{25c0}') then enc3_label = enc3_label .. ' \u{25c0}\u{25b6}' end
+		screen.move(125, pos_y + height - 2)
+		screen.text_right(enc3_label)
+	end
+
+	-- enc1 label (top right, its own band)
+	local enc1_label = nil
+	if merged.alt_enc1 and App.alt_down then
+		enc1_label = merged.alt_enc1
+	elseif merged.enc1 then
+		enc1_label = merged.enc1
+	end
+	if enc1_label then
+		if not string.find(enc1_label, '\u{25c0}') then enc1_label = enc1_label .. ' \u{25c0}\u{25b6}' end
+		screen.move(76, 0)
+		screen.level(0)
+		screen.rect(76, 0, 52, 9)
+		screen.fill()
+		screen.level(15)
+		self:set_font(1)
+		screen.move(127, 7)
+		screen.text_right(enc1_label)
+		screen.fill()
+	end
+
+	-- enc2 label (middle right of toast bar, matches pattern)
+	local enc2_label = nil
+	if merged.alt_enc2 and App.alt_down then
+		enc2_label = merged.alt_enc2
+	elseif merged.enc2 then
+		enc2_label = merged.enc2
+	end
+	if enc2_label then
+		if not string.find(enc2_label, '\u{25c0}') then enc2_label = enc2_label .. ' \u{25c0}\u{25b6}' end
+		screen.move(81, pos_y + height - 2)
+		screen.text_center(enc2_label)
+	end
+
+	screen.fill()
 end
 
 return UI

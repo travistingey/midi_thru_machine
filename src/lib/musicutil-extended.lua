@@ -232,6 +232,39 @@ for index,chord in pairs(u.interval_lookup) do
     chord.bits = u.intervals_to_bits(chord.intervals)
 end
 
+-- Precompute scales that contain each chord/interval bitset
+local function transpose_bits(bits, semitones)
+	semitones = semitones % 12
+	if semitones == 0 then return bits end
+	return ((bits << semitones) | (bits >> (12 - semitones))) & 0xFFF
+end
+
+local scale_bits = {}
+for _, scale in ipairs(u.SCALES) do
+	if scale.intervals then
+		local base_bits = u.intervals_to_bits(scale.intervals)
+		for shift = 0, 11 do
+			local shifted = transpose_bits(base_bits, shift)
+			scale_bits[#scale_bits + 1] = { bits = shifted, scale = scale, shift = shift }
+		end
+	end
+end
+
+-- Include scales that contain these intervals (transposed roots only; no modal rotation)
+for bits, chord in pairs(u.interval_lookup) do
+	chord.scales = {}
+	local seen = {}
+	for _, entry in ipairs(scale_bits) do
+		if (entry.bits & bits) == bits then
+			local key = entry.scale.name .. ':' .. entry.shift
+			if not seen[key] then
+				seen[key] = true
+				table.insert(chord.scales, { scale = entry.scale, shift = entry.shift })
+			end
+		end
+	end
+end
+
 -- Function to print chords without recursive parsing
 function print_chords(chords)
     for i, chord in ipairs(chords) do

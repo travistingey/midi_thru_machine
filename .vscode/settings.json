@@ -4,5 +4,10 @@
     "editor.formatOnPaste": true,
     "editor.minimap.autohide": true,
     "editor.minimap.enabled": true,
-    "editor.inlineSuggest.showToolbar": "always"
+    "editor.inlineSuggest.showToolbar": "always",
+    "[lua]": {
+        "editor.defaultFormatter": "JohnnyMorganz.stylua",
+        "editor.formatOnSave": true
+    },
+    "stylua.targetReleaseVersion": "latest"
 }
