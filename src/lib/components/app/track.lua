@@ -5,6 +5,7 @@ local Registry = require('Foobar/lib/utilities/registry')
 local path_name = 'Foobar/lib/components/track/'
 
 local Auto = require(path_name .. 'auto')
+local Buffer = require(path_name .. 'buffer')
 local Input = require(path_name .. 'input')
 local Seq = require(path_name .. 'seq')
 local Scale = require(path_name .. 'scale')
@@ -27,6 +28,7 @@ function Track:new(o)
 	o:set(o)
 
 	self.load_component(o, Auto)
+	self.load_component(o, Buffer)
 	self.load_component(o, Input)
 	self.load_component(o, Seq)
 	self.load_component(o, Mute)
@@ -101,7 +103,7 @@ function Track:set(o)
 	self:on('midi_trigger', input_event)
 	self:on('mute_input', function(state) self.mute_input = state end)
 	self:on('record_buffer', function(data, tick)
-		if self.armed and App.playing and self.auto then self.auto:record_buffer(data, tick) end
+		if self.armed and App.playing and self.buffer then self.buffer:record_buffer(data, tick) end
 	end)
 
 	-- Device In/Out
@@ -644,7 +646,7 @@ end
 -- Builds multiple component chains in single call.
 function Track:build_chain()
 	local send_input = { self.scale, self.mute, self.output }
-	local chain = { self.auto, self.input, self.seq, self.scale, self.mute, self.output }
+	local chain = { self.input, self.auto, self.buffer, self.seq, self.scale, self.mute, self.output }
 	local send = { self.mute, self.output }
 
 	self.process_transport = self:chain_components(chain, 'process_transport')

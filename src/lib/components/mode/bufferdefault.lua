@@ -179,7 +179,7 @@ function BufferDefault:default_menu()
 			label_fn = function() return 'PLAYBACK' end,
 			value_fn = function()
 				local track = App.track[App.current_track]
-				local playback = track and track.auto and track.auto.buffer_playback
+				local playback = track and track.buffer and track.buffer.buffer_playback
 				return playback and 'on' or 'off'
 			end,
 			helper_labels = {
@@ -203,15 +203,15 @@ function BufferDefault:default_menu()
 			disable = true,
 			on_press = function()
 				local track = App.track[App.current_track]
-				if track and track.auto then
-					track.auto:clear_buffer()
+				if track and track.buffer then
+					track.buffer:clear_buffer()
 					print('Buffer cleared for track ' .. App.current_track)
 				end
 			end,
 			press_fn_3 = function()
 				local track = App.track[App.current_track]
-				if track and track.auto then
-					track.auto:clear_buffer()
+				if track and track.buffer then
+					track.buffer:clear_buffer()
 					print('Buffer cleared for track ' .. App.current_track)
 				end
 			end,
@@ -236,7 +236,7 @@ function BufferDefault:buffer_menu()
 			label_fn = function() return 'PLAYBACK' end,
 			value_fn = function()
 				local track = App.track[App.current_track]
-				local playback = track and track.auto and track.auto.buffer_playback
+				local playback = track and track.buffer and track.buffer.buffer_playback
 				return playback and 'on' or 'off'
 			end,
 			helper_labels = {

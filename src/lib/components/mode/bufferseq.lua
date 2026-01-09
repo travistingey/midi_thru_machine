@@ -15,7 +15,7 @@ function BufferSeq:set(o)
 	self.__base.set(self, o)
 	self.active = true
 	self.index = nil
-	self.component = 'auto'
+	self.component = 'buffer'
 
 	-- Buffer-only lane
 	self.selected_lane = 'buffer'
@@ -77,13 +77,13 @@ end
 
 function BufferSeq:enable_event()
 	-- No preset selection needed for buffer mode
-	-- Initialize display_step_length from auto component if not already set
+	-- Initialize display_step_length from buffer component if not already set
 	if not self.display_step_length then
-		local auto = self:get_component()
-		if auto and auto.buffer_step_length then
-			self.display_step_length = auto.buffer_step_length
+		local buffer = self:get_component()
+		if buffer and buffer.buffer_step_length then
+			self.display_step_length = buffer.buffer_step_length
 		else
-			self.display_step_length = 6 -- fallback default (matches auto default)
+			self.display_step_length = 6 -- fallback default (matches buffer default)
 		end
 	end
 	-- Initialize display calculations now that we can access the component
@@ -91,7 +91,7 @@ function BufferSeq:enable_event()
 end
 
 -- Get current display_step_length (for grid visualization)
--- This is separate from auto.buffer_step_length which remains static
+-- This is separate from buffer.buffer_step_length which remains static
 function BufferSeq:get_step_length()
 	return self.display_step_length or 6 -- fallback default
 end
@@ -121,8 +121,8 @@ function BufferSeq:increase_step_length()
 
 		self.display_step_length = new_length
 		self:recalculate_display(current_display_offset)
-		local auto = self:get_component()
-		if auto then self:set_grid(auto) end
+		local buffer = self:get_component()
+		if buffer then self:set_grid(buffer) end
 	end
 end
 
@@ -140,8 +140,8 @@ function BufferSeq:decrease_step_length()
 	if new_length then
 		self.display_step_length = new_length
 		self:recalculate_display(current_display_offset)
-		local auto = self:get_component()
-		if auto then self:set_grid(auto) end
+		local buffer = self:get_component()
+		if buffer then self:set_grid(buffer) end
 	end
 end
 
@@ -173,12 +173,12 @@ end
 
 -- Start scrub playback from a pad
 function BufferSeq:start_scrub(pad_index)
-	local auto = self:get_component()
+	local buffer = self:get_component()
 	local start_tick, end_tick = self:pad_to_tick_range(pad_index)
 
-	-- Save loop boundaries (auto.tick continues updating automatically)
-	self.scrub_saved_seq_start = auto.seq_start
-	self.scrub_saved_seq_length = auto.seq_length
+	-- Save loop boundaries (buffer.tick continues updating automatically)
+	self.scrub_saved_seq_start = buffer.seq_start
+	self.scrub_saved_seq_length = buffer.seq_length
 
 	-- Set scrub range
 	self.scrub_start_tick = start_tick
@@ -186,7 +186,7 @@ function BufferSeq:start_scrub(pad_index)
 	self.scrub_active = true
 
 	-- Start scrub playback
-	auto:start_scrub(start_tick, end_tick, App.buffer_scrub_mode == 'loop')
+	buffer:start_scrub(start_tick, end_tick, App.buffer_scrub_mode == 'loop')
 
 	print('Scrub started: ' .. start_tick .. '-' .. end_tick .. ' (' .. App.buffer_scrub_mode .. ')')
 end
@@ -194,7 +194,7 @@ end
 -- Recalculate scrub range from all currently held pads
 -- This ensures the loop is always based on currently held pads, not additive
 function BufferSeq:recalculate_scrub_from_held_pads()
-	local auto = self:get_component()
+	local buffer = self:get_component()
 
 	-- Find min and max pad indices from held pads
 	local min_pad = nil
@@ -220,13 +220,13 @@ function BufferSeq:recalculate_scrub_from_held_pads()
 		-- Update existing scrub with new range
 		self.scrub_start_tick = start_tick
 		self.scrub_end_tick = end_tick
-		auto:update_scrub(start_tick, end_tick)
+		buffer:update_scrub(start_tick, end_tick)
 		print('Scrub recalculated: ' .. start_tick .. '-' .. end_tick)
 	else
 		-- Start new scrub with full range (min to max)
-		-- Save loop boundaries (auto.tick continues updating automatically)
-		self.scrub_saved_seq_start = auto.seq_start
-		self.scrub_saved_seq_length = auto.seq_length
+		-- Save loop boundaries (buffer.tick continues updating automatically)
+		self.scrub_saved_seq_start = buffer.seq_start
+		self.scrub_saved_seq_length = buffer.seq_length
 
 		-- Set scrub range
 		self.scrub_start_tick = start_tick
@@ -234,7 +234,7 @@ function BufferSeq:recalculate_scrub_from_held_pads()
 		self.scrub_active = true
 
 		-- Start scrub playback (will loop if App.buffer_scrub_mode is 'loop')
-		auto:start_scrub(start_tick, end_tick, App.buffer_scrub_mode == 'loop')
+		buffer:start_scrub(start_tick, end_tick, App.buffer_scrub_mode == 'loop')
 
 		print('Scrub started: ' .. start_tick .. '-' .. end_tick .. ' (' .. App.buffer_scrub_mode .. ')')
 	end
@@ -242,39 +242,39 @@ end
 
 -- Jump buffer playback to a specific tick (play-through mode)
 function BufferSeq:jump_to_tick(tick)
-	local auto = self:get_component()
+	local buffer = self:get_component()
 
-	-- If in scrub mode, set scrub_tick; otherwise set auto.tick
-	if auto.scrub_mode then
-		auto.scrub_tick = tick
+	-- If in scrub mode, set scrub_tick; otherwise set buffer.tick
+	if buffer.scrub_mode then
+		buffer.scrub_tick = tick
 		print('Scrub playback jumped to tick: ' .. tick)
 	else
-		auto.tick = tick
+		buffer.tick = tick
 		print('Buffer playback jumped to tick: ' .. tick)
 	end
 end
 
 -- Resync buffer playback with app tick (play-through mode)
 function BufferSeq:resync_with_app()
-	local auto = self:get_component()
+	local buffer = self:get_component()
 
 	-- Calculate loop-aware position from App.tick
-	-- App.tick is a global counter, but auto.tick must respect loop boundaries
+	-- App.tick is a global counter, but buffer.tick must respect loop boundaries
 	-- Convert App.tick to position within loop: (App.tick % seq_length) + seq_start
-	auto.tick = (App.tick % auto.seq_length) + auto.seq_start
+	buffer.tick = (App.tick % buffer.seq_length) + buffer.seq_start
 
-	print('Buffer playback resynced with app tick: ' .. App.tick .. ' -> auto.tick: ' .. auto.tick)
+	print('Buffer playback resynced with app tick: ' .. App.tick .. ' -> buffer.tick: ' .. buffer.tick)
 end
 
 -- Stop scrub playback and restore normal playback
 function BufferSeq:stop_scrub()
 	if not self.scrub_active then return end
 
-	local auto = self:get_component()
+	local buffer = self:get_component()
 
 	-- Stop scrub and restore previous state
-	-- Note: auto.tick is already at the correct position (it's been updating in the background)
-	auto:stop_scrub(nil, self.scrub_saved_seq_start, self.scrub_saved_seq_length)
+	-- Note: buffer.tick is already at the correct position (it's been updating in the background)
+	buffer:stop_scrub(nil, self.scrub_saved_seq_start, self.scrub_saved_seq_length)
 
 	self.scrub_active = false
 	self.scrub_start_tick = nil
@@ -287,7 +287,7 @@ end
 
 function BufferSeq:grid_event(component, data)
 	local grid = self.grid
-	local auto = component
+	local buffer = component
 	local pad_index = self.grid:grid_to_index(data) + self.step_offset
 
 	-- Update context/screen overlay
@@ -323,17 +323,17 @@ function BufferSeq:grid_event(component, data)
 		local step_length = self:get_step_length()
 		local loop_start = (selection_start - 1) * step_length
 		local loop_end = selection_end * step_length - 1
-		auto:set_loop(loop_start, loop_end)
+		buffer:set_loop(loop_start, loop_end)
 		print('Loop set: ' .. loop_start .. '-' .. loop_end)
 	end
 
-	self:set_grid(auto)
+	self:set_grid(buffer)
 end
 
 function BufferSeq:set_grid(component)
 	if self.mode == nil then return end
 	local grid = self.grid
-	local auto = self:get_component() -- 'component' is the Auto component
+	local buffer = self:get_component() -- 'component' is the Buffer component
 	local BLINK = 1
 	local VALUE = (1 << 1)
 	local LOOP_END = (1 << 2)
@@ -345,26 +345,20 @@ function BufferSeq:set_grid(component)
 
 		if self.blink_state then pad = pad | BLINK end
 
-		local lane = self.selected_lane
-
 		-- Determine the global step index for this LED pad based on the display offset
 		local global_step = i + self.step_offset
-		local current_step = math.floor(auto.tick / self.step_length) + 1
+		local current_step = math.floor(buffer.tick / self.step_length) + 1
 		local seq_value
 
 		-- Iterate over the tick range corresponding to the global step
+		-- Check buffer_read for visualization (what's being played back)
 		for j = (global_step - 1) * self.step_length, global_step * self.step_length - 1 do
-			if auto.seq[j] and auto.seq[j][lane] then
-				if lane == 'buffer' then
-					-- Buffer lane contains array of events
-					local events = auto.seq[j][lane]
-					if events and #events > 0 then
-						-- Use event count as a pseudo-value for color variation
-						seq_value = #events
-						break
-					end
-				else
-					seq_value = auto.seq[j][lane].value
+			if buffer.buffer_read[j] then
+				-- Buffer contains array of events
+				local events = buffer.buffer_read[j]
+				if events and #events > 0 then
+					-- Use event count as a pseudo-value for color variation
+					seq_value = #events
 					break
 				end
 			end
@@ -372,8 +366,8 @@ function BufferSeq:set_grid(component)
 
 		if seq_value then pad = pad | VALUE end
 
-		local loop_start = auto.seq_start
-		local loop_end = auto.seq_start + auto.seq_length - 1
+		local loop_start = buffer.seq_start
+		local loop_end = buffer.seq_start + buffer.seq_length - 1
 		local loop_start_index = math.floor(loop_start / self.step_length) + 1
 		local loop_end_index = math.floor(loop_end / self.step_length) + 1
 
@@ -413,11 +407,11 @@ function BufferSeq:set_grid(component)
 	grid:refresh('BufferSeq:set_grid')
 end
 
-function BufferSeq:transport_event(auto, data)
+function BufferSeq:transport_event(buffer, data)
 	-- Play-through mode doesn't need special transport handling
 	-- The buffer just plays from wherever it was jumped to
 
-	self:set_grid(auto)
+	self:set_grid(buffer)
 end
 
 function BufferSeq:alt_event(data)
@@ -430,13 +424,13 @@ function BufferSeq:alt_event(data)
 			self:stop_scrub()
 			self.held_pads = {}
 		end
-		local auto = self:get_component()
-		self:set_grid(auto)
+		local buffer = self:get_component()
+		self:set_grid(buffer)
 		local cleanup_holder = {}
 		cleanup_holder.fn = self:on('alt_reset', function()
 			self:end_blink()
-			local auto = self:get_component()
-			self:set_grid(auto)
+			local buffer = self:get_component()
+			self:set_grid(buffer)
 			if cleanup_holder.fn then
 				cleanup_holder.fn()
 				cleanup_holder.fn = nil
@@ -445,8 +439,8 @@ function BufferSeq:alt_event(data)
 	elseif data.state then
 		self:end_blink()
 		self.index = nil
-		local auto = self:get_component()
-		self:set_grid(auto)
+		local buffer = self:get_component()
+		self:set_grid(buffer)
 	end
 end
 
@@ -458,13 +452,13 @@ function BufferSeq:row_event(data)
 			self.held_pads = {}
 		end
 		self.track = data.row
-		-- Initialize display_step_length for new track (from auto component)
-		local auto = self:get_component()
-		if auto and auto.buffer_step_length then self.display_step_length = auto.buffer_step_length end
+		-- Initialize display_step_length for new track (from buffer component)
+		local buffer = self:get_component()
+		if buffer and buffer.buffer_step_length then self.display_step_length = buffer.buffer_step_length end
 		-- Recalculate display for new track
 		self:recalculate_display()
 		-- Refresh grid to show new track's data
-		if auto then self:set_grid(auto) end
+		if buffer then self:set_grid(buffer) end
 	end
 end
 
