@@ -268,7 +268,7 @@ end
 function Auto:transport_event(data)
 	if data.type == 'start' then
 		self.playing = true
-		self.tick = 1
+		self.tick = 0
 		self.active_cc = nil
 		-- Clear any lingering buffer notes from previous playback
 		self:kill_notes()
@@ -278,7 +278,7 @@ function Auto:transport_event(data)
 		if self.seq[self.tick] then self:run_events(self.seq[self.tick]) end
 	elseif data.type == 'stop' then
 		self.playing = false
-		self.tick = 1
+		self.tick = 0
 		-- Kill all active buffer notes to prevent stuck notes
 		self:kill_notes()
 		if self.seq[self.tick] then self:run_events(self.seq[self.tick]) end
@@ -319,7 +319,6 @@ function Auto:transport_event(data)
 				if not App.buffer_loop then
 					self.track.armed = false
 					Registry.set('track_' .. self.track.id .. '_armed', 0, 'buffer_oneshot')
-					print('Track ' .. self.track.id .. ' disarmed (one-shot complete)')
 				end
 			end
 
@@ -358,17 +357,15 @@ function Auto:transport_event(data)
 			-- Update scrub_tick for scrub playback
 			local next_scrub_tick = (self.scrub_tick or self.scrub_start) + run_offset
 
-			if next_scrub_tick > self.scrub_end then
-				if self.scrub_loop then
-					-- Loop back to scrub start
-					self:kill_notes()
-					next_scrub_tick = self.scrub_start
-					self.scrub_tick = self.scrub_start
-				else
-					-- Play-through mode: stay at end
-					next_scrub_tick = self.scrub_end
-					self.scrub_tick = self.scrub_end
-				end
+			if self.scrub_loop and next_scrub_tick > self.scrub_end then
+				-- Loop back to scrub start
+				self:kill_notes()
+				next_scrub_tick = self.scrub_start
+				self.scrub_tick = self.scrub_start
+			elseif not self.scrub_loop and next_scrub_tick > self.seq_start + self.seq_length then
+				-- Play-thru mode, plays through full buffer
+				self:kill_notes()
+				self.scrub_tick = self.seq_start
 			else
 				self.scrub_tick = next_scrub_tick
 			end
