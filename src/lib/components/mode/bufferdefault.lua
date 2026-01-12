@@ -24,21 +24,6 @@ function BufferDefault:enable_event()
 	self.mode:use_context(context, screen, options)
 end
 
--- Screen used for sub-menus
-function BufferDefault:submenu_screen()
-	return function()
-		screen.clear()
-		UI:draw_small_tempo()
-
-		if self.current and self.current.status then
-			UI:draw_status('\u{25cf}', self.current.status.label)
-		else
-			UI:draw_status('\u{25cf}', 'BUFFER')
-		end
-		UI:draw_menu(0, 20, self.mode.menu, self.mode.cursor, { disable_highlight = self.mode.disable_highlight })
-	end
-end
-
 function BufferDefault:default_context()
 	local ctx = {
 		cursor = self.mode.cursor or 1,
@@ -81,15 +66,6 @@ function BufferDefault:default_context()
 			if current_item and current_item.press_fn_3 then
 				-- Let the menu item handle it (e.g., clear buffer)
 				current_item.press_fn_3()
-			else
-				-- Otherwise, open the submenu
-				local track_name = App.track[App.current_track] and App.track[App.current_track].name or ('Track ' .. App.current_track)
-				local config = {
-					status = { icon = App.current_track, label = track_name },
-					options = { timeout = false },
-					screen = self:submenu_screen(),
-				}
-				self:sub_menu(self:buffer_menu(), config)
 			end
 		end,
 		disable_highlight = true,
@@ -156,12 +132,12 @@ function BufferDefault:sub_menu(menu, config)
 	self.mode:use_context(self.current.context, self.current.screen, self.current.options)
 end
 
--- Default menu shows track armed status, buffer playback, and clear buffer
+-- Default menu shows all buffer settings in one menu
 function BufferDefault:default_menu()
 	local id = App.current_track
 
 	local items = {
-		-- Track armed status (for quick reference)
+		-- Track armed status
 		Registry.menu.make_item('track_' .. id .. '_armed', {
 			icon = '\u{25cf}',
 			label_fn = function() return 'ARMED' end,
@@ -186,6 +162,20 @@ function BufferDefault:default_menu()
 				enc3 = 'toggle playback',
 			},
 		}),
+		-- Playback mode (Default/Input/Direct/Scale Only)
+		Registry.menu.make_item('track_' .. id .. '_buffer_playback_mode', {
+			icon = '\u{25cf}',
+			label_fn = function() return 'PLAYBACK MODE' end,
+			value_fn = function()
+				local track = App.track[App.current_track]
+				local mode = track and track.buffer and track.buffer.playback_mode or 1
+				local modes = { 'Default', 'Input', 'Direct', 'Scale Only' }
+				return modes[mode] or 'Default'
+			end,
+			helper_labels = {
+				enc3 = 'change mode',
+			},
+		}),
 		-- Record mode (overdub/overwrite)
 		Registry.menu.make_item('buffer_overdub', {
 			icon = '\u{25cf}',
@@ -193,6 +183,40 @@ function BufferDefault:default_menu()
 			value_fn = function() return App.buffer_overdub and 'overdub' or 'overwrite' end,
 			helper_labels = {
 				enc3 = 'toggle mode',
+			},
+		}),
+		-- Loop Recording vs One-shot
+		Registry.menu.make_item('buffer_loop', {
+			icon = '\u{25cf}',
+			label_fn = function() return 'LOOP REC' end,
+			value_fn = function() return App.buffer_loop and 'loop' or 'one-shot' end,
+			helper_labels = {
+				enc3 = 'toggle',
+			},
+		}),
+		-- Scrub Mode (loop vs play-through)
+		Registry.menu.make_item('buffer_scrub_mode', {
+			icon = '\u{25cf}',
+			label_fn = function() return 'SCRUB MODE' end,
+			value_fn = function() return App.buffer_scrub_mode == 'loop' and 'loop' or 'play-thru' end,
+			helper_labels = {
+				enc3 = 'toggle',
+			},
+		}),
+		-- Buffer Step Length (uses Registry menu item for encoder control)
+		Registry.menu.make_item('track_' .. id .. '_buffer_step_length', {
+			icon = '\u{25cf}',
+			label_fn = function() return 'STEP LENGTH' end,
+			helper_labels = {
+				enc3 = 'change step',
+			},
+		}),
+		-- Buffer Length (in bars)
+		Registry.menu.make_item('track_' .. id .. '_buffer_length', {
+			icon = '\u{25cf}',
+			label_fn = function() return 'BUFFER LENGTH' end,
+			helper_labels = {
+				enc3 = 'change length',
 			},
 		}),
 		-- Clear buffer for current track
@@ -224,85 +248,9 @@ function BufferDefault:default_menu()
 	return items
 end
 
--- Buffer settings sub-menu
-function BufferDefault:buffer_menu()
-	local items = {}
-
-	-- Buffer Playback (per-track)
-	local track_id = App.current_track
-	table.insert(
-		items,
-		Registry.menu.make_item('track_' .. track_id .. '_buffer_playback', {
-			label_fn = function() return 'PLAYBACK' end,
-			value_fn = function()
-				local track = App.track[App.current_track]
-				local playback = track and track.buffer and track.buffer.buffer_playback
-				return playback and 'on' or 'off'
-			end,
-			helper_labels = {
-				enc3 = 'toggle',
-			},
-		})
-	)
-
-	-- Overdub vs Overwrite
-	table.insert(
-		items,
-		Registry.menu.make_item('buffer_overdub', {
-			label_fn = function() return 'RECORD MODE' end,
-			value_fn = function() return App.buffer_overdub and 'overdub' or 'overwrite' end,
-			helper_labels = {
-				enc3 = 'toggle mode',
-			},
-		})
-	)
-
-	-- Loop Recording vs One-shot
-	table.insert(
-		items,
-		Registry.menu.make_item('buffer_loop', {
-			label_fn = function() return 'LOOP REC' end,
-			value_fn = function() return App.buffer_loop and 'loop' or 'one-shot' end,
-			helper_labels = {
-				enc3 = 'toggle',
-			},
-		})
-	)
-
-	-- Scrub Mode (loop vs play-through)
-	table.insert(
-		items,
-		Registry.menu.make_item('buffer_scrub_mode', {
-			label_fn = function() return 'SCRUB MODE' end,
-			value_fn = function() return App.buffer_scrub_mode == 'loop' and 'loop' or 'play-thru' end,
-			helper_labels = {
-				enc3 = 'toggle',
-			},
-		})
-	)
-
-	-- Current track armed status
-	local id = App.current_track
-	table.insert(
-		items,
-		Registry.menu.make_item('track_' .. id .. '_armed', {
-			label_fn = function() return 'TRACK ' .. App.current_track .. ' ARM' end,
-			value_fn = function()
-				local armed = App.track[App.current_track] and App.track[App.current_track].armed
-				return armed and 'armed' or 'off'
-			end,
-			helper_labels = {
-				enc3 = 'toggle arm',
-			},
-		})
-	)
-
-	return items
-end
-
 function BufferDefault:default_screen()
 	return function()
-		UI:draw_tempo()
+		UI:draw_small_tempo()
 
 		if self.current and self.current.status then
 			UI:draw_status(self.current.status.icon, self.current.status.label)

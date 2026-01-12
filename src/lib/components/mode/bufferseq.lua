@@ -28,9 +28,9 @@ function BufferSeq:set(o)
 	self.grid = Grid:new({
 		name = 'BufferSeq ' .. o.track,
 		grid_start = o.grid_start or { x = 1, y = 8 },
-		grid_end = o.grid_end or { x = 8, y = 1 },
+		grid_end = o.grid_end or { x = 8, y = 8 },
 		display_start = o.display_start or { x = 1, y = 1 },
-		display_end = o.display_end or { x = 8, y = 8 },
+		display_end = o.display_end or { x = 8, y = 4 },
 		offset = o.offset or { x = 0, y = 0 },
 		midi = App.midi_grid,
 	})
@@ -67,7 +67,10 @@ function BufferSeq:set(o)
 
 		if not has_menu then
 			if self.scrub_active then
-				UI:draw_tag(1, 36, 'scrub', self.scrub_start_tick .. '-' .. self.scrub_end_tick)
+				-- Convert tick values to integers for display (indices should be whole numbers)
+				local start_tick = math.floor(self.scrub_start_tick)
+				local end_tick = math.floor(self.scrub_end_tick)
+				UI:draw_tag(1, 36, 'scrub', start_tick .. '-' .. end_tick)
 			else
 				UI:draw_tag(1, 36, 'step', self.last_event)
 			end
@@ -78,14 +81,16 @@ end
 function BufferSeq:enable_event()
 	-- No preset selection needed for buffer mode
 	-- Initialize display_step_length from buffer component if not already set
+	local buffer = self:get_component()
 	if not self.display_step_length then
-		local buffer = self:get_component()
 		if buffer and buffer.buffer_step_length then
 			self.display_step_length = buffer.buffer_step_length
 		else
-			self.display_step_length = 6 -- fallback default (matches buffer default)
+			-- Default to 1/8th note (App.ppqn / 2)
+			self.display_step_length = App.ppqn / 2
 		end
 	end
+	table.insert(self.cleanup_functions, buffer:on('clear_buffer', function(data) self:set_grid(buffer) end))
 	-- Initialize display calculations now that we can access the component
 	self:recalculate_display()
 end
@@ -93,7 +98,33 @@ end
 -- Get current display_step_length (for grid visualization)
 -- This is separate from buffer.buffer_step_length which remains static
 function BufferSeq:get_step_length()
-	return self.display_step_length or 6 -- fallback default
+	return self.display_step_length or (App.ppqn / 2) -- fallback default (1/8th note)
+end
+
+-- Get rainbow color index based on measure and seq_value
+-- Groups colors into 4 groups: 1-4, 5-8, 9-12, 13-16
+-- Each measure (4 beats) uses one color group
+-- seq_value selects which color within the group (1-4)
+function BufferSeq:get_rainbow_color_index(step_tick, seq_value)
+	-- Calculate which measure (1-4) this step is in
+	-- 1 measure = 4 beats = App.ppqn * 4 ticks
+	local measure = math.floor(step_tick / (App.ppqn * 4)) % 4
+	-- measure is 0-3, convert to 1-4
+	measure = measure + 1
+
+	-- Each measure uses 4 colors:
+	-- Measure 1: colors 1-4
+	-- Measure 2: colors 5-8
+	-- Measure 3: colors 9-12
+	-- Measure 4: colors 13-16
+	local color_group_start = (measure - 1) * 4 + 1
+
+	-- Use seq_value to select color within group (1-4)
+	-- seq_value can be any number, so use modulo to get 0-3, then add 1 to get 1-4
+	local color_offset = ((seq_value - 1) % 4) + 1
+
+	-- Return color index (1-16)
+	return color_group_start + color_offset - 1
 end
 
 function BufferSeq:recalculate_display(previous_offset)
@@ -339,6 +370,22 @@ function BufferSeq:set_grid(component)
 	local LOOP_END = (1 << 2)
 	local STEP = (1 << 3)
 	local OUTSIDE = (1 << 4)
+	local SCRUB = (1 << 5)
+	local RECORD_STEP = (1 << 6) -- Main playhead (recording position)
+
+	-- Check if scrub mode is active
+	local scrub_active = buffer.scrub_mode or self.scrub_active
+	local scrub_start_step = nil
+	local scrub_end_step = nil
+	local scrub_playhead_step = nil
+	local step_length = self:get_step_length()
+
+	if scrub_active and self.scrub_start_tick and self.scrub_end_tick then
+		-- Convert ticks to 1-based step indices (ticks 1-6 = step 1, ticks 7-12 = step 2, etc.)
+		scrub_start_step = math.floor((self.scrub_start_tick - 1) / step_length) + 1
+		scrub_end_step = math.floor((self.scrub_end_tick - 1) / step_length) + 1
+		if buffer.scrub_tick then scrub_playhead_step = math.floor((buffer.scrub_tick - 1) / step_length) + 1 end
+	end
 
 	grid:for_each(function(s, x, y, i)
 		local pad = 0
@@ -347,12 +394,14 @@ function BufferSeq:set_grid(component)
 
 		-- Determine the global step index for this LED pad based on the display offset
 		local global_step = i + self.step_offset
-		local current_step = math.floor(buffer.tick / self.step_length) + 1
+		-- Calculate the tick position of this step (absolute tick position)
+		-- This is used for measure calculation, so we need the actual tick position
+		local step_tick = (global_step - 1) * step_length
 		local seq_value
 
 		-- Iterate over the tick range corresponding to the global step
 		-- Check buffer_read for visualization (what's being played back)
-		for j = (global_step - 1) * self.step_length, global_step * self.step_length - 1 do
+		for j = (global_step - 1) * step_length, global_step * step_length - 1 do
 			if buffer.buffer_read[j] then
 				-- Buffer contains array of events
 				local events = buffer.buffer_read[j]
@@ -368,38 +417,163 @@ function BufferSeq:set_grid(component)
 
 		local loop_start = buffer.seq_start
 		local loop_end = buffer.seq_start + buffer.seq_length - 1
-		local loop_start_index = math.floor(loop_start / self.step_length) + 1
-		local loop_end_index = math.floor(loop_end / self.step_length) + 1
+		-- Convert ticks to 1-based step indices (matching presetseq calculation)
+		local loop_start_index = math.floor(loop_start / step_length) + 1
+		local loop_end_index = math.floor(loop_end / step_length) + 1
 
 		if global_step == loop_start_index or global_step == loop_end_index then pad = pad | LOOP_END end
 
-		if current_step == global_step and App.playing then pad = pad | STEP end
+		-- Always calculate main playhead (recording position) - show even during scrub
+		local current_step = math.floor((buffer.tick - 1) / step_length) + 1
+		if current_step == global_step then pad = pad | RECORD_STEP end
 
-		if global_step > loop_end_index then pad = pad | OUTSIDE end
+		-- Handle scrub mode
+		if scrub_active then
+			-- Highlight scrub range steps
+			if scrub_start_step and scrub_end_step and global_step >= scrub_start_step and global_step <= scrub_end_step then pad = pad | SCRUB end
+			-- Show scrub playhead (only during playback)
+			if scrub_playhead_step and global_step == scrub_playhead_step and App.playing then pad = pad | STEP end
+		end
+
+		-- Mark steps outside loop bounds (before loop start or after loop end)
+		local is_outside = global_step < loop_start_index or global_step > loop_end_index
+		if is_outside then pad = pad | OUTSIDE end
+
+		-- Check if buffer playback is active
+		local playback_active = buffer.buffer_playback or false
 
 		local color = 123
 
-		if pad & (OUTSIDE | VALUE) == (OUTSIDE | VALUE) and pad & BLINK == 0 then
-			color = grid.rainbow_off[(seq_value - 1) % 16 + 1] -- Draw steps with values outside the loop
-		elseif pad & (BLINK | VALUE | STEP) == 0 or pad == BLINK then
-			color = 0 -- empty
-		elseif pad & STEP > 0 and pad & (BLINK | VALUE) == 0 or pad == (BLINK | STEP) then
-			-- LOW White
-			color = { 5, 5, 5 }
-		elseif pad & VALUE > 0 and pad & (BLINK | STEP) == 0 or pad == (BLINK | VALUE) then
-			-- LOW Color
-			color = grid.rainbow_off[(seq_value - 1) % 16 + 1]
-		elseif pad & VALUE > 0 and pad & STEP > 0 then
-			color = grid.rainbow_on[(seq_value - 1) % 16 + 1]
-		elseif pad & (BLINK | OUTSIDE) == (BLINK | OUTSIDE) and pad & VALUE > 0 then
+		-- Handle blink mode first (like presetseq)
+		if pad & (BLINK | OUTSIDE) == (BLINK | OUTSIDE) and pad & VALUE > 0 then
 			-- Value steps outside the loop during blink
 			color = { 6, 0, 0 }
 		elseif pad & (BLINK | OUTSIDE) == (BLINK | OUTSIDE) and pad & VALUE == 0 then
 			-- Blink empty steps outside the loop
 			color = 0
-		elseif pad & LOOP_END > 0 then
-			-- Loop end points
-			color = { 5, 5, 5 }
+		-- Handle out-of-bounds steps (when not blinking)
+		elseif is_outside then
+			if seq_value then
+				-- Out-of-bounds with events: always {5,5,5}
+				color = { 5, 5, 5 }
+			else
+				-- Out-of-bounds without events: always 0
+				color = 0
+			end
+		-- When playback is OFF
+		elseif not playback_active then
+			-- If scrub mode is active, use rainbow colors for scrub range
+			if scrub_active and pad & SCRUB > 0 then
+				if pad & STEP > 0 then
+					-- Scrub playhead with value (rainbow on)
+					if seq_value then
+						local color_index = self:get_rainbow_color_index(step_tick, seq_value)
+						color = grid.rainbow_on[color_index]
+					else
+						color = { 5, 5, 5 }
+					end
+				elseif seq_value then
+					-- Scrub range with value (rainbow off)
+					local color_index = self:get_rainbow_color_index(step_tick, seq_value)
+					color = grid.rainbow_off[color_index]
+				else
+					-- Scrub range without value
+					color = { 5, 5, 5 }
+				end
+				-- Also show main playhead (recording position) with color = 1 if on this step
+				if pad & RECORD_STEP > 0 then color = 1 end
+			-- Outside scrub range when playback is off
+			else
+				-- Show main playhead with color = 1 when playback is off (for recording position)
+				if pad & RECORD_STEP > 0 then
+					color = 1
+				elseif seq_value then
+					-- Pads with events: {5,5,5}
+					color = { 5, 5, 5 }
+				else
+					-- Empty pads: 0
+					color = 0
+				end
+			end
+		-- When playback is ON (normal rendering with rainbow colors)
+		else
+			-- Handle scrub mode highlighting during playback
+			if scrub_active and pad & SCRUB > 0 then
+				if pad & STEP > 0 then
+					-- Scrub playhead with value (rainbow on)
+					if seq_value then
+						local color_index = self:get_rainbow_color_index(step_tick, seq_value)
+						color = grid.rainbow_on[color_index]
+					else
+						color = { 5, 5, 5 }
+					end
+				elseif seq_value then
+					-- Scrub range with value (rainbow off)
+					local color_index = self:get_rainbow_color_index(step_tick, seq_value)
+					color = grid.rainbow_off[color_index]
+				else
+					-- Scrub range without value
+					color = { 5, 5, 5 }
+				end
+				-- Also show main playhead (recording position) if on this step
+				-- If both playheads are on same step, prioritize scrub playhead (already set above)
+				-- If main playhead is on different step, show it with rainbow colors
+				if pad & RECORD_STEP > 0 and pad & STEP == 0 then
+					-- Main playhead on different step from scrub playhead
+					if seq_value then
+						local color_index = self:get_rainbow_color_index(step_tick, seq_value)
+						color = grid.rainbow_on[color_index]
+					else
+						color = { 5, 5, 5 }
+					end
+				end
+			-- Normal playback rendering (not scrub, not out-of-bounds)
+			elseif pad & (BLINK | VALUE | RECORD_STEP) == 0 or pad == BLINK then
+				color = 0 -- empty
+			elseif pad & RECORD_STEP > 0 and pad & (BLINK | VALUE) == 0 or pad == (BLINK | RECORD_STEP) then
+				-- Main playhead without value
+				color = { 5, 5, 5 }
+			elseif pad & VALUE > 0 and pad & (BLINK | RECORD_STEP) == 0 or pad == (BLINK | VALUE) then
+				-- Value without playhead (off colors)
+				if seq_value then
+					local color_index = self:get_rainbow_color_index(step_tick, seq_value)
+					color = grid.rainbow_off[color_index]
+				else
+					color = 0
+				end
+			elseif pad & VALUE > 0 and pad & RECORD_STEP > 0 then
+				-- Main playhead with value (on colors)
+				if seq_value then
+					local color_index = self:get_rainbow_color_index(step_tick, seq_value)
+					color = grid.rainbow_on[color_index]
+				else
+					color = { 5, 5, 5 }
+				end
+			end
+		end
+
+		-- Loop end points: visible when alt mode is active, blink when blink mode is active
+		if pad & LOOP_END > 0 then
+			if self.mode.alt then
+				-- Alt mode is active - show loop end points
+				if self.blink_state ~= nil then
+					-- Blink mode is active - blink the loop end points
+					if self.blink_state then
+						color = { 5, 5, 5 }
+					else
+						color = 0
+					end
+				else
+					-- Alt mode active but blink not started yet - show with value if present
+					if seq_value then
+						local color_index = self:get_rainbow_color_index(step_tick, seq_value)
+						color = grid.rainbow_off[color_index]
+					else
+						color = { 5, 5, 5 }
+					end
+				end
+			end
+			-- If alt mode is not active, don't override - let normal rendering handle it
 		end
 
 		s.led[x][y] = color
@@ -414,8 +588,103 @@ function BufferSeq:transport_event(buffer, data)
 	self:set_grid(buffer)
 end
 
+function BufferSeq:arrow_event(data)
+	if not data.state then return end
+	if self.mode.alt then
+		-- Alt + Right: Toggle buffer playback for active track
+		if data.type == 'right' then
+			local track = App.track[self.track or App.current_track]
+			if track and track.buffer then
+				local current_playback = track.buffer.buffer_playback or false
+				local new_playback = not current_playback
+				-- Use Registry to set the parameter (this will trigger the set_action)
+				local Registry = require('Foobar/lib/utilities/registry')
+				Registry.set('track_' .. track.id .. '_buffer_playback', new_playback and 1 or 0, 'alt_toggle')
+				print('Buffer playback: ' .. (new_playback and 'on' or 'off'))
+			end
+			-- Reset alt mode
+			self.mode.alt = false
+			-- Reset alt pad LED
+			if self.mode.alt_pad then
+				self.mode.alt_pad.led[9][1] = 0
+				self.mode.alt_pad:refresh()
+			end
+			self:emit('alt_reset')
+			return
+		end
+
+		-- Alt + Left: Clear buffer
+		if data.type == 'left' then
+			local track = App.track[self.track or App.current_track]
+			if track and track.buffer then
+				track.buffer:clear_buffer()
+				print('Buffer cleared for track ' .. track.id)
+				-- Refresh grid display
+				self:set_grid(track.buffer)
+			end
+			-- Reset alt mode
+			self.mode.alt = false
+			-- Reset alt pad LED
+			if self.mode.alt_pad then
+				self.mode.alt_pad.led[9][1] = 0
+				self.mode.alt_pad:refresh()
+			end
+			self:emit('alt_reset')
+			return
+		end
+
+		-- Alt + Up/Down: Jump offset by page size
+		if data.type == 'up' or data.type == 'down' then
+			-- Calculate page size: display_length steps (e.g., 32 for 8x4 grid in 8x8 display)
+			local page_size = self.display_length
+			local step_length = self:get_step_length()
+
+			if data.type == 'up' then
+				-- Jump to previous page
+				self.display_offset = math.max(0, self.display_offset - page_size)
+			else
+				-- Jump to next page
+				self.display_offset = self.display_offset + page_size
+			end
+
+			-- Recalculate display with new offset
+			self:recalculate_display()
+
+			-- Refresh grid
+			local buffer = self:get_component()
+			if buffer then self:set_grid(buffer) end
+
+			print('Buffer offset: ' .. self.display_offset)
+
+			-- Reset alt mode
+			self.mode.alt = false
+			-- Reset alt pad LED
+			if self.mode.alt_pad then
+				self.mode.alt_pad.led[9][1] = 0
+				self.mode.alt_pad:refresh()
+			end
+			self:emit('alt_reset')
+			return
+		end
+	elseif data.type == 'left' then
+		-- Left/Right: zoom in/out (step length)
+		-- Up/Down: scroll through buffer
+
+		self:increase_step_length()
+	elseif data.type == 'right' then
+		self:decrease_step_length()
+	elseif data.type == 'up' then
+		self:decrease_display_offset()
+		if self.display_offset == 0 then print('At buffer start') end
+	elseif data.type == 'down' then
+		self:increase_display_offset()
+		print('Buffer offset: ' .. bufferseq.display_offset)
+	end
+end
+
 function BufferSeq:alt_event(data)
 	if data.state and self.mode.alt then
+		-- Alt mode activated - start blinking to show loop end points
 		self.index = nil
 		self.mode:cancel_context()
 		self:start_blink()
@@ -437,6 +706,7 @@ function BufferSeq:alt_event(data)
 			end
 		end)
 	elseif data.state then
+		-- Alt mode deactivated - stop blinking
 		self:end_blink()
 		self.index = nil
 		local buffer = self:get_component()

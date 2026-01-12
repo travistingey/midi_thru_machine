@@ -395,7 +395,7 @@ function Default:track_menu()
 		})
 	)
 
-	-- step/reset_step are shown in Input menus for applicable types, not here
+	-- step/reset_step_count are shown in Input menus for applicable types, not here
 	add('program_change', {
 		label_fn = function() return 'PROGRAM CHANGE' end,
 		requires_confirmation = true,

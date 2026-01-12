@@ -26,20 +26,32 @@ function Input:set(o)
 end
 
 function Input:transport_event(data)
-	if self.track.step > 0 and self.track.input_type ~= 'midi' then self:clock_trigger(data, self.process) end
+	if
+		self.track.reset_step_length > 0
+		and self.track.reset_step_count > 0
+		and self.track.reset_step_length > 0
+		and App.tick % (self.track.reset_step_length * self.track.reset_step_count) == self.track.reset_tick
+	then
+		self.track.reset_tick = App.tick % self.track.reset_step_length
+		self:reset_step()
+	end
+
+	if self.track.step_length > 0 and self.track.input_type ~= 'midi' then self:clock_trigger(data, self.process) end
 	return data
 end
 
+function Input:reset_step()
+	self.track.step_count = 0
+	self.index = 0
+end
+
 function Input:midi_trigger(data)
-	if (self.track.midi_in == 17 or data.ch == self.track.midi_in) and self.track.step == 0 and data.note == self.track.trigger then
+	if (self.track.midi_in == 17 or data.ch == self.track.midi_in) and self.track.step_length == 0 and data.note == self.track.trigger then
 		if data.type == 'note_on' then
 			local event = {}
 			self.track.step_count = self.track.step_count + 1
 
-			if self.track.step_count == self.track.reset_step then
-				self.track.step_count = 0
-				self.index = 0
-			end
+			if self.track.reset_step_count > 0 and self.track.reset_step_length == 0 and self.track.step_count == self.track.reset_step_count then self:reset_step() end
 
 			for prop, v in pairs(data) do
 				event[prop] = v
@@ -69,12 +81,10 @@ function Input:midi_trigger(data)
 end
 
 function Input:clock_trigger(data, process)
-	if self.track.step > 0 and self.track.reset_step > 0 and App.tick % (self.track.reset_step * self.track.step) == self.track.reset_tick then
-		self.track.reset_tick = App.tick % self.track.step
-		self.index = 0
-	end
+	if self.track.step_length > 0 and App.tick % self.track.step_length == 1 then
+		self.track.step_count = self.track.step_count + 1
 
-	if self.track.step > 0 and App.tick % self.track.step == self.track.reset_tick then
+		if self.track.reset_step_count > 0 and self.track.reset_step_length == 0 and self.track.step_count == self.track.reset_step_count then self:reset_step() end
 		local event = self:process(data)
 		if event then
 			if event.new_note then event.note = event.new_note end
@@ -83,15 +93,15 @@ function Input:clock_trigger(data, process)
 
 				local off = { type = 'note_off', note = event.note, vel = event.vel }
 
-				clock.sync(math.ceil(self.track.step / 2) / 24)
-				self.track:send_input(off)
+				clock.sync(math.ceil(self.track.step_length / 2) / App.ppqn)
+				self.track:send_output(off)
 			end)
 		end
 	end
 end
 
 Input.options = { 'midi', 'arpeggio', 'random', 'bitwise', 'chord', 'crow' }
-Input.params = { 'midi_in', 'trigger', 'crow_in', 'note_range_upper', 'note_range_lower', 'arp', 'note_range', 'step', 'reset_step', 'chance', 'voice', 'step_length' } -- Update this list to dynamically show/hide Track params based on Input type
+Input.params = { 'midi_in', 'trigger', 'crow_in', 'note_range_upper', 'note_range_lower', 'arp', 'note_range', 'step', 'reset_step', 'chance', 'voice', 'bitwise_length' } -- Update this list to dynamically show/hide Track params based on Input type
 
 Input.types = {}
 
@@ -127,7 +137,7 @@ end
 -- Crow Input
 -- crow.send('input[1].query()') will query and save values to App.crow_in[1].volts
 Input.types['crow'] = {
-	props = { 'trigger', 'step', 'reset_step' },
+	props = { 'trigger', 'step_length', 'reset_step_length' },
 	set_action = function(s, track)
 		track:kill()
 		Input.set_trigger(s, track)
@@ -142,7 +152,7 @@ Input.types['crow'] = {
 
 -- Arpeggiator
 Input.types['arpeggio'] = {
-	props = { 'trigger', 'note_range_lower', 'note_range', 'arp', 'step', 'reset_step' },
+	props = { 'trigger', 'note_range_lower', 'note_range', 'arp', 'step_length', 'reset_step_length' },
 	set_action = function(s, track)
 		Input.set_trigger(s, track)
 
@@ -236,11 +246,11 @@ Input.types['random'] = {
 
 -- Bitwise Sequencer
 Input.types['bitwise'] = {
-	props = { 'trigger', 'note_range_lower', 'note_range', 'chance', 'step_length', 'step', 'reset_step' },
+	props = { 'trigger', 'note_range_lower', 'note_range', 'chance', 'bitwise_length', 'step', 'reset_step' },
 	set_action = function(s, track)
 		Input.set_trigger(s, track)
 		track.chance = params:get('track_' .. track.id .. '_chance')
-		track.step_length = params:get('track_' .. track.id .. '_step_length')
+		track.bitwise_length = params:get('track_' .. track.id .. '_bitwise_length')
 
 		s.note = Bitwise:new({
 			chance = track.chance,
@@ -255,10 +265,10 @@ Input.types['bitwise'] = {
 		s.note.chance = s.track.chance
 		s.vel.chance = s.track.chance
 
-		s.note.length = s.track.step_length
-		s.vel.length = s.track.step_length
+		s.note.length = s.track.bitwise_length
+		s.vel.length = s.track.bitwise_length
 
-		s.index = util.wrap(s.index + 1, 1, s.track.step_length)
+		s.index = util.wrap(s.index + 1, 1, s.track.bitwise_length)
 
 		s.note:mutate(s.index)
 		s.vel:mutate(s.index)

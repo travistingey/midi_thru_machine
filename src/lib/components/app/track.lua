@@ -7,7 +7,6 @@ local path_name = 'Foobar/lib/components/track/'
 local Auto = require(path_name .. 'auto')
 local Buffer = require(path_name .. 'buffer')
 local Input = require(path_name .. 'input')
-local Seq = require(path_name .. 'seq')
 local Scale = require(path_name .. 'scale')
 local Mute = require(path_name .. 'mute')
 local Output = require(path_name .. 'output')
@@ -28,9 +27,8 @@ function Track:new(o)
 	o:set(o)
 
 	self.load_component(o, Auto)
-	self.load_component(o, Buffer)
 	self.load_component(o, Input)
-	self.load_component(o, Seq)
+	self.load_component(o, Buffer)
 	self.load_component(o, Mute)
 	self.load_component(o, Output)
 
@@ -79,7 +77,7 @@ function Track:set(o)
 
 	local track = 'track_' .. self.id .. '_'
 
-	Registry.add('add_group', 'Track ' .. self.id, 27)
+	Registry.add('add_group', 'Track ' .. self.id, 30)
 
 	Registry.add('add_text', track .. 'name', 'Name', self.name)
 	Registry.set_action(track .. 'name', function(d) self.name = d end)
@@ -291,23 +289,31 @@ function Track:set(o)
 
 	-- Step
 	local step_values = { 0, 2, 3, 4, 6, 8, 9, 12, 16, 18, 24, 32, 36, 48, 96, 192, 384, 768, 1536 }
-	local step_options = { 'midi trig', '1/48', '1/32', '1/32t', '1/16', '1/16t', '1/16d', '1/8', '1/8t', '1/8d', '1/4', '1/4t', '1/4d', '1/2', '1', '2', '4', '8', '16' }
+	local step_options = { 'trig', '1/48', '1/32', '1/32t', '1/16', '1/16t', '1/16d', '1/8', '1/8t', '1/8d', '1/4', '1/4t', '1/4d', '1/2', '1', '2', '4', '8', '16' }
 
 	self.step = o.step or step_values[1]
 
-	Registry.add('add_option', track .. 'step', 'Step', step_options, 1)
-	Registry.set_action(track .. 'step', function(d)
+	Registry.add('add_option', track .. 'step_length', 'Step Length', step_options, 1)
+	Registry.set_action(track .. 'step_length', function(d)
 		self:kill()
-		App.settings[track .. 'step'] = d
-		self.step = step_values[d]
-		self.reset_tick = 1
+		App.settings[track .. 'step_length'] = d
+		self.step_length = step_values[d]
 		self.step_count = 0
 	end)
 
 	-- Reset Step
-	self.reset_step = o.reset_step or 0
+	Registry.add('add_option', track .. 'reset_step_length', 'Reset', step_options, 1)
+	Registry.set_action(track .. 'reset_step_length', function(d)
+		self:kill()
+		App.settings[track .. 'reset_step_length'] = d
+		self.reset_step_length = step_values[d]
+		self.reset_tick = 1
+		self.step_count = 0
+	end)
+
+	self.reset_step_count = o.reset_step_count or 0
 	self.reset_tick = o.reset_tick or 1
-	Registry.add('add_number', track .. 'reset_step', 'Reset step', 0, 64, 0, function(param)
+	Registry.add('add_number', track .. 'reset_step_count', 'Reset step', 0, 64, 0, function(param)
 		local v = param:get()
 		if v == 0 then
 			return 'off'
@@ -320,9 +326,9 @@ function Track:set(o)
 
 	self.step_count = 0
 
-	Registry.set_action(track .. 'reset_step', function(d)
-		App.settings[track .. 'reset_step'] = d
-		self.reset_step = d
+	Registry.set_action(track .. 'reset_step_count', function(d)
+		App.settings[track .. 'reset_step_count'] = d
+		self.reset_step_count = d
 		self.reset_tick = 1
 		self.step_count = 0
 	end)
@@ -396,11 +402,11 @@ function Track:set(o)
 	end)
 
 	-- Step Length
-	self.step_length = o.step_legnth or 16
-	Registry.add('add_number', track .. 'step_length', 'Step Length', 1, 16, 16)
-	Registry.set_action(track .. 'step_length', function(d)
-		App.settings[track .. 'step_length'] = d
-		self.step_length = d
+	self.bitwise_length = o.bitwise_length or 16
+	Registry.add('add_number', track .. 'bitwise_length', 'Bitwise Length', 1, 16, 16)
+	Registry.set_action(track .. 'bitwise_length', function(d)
+		App.settings[track .. 'bitwise_length'] = d
+		self.bitwise_length = d
 	end)
 
 	-- Note Range
@@ -492,21 +498,106 @@ function Track:set(o)
 		local was_armed = self.armed
 		self.armed = (d > 0)
 		if self.armed then
-			self.auto.buffer_playback = false
+			if self.buffer then params:set(track .. 'buffer_playback', 0, true) end
 			if self.auto and not App.buffer_overdub then self.auto.overwrite_cleared_steps = {} end
 		end
 	end)
 
 	-- Buffer playback (per-track)
-	-- Following the pattern: parameter registered here, initial value set in Auto:set(),
+	-- Following the pattern: parameter registered here, initial value set in Buffer:set(),
 	-- then params:default() will call set_action to sync parameter value to component
 	Registry.add('add_binary', track .. 'buffer_playback', 'Buffer Playback', 'toggle', 0)
 	Registry.set_action(track .. 'buffer_playback', function(d)
 		local buffer_playback = (d > 0)
-		if self.auto then
-			self.auto.buffer_playback = buffer_playback
-			self.armed = not buffer_playback
+		if self.buffer then
+			self.buffer.buffer_playback = buffer_playback
+			if buffer_playback then params:set(track .. 'armed', 0) end
 		end
+		-- Trigger menu redraw to show updated value
+		App.screen_dirty = true
+	end)
+
+	Registry.add('add_option', track .. 'buffer_playback_mode', 'Playback Mode', { 'Default', 'Input', 'Direct', 'Scale Only' }, 1)
+	Registry.set_action(track .. 'buffer_playback_mode', function(d)
+		if self.buffer then self.buffer.playback_mode = d end
+	end)
+
+	-- Buffer step length (excludes 0/midi trig option)
+	-- Create arrays without the first option (0/midi trig)
+	local buffer_step_values = { 2, 3, 4, 6, 8, 9, 12, 16, 18, 24, 32, 36, 48, 96, 192, 384, 768, 1536 }
+	local buffer_step_options = { '1/48', '1/32', '1/32t', '1/16', '1/16t', '1/16d', '1/8', '1/8t', '1/8d', '1/4', '1/4t', '1/4d', '1/2', '1', '2', '4', '8', '16' }
+	-- Default is 6 ticks (1/8 note at 24 PPQN), which is index 4 in buffer_step_values (was index 5 in step_values)
+	local buffer_step_default_index = 14
+	Registry.add('add_option', track .. 'buffer_step_length', 'Buffer Step', buffer_step_options, buffer_step_default_index)
+	Registry.set_action(track .. 'buffer_step_length', function(d)
+		App.settings[track .. 'buffer_step_length'] = d
+		local new_step_length = buffer_step_values[d]
+		if self.buffer then
+			self.buffer.buffer_step_length = new_step_length
+			-- Update bufferseq display_step_length if it exists (for modes using bufferseq)
+			-- Find bufferseq component in any active mode and update it
+			if App.mode then
+				for mode_id, mode in pairs(App.mode) do
+					if mode.components then
+						for _, comp in ipairs(mode.components) do
+							if comp.name == 'bufferseq' and comp.track == self.id then
+								comp.display_step_length = new_step_length
+								comp:recalculate_display()
+								local buffer = comp:get_component()
+								if buffer then comp:set_grid(buffer) end
+								break
+							end
+						end
+					end
+				end
+			end
+		end
+		-- Trigger menu redraw to show updated value
+		App.screen_dirty = true
+	end)
+
+	-- Buffer length (in bars)
+	-- Options: 1, 2, 4, 8, 16, 32, 64 bars
+	local buffer_length_options = { '1 bar', '2 bars', '4 bars', '8 bars', '16 bars', '32 bars', '64 bars' }
+	local buffer_length_values = {
+		App.ppqn * 4, -- 1 bar
+		App.ppqn * 8, -- 2 bars
+		App.ppqn * 16, -- 4 bars
+		App.ppqn * 32, -- 8 bars
+		App.ppqn * 64, -- 16 bars
+		App.ppqn * 128, -- 32 bars
+		App.ppqn * 256, -- 64 bars
+		App.ppqn * 512, -- 128 bars
+	}
+	local buffer_length_default_index = 6 -- 32 bars
+
+	Registry.add('add_option', track .. 'buffer_length', 'Buffer Length', buffer_length_options, buffer_length_default_index)
+
+	Registry.set_action(track .. 'buffer_length', function(d)
+		App.settings[track .. 'buffer_length'] = d
+		local new_length = buffer_length_values[d]
+		if self.buffer then
+			self.buffer.seq_length = new_length
+			-- Reset overwrite tracking when buffer length changes
+			if self.buffer.overwrite_cleared_steps then self.buffer.overwrite_cleared_steps = {} end
+			-- Update bufferseq if it exists
+			if App.mode then
+				for mode_id, mode in pairs(App.mode) do
+					if mode.components then
+						for _, comp in ipairs(mode.components) do
+							if comp.name == 'bufferseq' and comp.track == self.id then
+								comp:recalculate_display()
+								local buffer = comp:get_component()
+								if buffer then comp:set_grid(buffer) end
+								break
+							end
+						end
+					end
+				end
+			end
+		end
+		-- Trigger menu redraw to show updated value
+		App.screen_dirty = true
 	end)
 end
 
@@ -645,15 +736,16 @@ end
 
 -- Builds multiple component chains in single call.
 function Track:build_chain()
-	local send_input = { self.scale, self.mute, self.output }
-	local chain = { self.input, self.auto, self.buffer, self.seq, self.scale, self.mute, self.output }
+	local full_chain = { self.auto, self.buffer, self.input, self.scale, self.mute, self.output }
+
 	local send = { self.mute, self.output }
 
-	self.process_transport = self:chain_components(chain, 'process_transport')
-	self.process_midi = self:chain_components(chain, 'process_midi')
+	self.process_transport = self:chain_components(full_chain, 'process_transport')
+	self.process_midi = self:chain_components(full_chain, 'process_midi')
 
 	self.send = self:chain_components(send, 'process_midi')
-	self.send_input = self:chain_components(send_input, 'process_midi')
+	self.send_input = self:chain_components({ self.scale, self.mute, self.output }, 'process_midi')
+	self.send_scale = self:chain_components({ self.scale }, 'process_midi')
 	self.send_output = self:chain_components({ self.output }, 'process_midi')
 end
 

@@ -3,7 +3,7 @@ local utilities = require('Foobar/lib/utilities')
 local path_name = 'Foobar/lib/components/mode/'
 
 local MuteGrid = require('Foobar/lib/components/mode/mutegrid')
-local NoteGrid = require('Foobar/lib/components/mode/notegrid')
+local PresetGrid = require('Foobar/lib/components/mode/presetgrid')
 local BufferSeq = require('Foobar/lib/components/mode/bufferseq')
 local Default = require('Foobar/lib/components/mode/default')
 
@@ -18,7 +18,7 @@ local bufferseq = BufferSeq:new({
 	offset = { x = 0, y = 4 },
 })
 local mutegrid = MuteGrid:new({ track = 1 })
-local notegrid = NoteGrid:new({ track = 1 })
+local presetgrid = PresetGrid:new({ track = 1, param_type = 'track' })
 local default = Default:new({})
 
 local SessionMode = Mode:new({
@@ -28,11 +28,11 @@ local SessionMode = Mode:new({
 		default,
 		bufferseq,
 		mutegrid,
-		notegrid,
+		presetgrid,
 	},
 	load_event = function(s, data)
 		bufferseq.track = App.current_track
-		notegrid.track = App.current_track
+		presetgrid.track = App.current_track
 
 		s.row_pads.led[9][9 - App.current_track] = 1
 		s.row_pads:refresh()
@@ -56,7 +56,7 @@ local SessionMode = Mode:new({
 				App.current_track = data.row
 
 				bufferseq:row_event(data)
-				notegrid:row_event(data)
+				presetgrid:row_event(data)
 			else
 				App:set_mode(1)
 				return

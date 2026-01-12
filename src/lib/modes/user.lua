@@ -42,6 +42,12 @@ local UserMode = Mode:new({
 	end,
 	arrow_event = function(self, data)
 		if data.state then
+			-- Check for alt mode first - bufferseq handles alt mode arrow events
+			if self.alt and bufferseq.arrow_event then
+				bufferseq:arrow_event(data)
+				return
+			end
+
 			if App.recording then
 				print('Cannot change zoom during recording')
 				return

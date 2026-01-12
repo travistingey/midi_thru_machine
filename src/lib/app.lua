@@ -76,7 +76,7 @@ function App:init(o)
 			'chance',
 			'step',
 			'step_length',
-			'reset_step',
+			'reset_step_count',
 		},
 		scale = {
 			'bits',
@@ -174,19 +174,31 @@ function App:init(o)
 
 	-- Buffer recording mode parameters
 	params:add_binary('buffer_playback', 'Buffer Playback', 'toggle', 1)
-	params:set_action('buffer_playback', function(d) self.buffer_playback = (d > 0) end)
+	params:set_action('buffer_playback', function(d)
+		self.buffer_playback = (d > 0)
+		App.screen_dirty = true
+	end)
 
 	params:add_binary('buffer_overdub', 'Buffer Overdub', 'toggle', 1)
-	params:set_action('buffer_overdub', function(d) self.buffer_overdub = (d > 0) end)
+	params:set_action('buffer_overdub', function(d)
+		self.buffer_overdub = (d > 0)
+		App.screen_dirty = true
+	end)
 
 	params:add_binary('buffer_loop', 'Buffer Loop Rec', 'toggle', 1)
-	params:set_action('buffer_loop', function(d) self.buffer_loop = (d > 0) end)
+	params:set_action('buffer_loop', function(d)
+		self.buffer_loop = (d > 0)
+		App.screen_dirty = true
+	end)
 
 	params:add_binary('buffer_mute_on_arm', 'Mute on Arm', 'toggle', 0)
 	params:set_action('buffer_mute_on_arm', function(d) self.buffer_mute_on_arm = (d > 0) end)
 
 	params:add_option('buffer_scrub_mode', 'Scrub Mode', { 'loop', 'play_through' }, 1)
-	params:set_action('buffer_scrub_mode', function(d) self.buffer_scrub_mode = d == 1 and 'loop' or 'play_through' end)
+	params:set_action('buffer_scrub_mode', function(d)
+		self.buffer_scrub_mode = d == 1 and 'loop' or 'play_through'
+		App.screen_dirty = true
+	end)
 	self.device_manager:register_params()
 	-- Create the tracks
 	params:add_separator('tracks', 'Tracks')
@@ -550,7 +562,7 @@ function App:register_modes()
 		mode.grid:process(msg)
 	end
 
-	local SessionModePreset = require('Foobar/lib/modes/session-preset')
+	local SessionModePreset = require('Foobar/lib/modes/session-preset-buffer')
 	local SessionModeNote = require('Foobar/lib/modes/session-note')
 	local DrumsMode = require('Foobar/lib/modes/drums')
 	local KeysMode = require('Foobar/lib/modes/keys')
