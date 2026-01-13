@@ -21,7 +21,7 @@ function PresetSeq:set(o)
 	self.lanes = { 'track', 'scale', 'cc', 'buffer' } -- List of lanes
 	self.selected_lane_index = 1 -- Index of the selected lane
 	self.selected_lane = self.lanes[self.selected_lane_index]
-	self.step_length = o.step_length or 24
+	self.step_length = o.step_length or App.ppqn
 
 	self.display_offset = o.display_offset or 0
 

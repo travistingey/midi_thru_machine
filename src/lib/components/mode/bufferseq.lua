@@ -51,6 +51,9 @@ function BufferSeq:set(o)
 	self.scrub_saved_seq_length = nil
 	self.held_pads = {} -- Track currently held pads for multi-pad selection
 
+	-- Grid refresh optimization: track last rendered step to avoid refreshing every tick
+	self.last_rendered_step = nil
+
 	-- Initialize display calculations (will be recalculated when component is available)
 	self.row_ticks = 0
 	self.display_ticks = 0
@@ -80,51 +83,66 @@ end
 
 function BufferSeq:enable_event()
 	-- No preset selection needed for buffer mode
-	-- Initialize display_step_length from buffer component if not already set
+	-- Initialize display_step_length independently (not synced with buffer_step_length)
+	-- If not already set, use a sensible default for grid visualization
 	local buffer = self:get_component()
 	if not self.display_step_length then
-		if buffer and buffer.buffer_step_length then
-			self.display_step_length = buffer.buffer_step_length
-		else
-			-- Default to 1/8th note (App.ppqn / 2)
-			self.display_step_length = App.ppqn / 2
+		-- Default to 1 bar (App.ppqn * 4) for grid display
+		-- This is independent of buffer.buffer_step_length which controls buffer swapping
+		self.display_step_length = App.ppqn * 4
+	end
+	table.insert(
+		self.cleanup_functions,
+		buffer:on('clear_buffer', function(data)
+			self.last_rendered_step = nil -- Force refresh on buffer clear
+			self:set_grid(buffer)
+		end)
+	)
+
+	-- Listen for track armed state changes to update row pads
+	-- Set up listeners for all tracks
+	local function setup_armed_listeners()
+		for track_id = 1, 8 do
+			local track = App.track[track_id]
+			if track then
+				table.insert(
+					self.cleanup_functions,
+					track:on('armed', function(armed)
+						-- Update row pads when any track's armed status changes
+						if self.mode and self.mode.enabled then self:update_row_pads() end
+					end)
+				)
+			end
 		end
 	end
-	table.insert(self.cleanup_functions, buffer:on('clear_buffer', function(data) self:set_grid(buffer) end))
+	setup_armed_listeners()
+
 	-- Initialize display calculations now that we can access the component
 	self:recalculate_display()
+
+	-- Update row pads when component enables
+	self:update_row_pads()
 end
 
 -- Get current display_step_length (for grid visualization)
 -- This is separate from buffer.buffer_step_length which remains static
 function BufferSeq:get_step_length()
-	return self.display_step_length or (App.ppqn / 2) -- fallback default (1/8th note)
+	return self.display_step_length or (App.ppqn * 4) -- fallback default (1 bar)
 end
 
--- Get rainbow color index based on measure and seq_value
+-- Get rainbow color index based on measure only
 -- Groups colors into 4 groups: 1-4, 5-8, 9-12, 13-16
 -- Each measure (4 beats) uses one color group
--- seq_value selects which color within the group (1-4)
+-- Uses first color in each group (measure-based only, not event-count based)
 function BufferSeq:get_rainbow_color_index(step_tick, seq_value)
 	-- Calculate which measure (1-4) this step is in
-	-- 1 measure = 4 beats = App.ppqn * 4 ticks
-	local measure = math.floor(step_tick / (App.ppqn * 4)) % 4
-	-- measure is 0-3, convert to 1-4
+	-- 1 measure = 4 beats = App.ppqn * 4
+	local measure = math.floor(step_tick / (App.ppqn * 4)) % 16
+	-- measure is 0-15, convert to 1-16
 	measure = measure + 1
 
-	-- Each measure uses 4 colors:
-	-- Measure 1: colors 1-4
-	-- Measure 2: colors 5-8
-	-- Measure 3: colors 9-12
-	-- Measure 4: colors 13-16
-	local color_group_start = (measure - 1) * 4 + 1
-
-	-- Use seq_value to select color within group (1-4)
-	-- seq_value can be any number, so use modulo to get 0-3, then add 1 to get 1-4
-	local color_offset = ((seq_value - 1) % 4) + 1
-
-	-- Return color index (1-16)
-	return color_group_start + color_offset - 1
+	-- Return first color in group (measure-based only)
+	return measure
 end
 
 function BufferSeq:recalculate_display(previous_offset)
@@ -399,15 +417,17 @@ function BufferSeq:set_grid(component)
 		local step_tick = (global_step - 1) * step_length
 		local seq_value
 
-		-- Iterate over the tick range corresponding to the global step
-		-- Check buffer_read for visualization (what's being played back)
-		for j = (global_step - 1) * step_length, global_step * step_length - 1 do
-			if buffer.buffer_read[j] then
-				-- Buffer contains array of events
-				local events = buffer.buffer_read[j]
+		-- Optimized: Only check ticks that actually exist in buffer_read (sparse table)
+		-- Just find first event in step range - don't count events
+		-- Color is based on measure (step_tick), not event count
+		local step_start_tick = (global_step - 1) * step_length
+		local step_end_tick = global_step * step_length - 1
+		for tick, events in pairs(buffer.buffer_read) do
+			-- Only check ticks within this step's range
+			if tick >= step_start_tick and tick <= step_end_tick then
 				if events and #events > 0 then
-					-- Use event count as a pseudo-value for color variation
-					seq_value = #events
+					-- Found first event - just mark as having value (don't count)
+					seq_value = 1
 					break
 				end
 			end
@@ -579,13 +599,43 @@ function BufferSeq:set_grid(component)
 		s.led[x][y] = color
 	end)
 	grid:refresh('BufferSeq:set_grid')
+
+	-- Update last rendered step for optimization (so transport_event knows we just refreshed)
+	if buffer and buffer.playing then
+		local step_length = self:get_step_length()
+		self.last_rendered_step = math.floor((buffer.tick - 1) / step_length) + 1
+	else
+		-- Not playing, so reset tracking
+		self.last_rendered_step = nil
+	end
 end
 
 function BufferSeq:transport_event(buffer, data)
-	-- Play-through mode doesn't need special transport handling
-	-- The buffer just plays from wherever it was jumped to
+	-- Optimized grid refresh: only refresh on DISPLAY step boundaries, not every tick
+	-- Uses display_step_length (for grid visualization) NOT buffer_step_length (for buffer swapping)
+	-- This dramatically reduces grid refresh frequency (e.g., from 120/sec to ~15/sec at 300 BPM with display_step_length=8)
 
-	self:set_grid(buffer)
+	-- Always refresh on start/stop events
+	if data.type == 'start' or data.type == 'stop' then
+		self.last_rendered_step = nil -- Force refresh
+		self:set_grid(buffer)
+		return
+	end
+
+	-- For clock events, only refresh when DISPLAY step changes (based on display_step_length)
+	if data.type == 'clock' and buffer.playing then
+		-- Use display_step_length for grid refresh boundaries (independent of buffer_step_length)
+		local display_step_length = self:get_step_length()
+		-- Calculate current display step index (1-based for display)
+		-- This uses display_step_length, which may differ from buffer.buffer_step_length
+		local current_display_step = math.floor((buffer.tick - 1) / display_step_length) + 1
+
+		-- Only refresh if display step changed
+		if self.last_rendered_step ~= current_display_step then
+			self.last_rendered_step = current_display_step
+			self:set_grid(buffer)
+		end
+	end
 end
 
 function BufferSeq:arrow_event(data)
@@ -693,13 +743,18 @@ function BufferSeq:alt_event(data)
 			self:stop_scrub()
 			self.held_pads = {}
 		end
+		-- Ensure we're showing the current track, not defaulting to first track
+		if self.track then App.current_track = self.track end
 		local buffer = self:get_component()
 		self:set_grid(buffer)
+		-- Update row pads to reflect current state
+		self:update_row_pads()
 		local cleanup_holder = {}
 		cleanup_holder.fn = self:on('alt_reset', function()
 			self:end_blink()
 			local buffer = self:get_component()
 			self:set_grid(buffer)
+			self:update_row_pads()
 			if cleanup_holder.fn then
 				cleanup_holder.fn()
 				cleanup_holder.fn = nil
@@ -711,24 +766,55 @@ function BufferSeq:alt_event(data)
 		self.index = nil
 		local buffer = self:get_component()
 		self:set_grid(buffer)
+		-- Update row pads when alt mode deactivates
+		self:update_row_pads()
 	end
 end
 
 function BufferSeq:row_event(data)
 	if data.state then
+		-- If alt mode is active, arm/disarm the track instead of switching tracks
+		if self.mode.alt then
+			local track = App.track[data.row]
+			if track then
+				local Registry = require('Foobar/lib/utilities/registry')
+				local was_armed = track.armed
+				-- Toggle armed state
+				local new_armed_state = was_armed and 0 or 1
+				Registry.set('track_' .. track.id .. '_armed', new_armed_state, 'alt_row_tap')
+				print('Track ' .. track.id .. ' armed: ' .. (new_armed_state == 1 and 'on' or 'off'))
+				-- Update row pads to reflect the change
+				self:update_row_pads()
+			end
+			-- Reset alt mode after arming
+			self.mode.alt = false
+			if self.mode.alt_pad then
+				self.mode.alt_pad.led[9][1] = 0
+				self.mode.alt_pad:refresh()
+			end
+			self:emit('alt_reset')
+			return
+		end
+
 		-- Stop any active scrub when changing tracks
 		if self.scrub_active then
 			self:stop_scrub()
 			self.held_pads = {}
 		end
 		self.track = data.row
-		-- Initialize display_step_length for new track (from buffer component)
-		local buffer = self:get_component()
-		if buffer and buffer.buffer_step_length then self.display_step_length = buffer.buffer_step_length end
+		App.current_track = data.row
+		-- Initialize display_step_length for new track (independent of buffer_step_length)
+		-- If not already set, use default - don't sync with buffer.buffer_step_length
+		if not self.display_step_length then
+			self.display_step_length = App.ppqn * 4 -- Default to 1 bar
+		end
 		-- Recalculate display for new track
 		self:recalculate_display()
 		-- Refresh grid to show new track's data
+		local buffer = self:get_component()
 		if buffer then self:set_grid(buffer) end
+		-- Update row pads after track change
+		self:update_row_pads()
 	end
 end
 
@@ -738,6 +824,44 @@ function BufferSeq:disable_event()
 		self:stop_scrub()
 		self.held_pads = {}
 	end
+end
+
+-- Update row pads to show current track and armed status
+-- Armed tracks: rainbow_off[1] when not selected, rainbow_on[1] when selected
+-- Current track: always shows with brightness 1 (white)
+function BufferSeq:update_row_pads()
+	if not self.mode or not self.mode.row_pads then return end
+
+	local Grid = require('Foobar/lib/grid')
+	local current_track = App.current_track or 1
+
+	-- Reset all row pads first
+	self.mode.row_pads:reset()
+
+	-- Update row pads for all tracks
+	for track_id = 1, 8 do
+		local track = App.track[track_id]
+		if track then
+			local row_y = 9 - track_id
+			if track.armed then
+				-- Armed track: use rainbow colors
+				if track_id == current_track then
+					-- Selected and armed: bright red (rainbow_on[1])
+					self.mode.row_pads.led[9][row_y] = Grid.rainbow_on[1]
+				else
+					-- Armed but not selected: dim red (rainbow_off[1])
+					self.mode.row_pads.led[9][row_y] = Grid.rainbow_off[1]
+				end
+			elseif track_id == current_track then
+				-- Current track but not armed: white (brightness 1)
+				self.mode.row_pads.led[9][row_y] = 1
+			end
+		end
+	end
+
+	-- Refresh both grid and display
+	self.mode.row_pads:refresh('BufferSeq:update_row_pads')
+	App.screen_dirty = true
 end
 
 return BufferSeq

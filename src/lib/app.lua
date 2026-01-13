@@ -92,9 +92,20 @@ function App:init(o)
 	end
 
 	-- Timing parameters:
-	self.ppqn = 24
+	self.ppqn = 96
+	self.external_ppqn = 24
 	self.swing = 0.5
 	self.swing_div = 6 -- 1/16 note swing
+
+	-- Adaptive clock timing state
+	self.tick_multiplier = 4 -- internal_ppqn / external_ppqn (96/24)
+	self.last_clock_time = nil -- Timestamp of last external tick
+	self.subtick_ms = nil -- Calculated duration of one subtick
+	self.use_burst_mode = true -- Dynamic flag for tick dispatch mode
+	self.burst_threshold_ms = 6 -- Below this, use burst mode
+	self.scheduled_ticks = {} -- Track scheduled coroutines for cleanup
+	self.pending_subticks = 0 -- Track how many subticks are still pending
+	self.DEBUG_TIMING = false -- Enable for timing diagnostics
 
 	-- Buffer recording mode settings (app-level)
 	self.buffer_overdub = false -- true = overdub (layer), false = overwrite (replace)
@@ -179,7 +190,7 @@ function App:init(o)
 		App.screen_dirty = true
 	end)
 
-	params:add_binary('buffer_overdub', 'Buffer Overdub', 'toggle', 1)
+	params:add_binary('buffer_overdub', 'Buffer Overdub', 'toggle', 0) -- Default to overwrite mode
 	params:set_action('buffer_overdub', function(d)
 		self.buffer_overdub = (d > 0)
 		App.screen_dirty = true
@@ -249,10 +260,100 @@ function App:on_transport(data)
 	elseif data.type == 'stop' then
 		self:on_stop()
 	elseif data.type == 'clock' then
-		self:on_tick()
+		self:on_external_clock()
 	end
 
 	self.screen_dirty = true
+end
+
+--==============================================================================
+-- External Clock Handling (from MIDI Clock)
+--==============================================================================
+function App:on_external_clock()
+	-- Only process external clock if clock source is external
+	if params:get('clock_source') ~= 2 then return end
+
+	local now = util.time()
+
+	-- If a new clock tick arrives before scheduled subticks complete,
+	-- cancel remaining scheduled ticks and burst them immediately
+	if #self.scheduled_ticks > 0 then
+		-- Cancel all pending scheduled ticks
+		for _, coro in ipairs(self.scheduled_ticks) do
+			clock.cancel(coro)
+		end
+		self.scheduled_ticks = {}
+
+		-- Burst the remaining subticks immediately (safety check for count)
+		local remaining = math.max(0, self.pending_subticks)
+		for i = 1, remaining do
+			self:on_tick()
+		end
+		self.pending_subticks = 0
+	end
+
+	-- First tick: no timing data yet, use burst mode
+	if not self.last_clock_time then
+		for i = 1, self.tick_multiplier do
+			self:on_tick()
+		end
+		self.last_clock_time = now
+		return
+	end
+
+	-- Calculate subtick timing based on time between external ticks
+	local tick_duration = (now - self.last_clock_time) * 1000 -- Convert to ms
+	self.subtick_ms = tick_duration / self.tick_multiplier
+
+	-- Decide dispatch mode: use burst if subticks would be imperceptibly close
+	self.use_burst_mode = self.subtick_ms < self.burst_threshold_ms
+
+	self.last_clock_time = now
+
+	-- Dispatch internal ticks based on mode
+	if self.use_burst_mode then
+		-- Burst mode: fire all subticks immediately
+		for i = 1, self.tick_multiplier do
+			self:on_tick()
+		end
+		self.pending_subticks = 0
+	else
+		-- Spaced mode: distribute subticks across the external tick duration
+		-- Fire first subtick immediately
+		self:on_tick()
+
+		-- Track remaining subticks
+		self.pending_subticks = self.tick_multiplier - 1
+
+		-- Schedule remaining subticks with appropriate delays
+		for i = 2, self.tick_multiplier do
+			local delay_ms = self.subtick_ms * (i - 1)
+			local coro = clock.run(function()
+				clock.sleep(delay_ms / 1000) -- Convert ms to seconds
+				if self.playing then -- Safety check
+					-- Decrement pending count before firing
+					-- Note: If a new clock tick arrived and cancelled this,
+					-- the count may have been reset, but that's okay
+					if self.pending_subticks > 0 then self.pending_subticks = self.pending_subticks - 1 end
+					self:on_tick()
+				end
+			end)
+			table.insert(self.scheduled_ticks, coro)
+		end
+	end
+
+	-- Debug output (optional)
+	if self.DEBUG_TIMING then
+		print(
+			string.format(
+				'Mode: %s, Subtick: %.2fms, Threshold: %.2fms, Pending: %d',
+				self.use_burst_mode and 'BURST' or 'SPACED',
+				self.subtick_ms or 0,
+				self.burst_threshold_ms,
+				self.pending_subticks
+			)
+		)
+	end
 end
 
 --==============================================================================
@@ -265,6 +366,17 @@ function App:on_start(continue)
 	self.tick = 0
 	self.start_time = clock.get_beats()
 	self.last_time = clock.get_beats()
+
+	-- Reset external clock timing state
+	self.last_clock_time = nil
+	self.subtick_ms = nil
+	self.use_burst_mode = true
+	self.pending_subticks = 0
+	-- Clear any scheduled ticks from previous session
+	for _, coro in ipairs(self.scheduled_ticks) do
+		clock.cancel(coro)
+	end
+	self.scheduled_ticks = {}
 
 	if continue then
 		self:emit('transport_event', { type = 'continue' })
@@ -282,12 +394,6 @@ function App:on_start(continue)
 	end) end
 end
 
-function App:set_recording(state)
-	self.recording = state
-	self:emit('recording', state)
-	self.screen_dirty = true
-end
-
 function App:on_stop()
 	local tracer = require('Foobar/lib/utilities/tracer').device(0, 'transport')
 	tracer:log('info', 'App stop')
@@ -299,6 +405,23 @@ function App:on_stop()
 			self.clock = nil
 		end
 	end
+
+	-- Reset clock timing state
+	self.last_clock_time = nil
+	self.subtick_ms = nil
+	self.pending_subticks = 0
+
+	-- Cancel any scheduled ticks
+	for _, coro in ipairs(self.scheduled_ticks) do
+		clock.cancel(coro)
+	end
+	self.scheduled_ticks = {}
+end
+
+function App:set_recording(state)
+	self.recording = state
+	self:emit('recording', state)
+	self.screen_dirty = true
 end
 
 function App:cleanup()

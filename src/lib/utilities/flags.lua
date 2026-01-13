@@ -86,6 +86,7 @@ end
 local feature_flag_values = {
 	unit_test = false,
 	verbose = false,
+	buffer_timing_stats = false, -- Enable buffer timing statistics collection
 }
 
 -- Application runtime state flags (mutated by the app itself)

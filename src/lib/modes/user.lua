@@ -35,8 +35,8 @@ local UserMode = Mode:new({
 		local auto = bufferseq:get_component()
 		if auto then bufferseq:set_grid(auto) end
 
-		self.row_pads.led[9][9 - App.current_track] = 1
-		self.row_pads:refresh()
+		-- Use bufferseq's unified row pad update function
+		bufferseq:update_row_pads()
 
 		App.screen_dirty = true
 	end,
@@ -72,27 +72,28 @@ local UserMode = Mode:new({
 	end,
 	row_event = function(self, data)
 		if data.state then
-			self.row_pads:reset()
+			-- Let bufferseq handle row events (including alt mode arming)
+			-- It will update row pads internally
+			bufferseq:row_event(data)
+			
+			-- Only proceed with track switching if bufferseq didn't handle it (not alt mode)
+			if not self.alt then
+				if data.row ~= App.current_track then
+					self.track = data.row
+					App.current_track = data.row
 
-			if data.row ~= App.current_track then
-				self.track = data.row
-				App.current_track = data.row
-				bufferseq:row_event(data)
-
-				-- Rebuild context/menu for new track (same logic as encoder 1 handler)
-				-- This ensures encoder bindings are updated to the new track
-				if default and default.default_context and default.mode then
-					local screen_fn = (default.current and default.current.screen) or default:default_screen()
-					local options = { timeout = false, menu_override = true, cursor = 1 }
-					local next_context = default:default_context()
-					default.current = { context = next_context, screen = screen_fn, options = options }
-					self:use_context(next_context, screen_fn, options)
-					App.screen_dirty = true
+					-- Rebuild context/menu for new track (same logic as encoder 1 handler)
+					-- This ensures encoder bindings are updated to the new track
+					if default and default.default_context and default.mode then
+						local screen_fn = (default.current and default.current.screen) or default:default_screen()
+						local options = { timeout = false, menu_override = true, cursor = 1 }
+						local next_context = default:default_context()
+						default.current = { context = next_context, screen = screen_fn, options = options }
+						self:use_context(next_context, screen_fn, options)
+						App.screen_dirty = true
+					end
 				end
 			end
-
-			self.row_pads.led[9][9 - App.current_track] = 1
-			self.row_pads:refresh()
 		end
 	end,
 })

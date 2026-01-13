@@ -3,6 +3,7 @@ local utilities = require(path_name .. 'utilities')
 local Grid = require(path_name .. 'grid')
 local TrackComponent = require('Foobar/lib/components/track/trackcomponent')
 local Registry = require(path_name .. 'utilities/registry')
+local flags = require(path_name .. 'utilities/flags')
 
 -- Buffer component handles recording and playback of MIDI events
 -- Separated from Auto component for clear separation of concerns:
@@ -23,7 +24,13 @@ end
 
 function Buffer:set(o)
 	self.id = o.id or 1
-
+	-- Add at the top of buffer.lua after other local declarations
+	self.timing_stats = {
+		swap_times = {},
+		transport_times = {},
+		record_times = {},
+		max_samples = 100, -- Keep last 100 samples
+	}
 	-- Buffer's own timing state (independent from Auto)
 	self.tick = o.tick or 0 -- Buffer's own playback position in ticks
 	self.seq_start = o.seq_start or 1
@@ -83,8 +90,12 @@ function Buffer:step_index_to_start_tick(step_index) return step_index * self.bu
 -- Swap buffer step: Copy buffer_write to buffer_read for a single step
 -- Called on step transitions to provide immediate feedback (within one step)
 -- Only swaps ticks within both step boundaries and loop boundaries
+-- Optimized to only iterate over ticks that contain data (sparse table optimization)
 function Buffer:swap_buffer_step(step_index)
 	if not self.track.armed then return end
+
+	-- Timing tracking (conditional on flag)
+	local start_time = flags.buffer_timing_stats and util.time() or nil
 	local start_tick, end_tick = self:step_index_to_tick_range(step_index)
 
 	-- Clamp to loop boundaries
@@ -93,14 +104,32 @@ function Buffer:swap_buffer_step(step_index)
 	start_tick = math.max(start_tick, loop_start)
 	end_tick = math.min(end_tick, loop_end)
 
-	-- Clear old read data for this step
-	for tick = start_tick, end_tick do
-		self.buffer_read[tick] = nil
+	-- Optimized: Only iterate over ticks that actually exist in buffer_write
+	-- This avoids iterating over empty ticks, which is much faster for sparse buffers
+	for tick, events in pairs(self.buffer_write) do
+		-- Only process ticks within our step range
+		if tick >= start_tick and tick <= end_tick then
+			-- Clear old read data for this tick (if it exists)
+			if self.buffer_read[tick] then self.buffer_read[tick] = nil end
+			-- Copy write to read (shallow copy - tables share event references)
+			self.buffer_read[tick] = events
+		end
 	end
 
-	-- Copy write to read for this step (shallow copy - tables share event references)
-	for tick = start_tick, end_tick do
-		if self.buffer_write[tick] then self.buffer_read[tick] = self.buffer_write[tick] end
+	-- Also clear any buffer_read ticks in this range that don't have corresponding buffer_write data
+	-- This handles the case where buffer_read has data that was removed from buffer_write
+	for tick, events in pairs(self.buffer_read) do
+		if tick >= start_tick and tick <= end_tick then
+			-- If this tick doesn't exist in buffer_write, clear it from buffer_read
+			if not self.buffer_write[tick] then self.buffer_read[tick] = nil end
+		end
+	end
+
+	-- Record timing (conditional on flag)
+	if flags.buffer_timing_stats then
+		local elapsed = (util.time() - start_time) * 1000 -- Convert to ms
+		table.insert(self.timing_stats.swap_times, elapsed)
+		if #self.timing_stats.swap_times > self.timing_stats.max_samples then table.remove(self.timing_stats.swap_times, 1) end
 	end
 end
 
@@ -110,6 +139,9 @@ end
 -- Records to buffer_write only - buffer_read is updated via step-based swapping
 function Buffer:record_buffer(midi_event)
 	if not self.track.armed then return end
+
+	-- Timing tracking (conditional on flag)
+	local record_start = flags.buffer_timing_stats and util.time() or nil
 
 	if midi_event.tick == self.tick then return end
 
@@ -125,6 +157,13 @@ function Buffer:record_buffer(midi_event)
 
 	-- Store the event (multiple events can exist at same tick)
 	table.insert(self.buffer_write[tick], midi_event)
+
+	-- Record timing (conditional on flag)
+	if flags.buffer_timing_stats and record_start then
+		local record_elapsed = (util.time() - record_start) * 1000
+		table.insert(self.timing_stats.record_times, record_elapsed)
+		if #self.timing_stats.record_times > self.timing_stats.max_samples then table.remove(self.timing_stats.record_times, 1) end
+	end
 end
 
 -- Clear buffer events for a single tick (used for overwrite mode)
@@ -159,23 +198,45 @@ function Buffer:set_loop(loop_start, loop_end)
 	self.seq_length = loop_end - loop_start + 1
 	-- Reset overwrite tracking when loop boundaries change
 	self.overwrite_cleared_steps = {}
+
+	-- Ensure buffer.tick is within the new loop bounds
+	-- If current tick is outside new loop bounds, set it to loop start
+	-- This ensures playback always starts within the loop when loop points are set
+	if self.tick < loop_start or self.tick > loop_end then self.tick = loop_start end
 end
 
 -- Transport Event Handling
 function Buffer:transport_event(data)
+	-- Timing tracking (conditional on flag)
+	local transport_start = flags.buffer_timing_stats and util.time() or nil
+
 	if data.type == 'start' then
 		self.playing = true
-		self.tick = 0
+		-- Start playback at loop start (not buffer start) to respect loop boundaries
+		-- Unless in scrub mode, in which case scrub_tick is already set
+		if not self.scrub_mode then self.tick = self.seq_start end
 		-- Clear any lingering buffer notes from previous playback
 		self:kill_notes()
 		-- Reset overwrite tracking for new playback
 		self.overwrite_cleared_steps = {}
 	elseif data.type == 'stop' then
 		self.playing = false
-		self.tick = 0
+		-- Reset to loop start (not buffer start) when stopping
+		if not self.scrub_mode then self.tick = self.seq_start end
 		-- Kill all active buffer notes to prevent stuck notes
 		self:kill_notes()
 	elseif data.type == 'clock' and self.playing then
+		-- Ensure tick is within loop bounds (safety check for normal playback)
+		-- This handles cases where loop points changed during playback or tick got out of sync
+		if not self.scrub_mode then
+			if self.tick < self.seq_start or self.tick >= self.seq_start + self.seq_length then
+				-- Wrap tick to be within loop bounds
+				local relative_tick = (self.tick - self.seq_start) % self.seq_length
+				if relative_tick < 0 then relative_tick = relative_tick + self.seq_length end
+				self.tick = self.seq_start + relative_tick
+			end
+		end
+
 		-- Detect step transitions for buffer swapping
 		local current_step_index = self:tick_to_step_index(self.tick)
 
@@ -264,9 +325,56 @@ function Buffer:transport_event(data)
 
 			if self.buffer_read[next_tick] then self:run_buffer(self.buffer_read[next_tick]) end
 		end
+
+		-- Record transport timing (conditional on flag)
+		if flags.buffer_timing_stats and transport_start then
+			local transport_elapsed = (util.time() - transport_start) * 1000
+			table.insert(self.timing_stats.transport_times, transport_elapsed)
+			if #self.timing_stats.transport_times > self.timing_stats.max_samples then table.remove(self.timing_stats.transport_times, 1) end
+		end
 	end
 
 	return data
+end
+
+-- Add diagnostic function to print stats
+function Buffer:print_timing()
+	local function avg(times)
+		if #times == 0 then return 0 end
+		local sum = 0
+		for _, t in ipairs(times) do
+			sum = sum + t
+		end
+		return sum / #times
+	end
+
+	local function max(times)
+		if #times == 0 then return 0 end
+		local m = 0
+		for _, t in ipairs(times) do
+			if t > m then m = t end
+		end
+		return m
+	end
+
+	print(
+		string.format(
+			'Buffer Timing Stats (step_length=%d):\n'
+				.. '  Swap: avg=%.3fms max=%.3fms (samples=%d)\n'
+				.. '  Transport: avg=%.3fms max=%.3fms (samples=%d)\n'
+				.. '  Record: avg=%.3fms max=%.3fms (samples=%d)',
+			self.buffer_step_length,
+			avg(self.timing_stats.swap_times),
+			max(self.timing_stats.swap_times),
+			#self.timing_stats.swap_times,
+			avg(self.timing_stats.transport_times),
+			max(self.timing_stats.transport_times),
+			#self.timing_stats.transport_times,
+			avg(self.timing_stats.record_times),
+			max(self.timing_stats.record_times),
+			#self.timing_stats.record_times
+		)
+	)
 end
 
 -- Playback buffer events

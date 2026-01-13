@@ -34,8 +34,8 @@ local SessionMode = Mode:new({
 		bufferseq.track = App.current_track
 		presetgrid.track = App.current_track
 
-		s.row_pads.led[9][9 - App.current_track] = 1
-		s.row_pads:refresh()
+		-- Use bufferseq's unified row pad update function
+		bufferseq:update_row_pads()
 		App.screen_dirty = true
 	end,
 	arrow_event = function(self, data)
@@ -49,22 +49,21 @@ local SessionMode = Mode:new({
 	end,
 	row_event = function(self, data)
 		if data.state then
-			self.row_pads:reset()
+			-- Let bufferseq handle row events (including alt mode arming)
+			-- It will update row pads internally
+			bufferseq:row_event(data)
+			
+			-- Only proceed with track switching if bufferseq didn't handle it (not alt mode)
+			if not self.alt then
+				if data.row ~= App.current_track then
+					self.track = data.row
+					App.current_track = data.row
+					presetgrid:row_event(data)
+				else
+					App:set_mode(1)
+					return
+				end
 
-			if data.row ~= App.current_track then
-				self.track = data.row
-				App.current_track = data.row
-
-				bufferseq:row_event(data)
-				presetgrid:row_event(data)
-			else
-				App:set_mode(1)
-				return
-			end
-
-			if self.alt then
-				App:set_mode(1)
-			else
 				self:disable()
 				self:enable()
 			end

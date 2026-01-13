@@ -287,14 +287,42 @@ function Track:set(o)
 		self.arp = arp_options[d]
 	end)
 
+	local function calculate_step_values(include_trig)
+		local ppqn = App.ppqn
+		local step_values = {
+			math.floor(ppqn / 12), -- 1/48
+			math.floor(ppqn / 8), -- 1/32
+			math.floor(ppqn * 2 / 24), -- 1/32t (triplet)
+			math.floor(ppqn / 4), -- 1/16
+			math.floor(ppqn * 2 / 12), -- 1/16t (triplet)
+			math.floor(ppqn * 3 / 8), -- 1/16d (dotted)
+			math.floor(ppqn / 2), -- 1/8
+			math.floor(ppqn * 2 / 6), -- 1/8t (triplet)
+			math.floor(ppqn * 3 / 4), -- 1/8d (dotted)
+			ppqn, -- 1/4
+			math.floor(ppqn * 2 / 3), -- 1/4t (triplet)
+			math.floor(ppqn * 3 / 2), -- 1/4d (dotted)
+			ppqn * 2, -- 1/2
+			ppqn * 4, -- 1 (whole note)
+			ppqn * 8, -- 2
+			ppqn * 16, -- 4
+			ppqn * 32, -- 8
+			ppqn * 64, -- 16
+		}
+		if include_trig then
+			table.insert(step_values, 0) -- trig
+		end
+		return step_values
+	end
+
 	-- Step
-	local step_values = { 0, 2, 3, 4, 6, 8, 9, 12, 16, 18, 24, 32, 36, 48, 96, 192, 384, 768, 1536 }
 	local step_options = { 'trig', '1/48', '1/32', '1/32t', '1/16', '1/16t', '1/16d', '1/8', '1/8t', '1/8d', '1/4', '1/4t', '1/4d', '1/2', '1', '2', '4', '8', '16' }
 
-	self.step = o.step or step_values[1]
+	self.step = o.step or 0
 
 	Registry.add('add_option', track .. 'step_length', 'Step Length', step_options, 1)
 	Registry.set_action(track .. 'step_length', function(d)
+		local step_values = calculate_step_values(true)
 		self:kill()
 		App.settings[track .. 'step_length'] = d
 		self.step_length = step_values[d]
@@ -304,6 +332,7 @@ function Track:set(o)
 	-- Reset Step
 	Registry.add('add_option', track .. 'reset_step_length', 'Reset', step_options, 1)
 	Registry.set_action(track .. 'reset_step_length', function(d)
+		local step_values = calculate_step_values(true)
 		self:kill()
 		App.settings[track .. 'reset_step_length'] = d
 		self.reset_step_length = step_values[d]
@@ -522,35 +551,18 @@ function Track:set(o)
 		if self.buffer then self.buffer.playback_mode = d end
 	end)
 
-	-- Buffer step length (excludes 0/midi trig option)
-	-- Create arrays without the first option (0/midi trig)
-	local buffer_step_values = { 2, 3, 4, 6, 8, 9, 12, 16, 18, 24, 32, 36, 48, 96, 192, 384, 768, 1536 }
 	local buffer_step_options = { '1/48', '1/32', '1/32t', '1/16', '1/16t', '1/16d', '1/8', '1/8t', '1/8d', '1/4', '1/4t', '1/4d', '1/2', '1', '2', '4', '8', '16' }
 	-- Default is 6 ticks (1/8 note at 24 PPQN), which is index 4 in buffer_step_values (was index 5 in step_values)
 	local buffer_step_default_index = 14
 	Registry.add('add_option', track .. 'buffer_step_length', 'Buffer Step', buffer_step_options, buffer_step_default_index)
 	Registry.set_action(track .. 'buffer_step_length', function(d)
 		App.settings[track .. 'buffer_step_length'] = d
+		local buffer_step_values = calculate_step_values()
 		local new_step_length = buffer_step_values[d]
 		if self.buffer then
 			self.buffer.buffer_step_length = new_step_length
-			-- Update bufferseq display_step_length if it exists (for modes using bufferseq)
-			-- Find bufferseq component in any active mode and update it
-			if App.mode then
-				for mode_id, mode in pairs(App.mode) do
-					if mode.components then
-						for _, comp in ipairs(mode.components) do
-							if comp.name == 'bufferseq' and comp.track == self.id then
-								comp.display_step_length = new_step_length
-								comp:recalculate_display()
-								local buffer = comp:get_component()
-								if buffer then comp:set_grid(buffer) end
-								break
-							end
-						end
-					end
-				end
-			end
+			-- Note: display_step_length is now independent and not synced with buffer_step_length
+			-- Users can control display_step_length separately via bufferseq encoder controls
 		end
 		-- Trigger menu redraw to show updated value
 		App.screen_dirty = true
