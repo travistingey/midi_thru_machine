@@ -109,8 +109,6 @@ function App:init(o)
 
 	-- Buffer recording mode settings (app-level)
 	self.buffer_overdub = false -- true = overdub (layer), false = overwrite (replace)
-	self.buffer_loop = true -- true = continuous loop recording, false = one-shot (disarm after loop)
-	self.buffer_playback = true -- true = buffer playback enabled, false = buffer muted
 	self.buffer_scrub_mode = 'loop' -- 'loop' = loop scrub range, 'play_through' = play through once
 
 	-- Tick and transport timing (times in beats)
@@ -179,16 +177,13 @@ function App:init(o)
 	----------------------------------------------------------------------------
 	-- Register Parameters, Tracks, Scales, Outputs, etc.
 	----------------------------------------------------------------------------
-	params:add_group('App', 10)
+	params:add_separator('app', 'App')
+	params:add_group('Devices', 4)
+	self.device_manager:register_params()
+
+	params:add_group('Recording', 3)
 	params:add_binary('recording', 'Recording', 'momentary', 0)
 	params:set_action('recording', function(state) self:set_recording(state == 1) end)
-
-	-- Buffer recording mode parameters
-	params:add_binary('buffer_playback', 'Buffer Playback', 'toggle', 1)
-	params:set_action('buffer_playback', function(d)
-		self.buffer_playback = (d > 0)
-		App.screen_dirty = true
-	end)
 
 	params:add_binary('buffer_overdub', 'Buffer Overdub', 'toggle', 0) -- Default to overwrite mode
 	params:set_action('buffer_overdub', function(d)
@@ -196,21 +191,12 @@ function App:init(o)
 		App.screen_dirty = true
 	end)
 
-	params:add_binary('buffer_loop', 'Buffer Loop Rec', 'toggle', 1)
-	params:set_action('buffer_loop', function(d)
-		self.buffer_loop = (d > 0)
-		App.screen_dirty = true
-	end)
-
-	params:add_binary('buffer_mute_on_arm', 'Mute on Arm', 'toggle', 0)
-	params:set_action('buffer_mute_on_arm', function(d) self.buffer_mute_on_arm = (d > 0) end)
-
 	params:add_option('buffer_scrub_mode', 'Scrub Mode', { 'loop', 'play_through' }, 1)
 	params:set_action('buffer_scrub_mode', function(d)
 		self.buffer_scrub_mode = d == 1 and 'loop' or 'play_through'
 		App.screen_dirty = true
 	end)
-	self.device_manager:register_params()
+
 	-- Create the tracks
 	params:add_separator('tracks', 'Tracks')
 	for i = 1, 8 do

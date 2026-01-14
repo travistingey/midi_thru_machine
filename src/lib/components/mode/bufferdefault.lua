@@ -185,11 +185,15 @@ function BufferDefault:default_menu()
 				enc3 = 'toggle mode',
 			},
 		}),
-		-- Loop Recording vs One-shot
-		Registry.menu.make_item('buffer_loop', {
+		-- Loop Recording/Playback vs One-shot (per-track)
+		Registry.menu.make_item('track_' .. id .. '_buffer_loop', {
 			icon = '\u{25cf}',
-			label_fn = function() return 'LOOP REC' end,
-			value_fn = function() return App.buffer_loop and 'loop' or 'one-shot' end,
+			label_fn = function() return 'LOOP' end,
+			value_fn = function()
+				local track = App.track[App.current_track]
+				local buffer_loop = track and track.buffer and track.buffer.buffer_loop
+				return buffer_loop and 'loop' or 'one-shot'
+			end,
 			helper_labels = {
 				enc3 = 'toggle',
 			},
@@ -201,22 +205,6 @@ function BufferDefault:default_menu()
 			value_fn = function() return App.buffer_scrub_mode == 'loop' and 'loop' or 'play-thru' end,
 			helper_labels = {
 				enc3 = 'toggle',
-			},
-		}),
-		-- Buffer Step Length (uses Registry menu item for encoder control)
-		Registry.menu.make_item('track_' .. id .. '_buffer_step_length', {
-			icon = '\u{25cf}',
-			label_fn = function() return 'STEP LENGTH' end,
-			helper_labels = {
-				enc3 = 'change step',
-			},
-		}),
-		-- Buffer Length (in bars)
-		Registry.menu.make_item('track_' .. id .. '_buffer_length', {
-			icon = '\u{25cf}',
-			label_fn = function() return 'BUFFER LENGTH' end,
-			helper_labels = {
-				enc3 = 'change length',
 			},
 		}),
 		-- Clear buffer for current track

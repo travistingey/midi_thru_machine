@@ -309,8 +309,13 @@ function Track:set(o)
 			ppqn * 32, -- 8
 			ppqn * 64, -- 16
 		}
+
 		if include_trig then
-			table.insert(step_values, 0) -- trig
+			local options = { 0 }
+			for i = 1, #step_values do
+				table.insert(options, step_values[i])
+			end
+			return options
 		end
 		return step_values
 	end
@@ -551,63 +556,25 @@ function Track:set(o)
 		if self.buffer then self.buffer.playback_mode = d end
 	end)
 
-	local buffer_step_options = { '1/48', '1/32', '1/32t', '1/16', '1/16t', '1/16d', '1/8', '1/8t', '1/8d', '1/4', '1/4t', '1/4d', '1/2', '1', '2', '4', '8', '16' }
-	-- Default is 6 ticks (1/8 note at 24 PPQN), which is index 4 in buffer_step_values (was index 5 in step_values)
-	local buffer_step_default_index = 14
-	Registry.add('add_option', track .. 'buffer_step_length', 'Buffer Step', buffer_step_options, buffer_step_default_index)
-	Registry.set_action(track .. 'buffer_step_length', function(d)
-		App.settings[track .. 'buffer_step_length'] = d
-		local buffer_step_values = calculate_step_values()
-		local new_step_length = buffer_step_values[d]
-		if self.buffer then
-			self.buffer.buffer_step_length = new_step_length
-			-- Note: display_step_length is now independent and not synced with buffer_step_length
-			-- Users can control display_step_length separately via bufferseq encoder controls
-		end
+	-- Buffer Loop (controls both recording and playback: true = continuous loop, false = one-shot)
+	Registry.add('add_binary', track .. 'buffer_loop', 'Buffer Loop', 'toggle', 1)
+	Registry.set_action(track .. 'buffer_loop', function(d)
+		App.settings[track .. 'buffer_loop'] = d
+		local buffer_loop = (d > 0)
+		if self.buffer then self.buffer.buffer_loop = buffer_loop end
 		-- Trigger menu redraw to show updated value
 		App.screen_dirty = true
 	end)
 
-	-- Buffer length (in bars)
-	-- Options: 1, 2, 4, 8, 16, 32, 64 bars
-	local buffer_length_options = { '1 bar', '2 bars', '4 bars', '8 bars', '16 bars', '32 bars', '64 bars' }
-	local buffer_length_values = {
-		App.ppqn * 4, -- 1 bar
-		App.ppqn * 8, -- 2 bars
-		App.ppqn * 16, -- 4 bars
-		App.ppqn * 32, -- 8 bars
-		App.ppqn * 64, -- 16 bars
-		App.ppqn * 128, -- 32 bars
-		App.ppqn * 256, -- 64 bars
-		App.ppqn * 512, -- 128 bars
-	}
-	local buffer_length_default_index = 6 -- 32 bars
-
-	Registry.add('add_option', track .. 'buffer_length', 'Buffer Length', buffer_length_options, buffer_length_default_index)
-
-	Registry.set_action(track .. 'buffer_length', function(d)
-		App.settings[track .. 'buffer_length'] = d
-		local new_length = buffer_length_values[d]
-		if self.buffer then
-			self.buffer.seq_length = new_length
-			-- Reset overwrite tracking when buffer length changes
-			if self.buffer.overwrite_cleared_steps then self.buffer.overwrite_cleared_steps = {} end
-			-- Update bufferseq if it exists
-			if App.mode then
-				for mode_id, mode in pairs(App.mode) do
-					if mode.components then
-						for _, comp in ipairs(mode.components) do
-							if comp.name == 'bufferseq' and comp.track == self.id then
-								comp:recalculate_display()
-								local buffer = comp:get_component()
-								if buffer then comp:set_grid(buffer) end
-								break
-							end
-						end
-					end
-				end
-			end
-		end
+	-- Buffer Sync (for scrub mode, loop changes, and clip loading)
+	local buffer_step_options = { '1/48', '1/32', '1/32t', '1/16', '1/16t', '1/16d', '1/8', '1/8t', '1/8d', '1/4', '1/4t', '1/4d', '1/2', '1', '2', '4', '8', '16' }
+	local buffer_sync_default_index = 4 -- Default to 1/8 note (same as buffer_step_length)
+	Registry.add('add_option', track .. 'buffer_sync', 'Buffer Sync', buffer_step_options, buffer_sync_default_index)
+	Registry.set_action(track .. 'buffer_sync', function(d)
+		App.settings[track .. 'buffer_sync'] = d
+		local buffer_step_values = calculate_step_values()
+		local new_sync_length = buffer_step_values[d]
+		if self.buffer then self.buffer.buffer_sync_length = new_sync_length end
 		-- Trigger menu redraw to show updated value
 		App.screen_dirty = true
 	end)

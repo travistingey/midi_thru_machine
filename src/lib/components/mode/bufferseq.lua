@@ -50,6 +50,7 @@ function BufferSeq:set(o)
 	self.scrub_saved_seq_start = nil
 	self.scrub_saved_seq_length = nil
 	self.held_pads = {} -- Track currently held pads for multi-pad selection
+	self.pending_scrub_pads = {} -- Track which pads are pending for scrub
 
 	-- Grid refresh optimization: track last rendered step to avoid refreshing every tick
 	self.last_rendered_step = nil
@@ -96,6 +97,21 @@ function BufferSeq:enable_event()
 		buffer:on('clear_buffer', function(data)
 			self.last_rendered_step = nil -- Force refresh on buffer clear
 			self:set_grid(buffer)
+		end)
+	)
+
+	-- Listen for scrub started event from buffer (for sync)
+	table.insert(
+		self.cleanup_functions,
+		buffer:on('scrub_started', function(data)
+			-- Update bufferseq state when scrub starts via sync
+			if not self.scrub_active then
+				self.scrub_saved_seq_start = buffer.seq_start
+				self.scrub_saved_seq_length = buffer.seq_length
+				self.scrub_start_tick = data.start_tick
+				self.scrub_end_tick = data.end_tick
+				self.scrub_active = true
+			end
 		end)
 	)
 
@@ -254,17 +270,66 @@ function BufferSeq:recalculate_scrub_from_held_pads()
 		if max_pad == nil or pad_index > max_pad then max_pad = pad_index end
 	end
 
-	-- If no pads are held, stop scrub
+	-- If no pads are held, stop scrub and clear pending
 	if min_pad == nil or max_pad == nil then
 		self:stop_scrub()
+		buffer:clear_pending_scrub()
+		self.pending_scrub_pads = {}
 		return
 	end
 
 	-- Calculate tick range from min to max pad
 	local start_tick, _ = self:pad_to_tick_range(min_pad)
 	local _, end_tick = self:pad_to_tick_range(max_pad)
+	local display_step_length = self:get_step_length()
 
-	-- Update scrub range
+	-- Create pad check function
+	local pad_check_fn = function()
+		-- Verify pads are still held
+		if not next(self.held_pads) then return false end
+
+		-- Recalculate to ensure range still matches
+		local check_min = nil
+		local check_max = nil
+		for pad_idx, _ in pairs(self.held_pads) do
+			if check_min == nil or pad_idx < check_min then check_min = pad_idx end
+			if check_max == nil or pad_idx > check_max then check_max = pad_idx end
+		end
+
+		if check_min and check_max then
+			local check_start, _ = self:pad_to_tick_range(check_min)
+			local _, check_end = self:pad_to_tick_range(check_max)
+			return check_start == start_tick and check_end == end_tick
+		end
+		return false
+	end
+
+	-- Check if sync is enabled and we should wait
+	if buffer.buffer_sync_length and buffer:should_wait_for_sync(display_step_length) then
+		-- If scrub is already active, update it immediately (no sync for updates)
+		if self.scrub_active then
+			-- Update existing scrub with new range
+			self.scrub_start_tick = start_tick
+			self.scrub_end_tick = end_tick
+			buffer:update_scrub(start_tick, end_tick)
+			print('Scrub recalculated: ' .. start_tick .. '-' .. end_tick)
+		else
+			-- Queue new scrub action (this will replace any existing pending scrub)
+			buffer:queue_scrub_action(start_tick, end_tick, App.buffer_scrub_mode == 'loop', display_step_length, pad_check_fn)
+
+			-- Track pending pads
+			self.pending_scrub_pads = {}
+			for pad_idx, _ in pairs(self.held_pads) do
+				self.pending_scrub_pads[pad_idx] = true
+			end
+
+			local next_sync_tick = buffer:get_next_sync_tick(display_step_length)
+			print('Scrub queued for sync at tick: ' .. next_sync_tick)
+		end
+		return
+	end
+
+	-- No sync or already on boundary - execute immediately
 	if self.scrub_active then
 		-- Update existing scrub with new range
 		self.scrub_start_tick = start_tick
@@ -273,7 +338,7 @@ function BufferSeq:recalculate_scrub_from_held_pads()
 		print('Scrub recalculated: ' .. start_tick .. '-' .. end_tick)
 	else
 		-- Start new scrub with full range (min to max)
-		-- Save loop boundaries (buffer.tick continues updating automatically)
+		-- Save loop boundaries
 		self.scrub_saved_seq_start = buffer.seq_start
 		self.scrub_saved_seq_length = buffer.seq_length
 
@@ -282,7 +347,7 @@ function BufferSeq:recalculate_scrub_from_held_pads()
 		self.scrub_end_tick = end_tick
 		self.scrub_active = true
 
-		-- Start scrub playback (will loop if App.buffer_scrub_mode is 'loop')
+		-- Start scrub playback
 		buffer:start_scrub(start_tick, end_tick, App.buffer_scrub_mode == 'loop')
 
 		print('Scrub started: ' .. start_tick .. '-' .. end_tick .. ' (' .. App.buffer_scrub_mode .. ')')
@@ -355,6 +420,11 @@ function BufferSeq:grid_event(component, data)
 			self.held_pads[pad_index] = true
 		else
 			self.held_pads[pad_index] = nil
+			-- Clear pending scrub if pad is released and no pads are held
+			if not next(self.held_pads) then
+				buffer:clear_pending_scrub()
+				self.pending_scrub_pads = {}
+			end
 		end
 
 		-- Loop mode: use standard scrub behavior
@@ -372,8 +442,16 @@ function BufferSeq:grid_event(component, data)
 		local step_length = self:get_step_length()
 		local loop_start = (selection_start - 1) * step_length
 		local loop_end = selection_end * step_length - 1
-		buffer:set_loop(loop_start, loop_end)
-		print('Loop set: ' .. loop_start .. '-' .. loop_end)
+
+		-- Check if sync is enabled
+		if buffer.buffer_sync_length and buffer:should_wait_for_sync(step_length) then
+			buffer:queue_loop_action(loop_start, loop_end, step_length)
+			local next_sync_tick = buffer:get_next_sync_tick(step_length)
+			print('Loop queued for sync at tick: ' .. next_sync_tick)
+		else
+			buffer:set_loop(loop_start, loop_end)
+			print('Loop set: ' .. loop_start .. '-' .. loop_end)
+		end
 	end
 
 	self:set_grid(buffer)
@@ -640,16 +718,22 @@ end
 
 function BufferSeq:arrow_event(data)
 	if not data.state then return end
+
+	local buffer = self:get_component()
+	local track = buffer.track
+
 	if self.mode.alt then
 		-- Alt + Right: Toggle buffer playback for active track
 		if data.type == 'right' then
-			local track = App.track[self.track or App.current_track]
-			if track and track.buffer then
+			if buffer then
 				local current_playback = track.buffer.buffer_playback or false
 				local new_playback = not current_playback
 				-- Use Registry to set the parameter (this will trigger the set_action)
 				local Registry = require('Foobar/lib/utilities/registry')
 				Registry.set('track_' .. track.id .. '_buffer_playback', new_playback and 1 or 0, 'alt_toggle')
+
+				if new_playback then Registry.set('track_' .. track.id .. '_armed', 0, 'playback_on') end
+
 				print('Buffer playback: ' .. (new_playback and 'on' or 'off'))
 			end
 			-- Reset alt mode
@@ -665,12 +749,12 @@ function BufferSeq:arrow_event(data)
 
 		-- Alt + Left: Clear buffer
 		if data.type == 'left' then
-			local track = App.track[self.track or App.current_track]
-			if track and track.buffer then
-				track.buffer:clear_buffer()
+			if buffer then
+				buffer:clear_buffer()
+				Registry.set('track_' .. track.id .. '_buffer_playback', 0, 'clear_buffer')
 				print('Buffer cleared for track ' .. track.id)
 				-- Refresh grid display
-				self:set_grid(track.buffer)
+				self:set_grid(buffer)
 			end
 			-- Reset alt mode
 			self.mode.alt = false
@@ -701,19 +785,10 @@ function BufferSeq:arrow_event(data)
 			self:recalculate_display()
 
 			-- Refresh grid
-			local buffer = self:get_component()
 			if buffer then self:set_grid(buffer) end
 
 			print('Buffer offset: ' .. self.display_offset)
 
-			-- Reset alt mode
-			self.mode.alt = false
-			-- Reset alt pad LED
-			if self.mode.alt_pad then
-				self.mode.alt_pad.led[9][1] = 0
-				self.mode.alt_pad:refresh()
-			end
-			self:emit('alt_reset')
 			return
 		end
 	elseif data.type == 'left' then
