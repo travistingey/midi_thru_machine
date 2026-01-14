@@ -2,6 +2,7 @@ local path_name = 'Foobar/lib/'
 local ModeComponent = require(path_name .. 'components/mode/modecomponent')
 local Grid = require(path_name .. 'grid')
 local UI = require(path_name .. 'ui')
+local Registry = require('Foobar/lib/utilities/registry')
 
 local BufferSeq = ModeComponent:new()
 BufferSeq.__base = ModeComponent
@@ -434,6 +435,12 @@ function BufferSeq:grid_event(component, data)
 	-- Handle long press for loop point setting (alt mode)
 	-- This works the same as presetseq: long press two pads to set loop boundaries
 	if data.type == 'pad_long' and data.pad_down and #data.pad_down == 1 and self.mode.alt then
+		-- Ensure buffer component exists
+		if not buffer then
+			print('Cannot set loop: buffer component not available')
+			return
+		end
+
 		local pad_1 = self.grid:grid_to_index(data) + self.step_offset
 		local pad_2 = self.grid:grid_to_index(data.pad_down[1]) + self.step_offset
 		local selection_start = math.min(pad_1, pad_2)
@@ -443,8 +450,9 @@ function BufferSeq:grid_event(component, data)
 		local loop_start = (selection_start - 1) * step_length
 		local loop_end = selection_end * step_length - 1
 
-		-- Check if sync is enabled
-		if buffer.buffer_sync_length and buffer:should_wait_for_sync(step_length) then
+		-- Check if sync is enabled and we should wait
+		-- Only use sync if transport is playing, otherwise set immediately
+		if buffer.buffer_sync_length and App.playing and buffer:should_wait_for_sync(step_length) then
 			buffer:queue_loop_action(loop_start, loop_end, step_length)
 			local next_sync_tick = buffer:get_next_sync_tick(step_length)
 			print('Loop queued for sync at tick: ' .. next_sync_tick)
@@ -729,7 +737,7 @@ function BufferSeq:arrow_event(data)
 				local current_playback = track.buffer.buffer_playback or false
 				local new_playback = not current_playback
 				-- Use Registry to set the parameter (this will trigger the set_action)
-				local Registry = require('Foobar/lib/utilities/registry')
+
 				Registry.set('track_' .. track.id .. '_buffer_playback', new_playback and 1 or 0, 'alt_toggle')
 
 				if new_playback then Registry.set('track_' .. track.id .. '_armed', 0, 'playback_on') end
@@ -751,6 +759,7 @@ function BufferSeq:arrow_event(data)
 		if data.type == 'left' then
 			if buffer then
 				buffer:clear_buffer()
+				print('Buffer cleared for track ' .. track.id)
 				Registry.set('track_' .. track.id .. '_buffer_playback', 0, 'clear_buffer')
 				print('Buffer cleared for track ' .. track.id)
 				-- Refresh grid display
