@@ -246,7 +246,7 @@ function Track:set(o)
 		local in_channel = self.midi_in
 		local out_device = self.output_device.id
 		local out_channel = self.midi_out
-		print(in_device, in_channel, out_device, out_channel)
+
 		Registry.set(track .. 'device_in', out_device, 'device_in_select')
 		Registry.set(track .. 'midi_in', out_channel, 'midi_in_select')
 		Registry.set(track .. 'device_out', in_device, 'device_out_select')
@@ -567,12 +567,12 @@ function Track:set(o)
 	end)
 
 	-- Buffer Sync (for scrub mode, loop changes, and clip loading)
-	local buffer_step_options = { '1/48', '1/32', '1/32t', '1/16', '1/16t', '1/16d', '1/8', '1/8t', '1/8d', '1/4', '1/4t', '1/4d', '1/2', '1', '2', '4', '8', '16' }
+	local buffer_step_options = { 'step', '1/48', '1/32', '1/32t', '1/16', '1/16t', '1/16d', '1/8', '1/8t', '1/8d', '1/4', '1/4t', '1/4d', '1/2', '1', '2', '4', '8', '16' }
 	local buffer_sync_default_index = 4 -- Default to 1/8 note (same as buffer_step_length)
 	Registry.add('add_option', track .. 'buffer_sync', 'Buffer Sync', buffer_step_options, buffer_sync_default_index)
 	Registry.set_action(track .. 'buffer_sync', function(d)
 		App.settings[track .. 'buffer_sync'] = d
-		local buffer_step_values = calculate_step_values()
+		local buffer_step_values = calculate_step_values(true)
 		local new_sync_length = buffer_step_values[d]
 		if self.buffer then self.buffer.buffer_sync_length = new_sync_length end
 		-- Trigger menu redraw to show updated value

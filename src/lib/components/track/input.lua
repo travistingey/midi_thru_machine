@@ -60,6 +60,10 @@ function Input:midi_trigger(data)
 			event = self:process(event)
 
 			if event then
+				-- Store original note as note_id before quantization
+				-- This ensures device manager can match note_on/note_off correctly
+				event.note_id = event.note
+				
 				if event.new_note then event.note = event.new_note end
 
 				self.last_note = event
@@ -74,6 +78,10 @@ function Input:midi_trigger(data)
 					send[prop] = v
 				end
 				send.type = 'note_off'
+				-- Ensure note_id is preserved for device manager matching
+				if not send.note_id and send.note then
+					send.note_id = send.note
+				end
 				self.track:send_input(send)
 			end
 		end

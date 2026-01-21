@@ -253,8 +253,6 @@ function BufferSeq:start_scrub(pad_index)
 
 	-- Start scrub playback
 	buffer:start_scrub(start_tick, end_tick, App.buffer_scrub_mode == 'loop')
-
-	print('Scrub started: ' .. start_tick .. '-' .. end_tick .. ' (' .. App.buffer_scrub_mode .. ')')
 end
 
 -- Recalculate scrub range from all currently held pads
@@ -413,28 +411,10 @@ function BufferSeq:grid_event(component, data)
 	end
 	self.last_event = pad_index
 
-	-- Handle pad press (start/update scrub)
-	-- Only handle pad presses when not in alt mode (alt mode is for loop setting)
-	if data.type == 'pad' and not self.mode.alt then
-		-- Track held pad
-		if data.state then
-			self.held_pads[pad_index] = true
-		else
-			self.held_pads[pad_index] = nil
-			-- Clear pending scrub if pad is released and no pads are held
-			if not next(self.held_pads) then
-				buffer:clear_pending_scrub()
-				self.pending_scrub_pads = {}
-			end
-		end
-
-		-- Loop mode: use standard scrub behavior
-		self:recalculate_scrub_from_held_pads()
-	end
-
-	-- Handle long press for loop point setting (alt mode)
+	-- Handle loop point setting (alt mode)
 	-- This works the same as presetseq: long press two pads to set loop boundaries
-	if data.type == 'pad_long' and data.pad_down and #data.pad_down == 1 and self.mode.alt then
+
+	if data.type == 'pad' and data.state and data.pad_down and #data.pad_down == 2 and self.mode.alt then
 		-- Ensure buffer component exists
 		if not buffer then
 			print('Cannot set loop: buffer component not available')
@@ -460,6 +440,25 @@ function BufferSeq:grid_event(component, data)
 			buffer:set_loop(loop_start, loop_end)
 			print('Loop set: ' .. loop_start .. '-' .. loop_end)
 		end
+	end
+
+	-- Handle pad press (start/update scrub)
+	-- Only handle pad presses when not in alt mode (alt mode is for loop setting)
+	if data.type == 'pad' and not self.mode.alt then
+		-- Track held pad
+		if data.state then
+			self.held_pads[pad_index] = true
+		else
+			self.held_pads[pad_index] = nil
+			-- Clear pending scrub if pad is released and no pads are held
+			if not next(self.held_pads) then
+				buffer:clear_pending_scrub()
+				self.pending_scrub_pads = {}
+			end
+		end
+
+		-- Loop mode: use standard scrub behavior
+		self:recalculate_scrub_from_held_pads()
 	end
 
 	self:set_grid(buffer)
@@ -491,6 +490,18 @@ function BufferSeq:set_grid(component)
 		if buffer.scrub_tick then scrub_playhead_step = math.floor((buffer.scrub_tick - 1) / step_length) + 1 end
 	end
 
+	-- OPTIMIZATION: Build a lookup table of which steps have events
+	-- This avoids iterating through all ticks for each pad (O(n*m) -> O(m+n))
+	-- When zoomed in, this dramatically improves performance
+	local steps_with_events = {}
+	for tick, events in pairs(buffer.buffer_read) do
+		if events and #events > 0 then
+			-- Convert tick to 1-based step index
+			local step_index = math.floor((tick - 1) / step_length) + 1
+			steps_with_events[step_index] = true
+		end
+	end
+
 	grid:for_each(function(s, x, y, i)
 		local pad = 0
 
@@ -503,21 +514,8 @@ function BufferSeq:set_grid(component)
 		local step_tick = (global_step - 1) * step_length
 		local seq_value
 
-		-- Optimized: Only check ticks that actually exist in buffer_read (sparse table)
-		-- Just find first event in step range - don't count events
-		-- Color is based on measure (step_tick), not event count
-		local step_start_tick = (global_step - 1) * step_length
-		local step_end_tick = global_step * step_length - 1
-		for tick, events in pairs(buffer.buffer_read) do
-			-- Only check ticks within this step's range
-			if tick >= step_start_tick and tick <= step_end_tick then
-				if events and #events > 0 then
-					-- Found first event - just mark as having value (don't count)
-					seq_value = 1
-					break
-				end
-			end
-		end
+		-- OPTIMIZED: Just look up if this step has events (O(1) lookup instead of O(m) scan)
+		if steps_with_events[global_step] then seq_value = 1 end
 
 		if seq_value then pad = pad | VALUE end
 
@@ -745,13 +743,7 @@ function BufferSeq:arrow_event(data)
 				print('Buffer playback: ' .. (new_playback and 'on' or 'off'))
 			end
 			-- Reset alt mode
-			self.mode.alt = false
-			-- Reset alt pad LED
-			if self.mode.alt_pad then
-				self.mode.alt_pad.led[9][1] = 0
-				self.mode.alt_pad:refresh()
-			end
-			self:emit('alt_reset')
+			self.mode:reset_alt()
 			return
 		end
 
@@ -766,13 +758,7 @@ function BufferSeq:arrow_event(data)
 				self:set_grid(buffer)
 			end
 			-- Reset alt mode
-			self.mode.alt = false
-			-- Reset alt pad LED
-			if self.mode.alt_pad then
-				self.mode.alt_pad.led[9][1] = 0
-				self.mode.alt_pad:refresh()
-			end
-			self:emit('alt_reset')
+			self.mode:reset_alt()
 			return
 		end
 
@@ -866,18 +852,9 @@ function BufferSeq:row_event(data)
 				-- Toggle armed state
 				local new_armed_state = was_armed and 0 or 1
 				Registry.set('track_' .. track.id .. '_armed', new_armed_state, 'alt_row_tap')
-				print('Track ' .. track.id .. ' armed: ' .. (new_armed_state == 1 and 'on' or 'off'))
 				-- Update row pads to reflect the change
 				self:update_row_pads()
 			end
-			-- Reset alt mode after arming
-			self.mode.alt = false
-			if self.mode.alt_pad then
-				self.mode.alt_pad.led[9][1] = 0
-				self.mode.alt_pad:refresh()
-			end
-			self:emit('alt_reset')
-			return
 		end
 
 		-- Stop any active scrub when changing tracks
@@ -931,10 +908,10 @@ function BufferSeq:update_row_pads()
 				-- Armed track: use rainbow colors
 				if track_id == current_track then
 					-- Selected and armed: bright red (rainbow_on[1])
-					self.mode.row_pads.led[9][row_y] = Grid.rainbow_on[1]
+					self.mode.row_pads.led[9][row_y] = Grid.rainbow_on[track_id]
 				else
 					-- Armed but not selected: dim red (rainbow_off[1])
-					self.mode.row_pads.led[9][row_y] = Grid.rainbow_off[1]
+					self.mode.row_pads.led[9][row_y] = Grid.rainbow_off[track_id]
 				end
 			elseif track_id == current_track then
 				-- Current track but not armed: white (brightness 1)

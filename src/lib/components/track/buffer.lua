@@ -34,7 +34,7 @@ function Buffer:set(o)
 	-- Buffer's own timing state (independent from Auto)
 	self.tick = o.tick or 0 -- Buffer's own playback position in ticks
 	self.seq_start = o.seq_start or 1
-	self.seq_length = o.seq_length or (App.ppqn * 4) -- Default 64 bars
+	self.seq_length = o.seq_length or (App.ppqn * 64) -- Default 64 bars
 	self.playing = false
 	self.enabled = true
 
@@ -72,7 +72,7 @@ function Buffer:set(o)
 	self.scrub_loop = false
 
 	-- Buffer sync settings
-	self.buffer_sync_length = o.buffer_sync_length or (App.ppqn / 2) -- Default 1/8 note
+	self.buffer_sync_length = o.buffer_sync_length or (App.ppqn / 4) -- Default 1/8 note
 	self.pending_loop_action = nil -- Single pending loop change
 	self.pending_scrub_action = nil -- Single pending scrub action (replaced if new one comes)
 end
@@ -215,8 +215,10 @@ end
 -- Calculate the effective sync boundary based on sync_length and display_step_length
 -- Returns the larger of the two values
 function Buffer:get_sync_boundary(display_step_length)
-	local sync_length = self.buffer_sync_length or (App.ppqn / 2)
-	return math.max(sync_length, display_step_length or sync_length)
+	if self.buffer_sync_length == 0 then return display_step_length end
+
+	local sync_length = self.buffer_sync_length or (App.ppqn / 4)
+	return math.min(sync_length, display_step_length or sync_length)
 end
 
 -- Calculate the next sync boundary tick based on App.tick
@@ -234,6 +236,8 @@ end
 
 -- Check if we should wait for sync or execute immediately
 function Buffer:should_wait_for_sync(display_step_length)
+	if self.buffer_sync_length == 0 then return false end
+
 	local boundary = self:get_sync_boundary(display_step_length)
 	local current_tick = App.tick or 0
 	return (current_tick % boundary) ~= 0

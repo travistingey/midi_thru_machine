@@ -372,6 +372,10 @@ function Scale:transport_event(data, track)
 end
 
 function Scale:quantize_note(data)
+	-- If note_off already has new_note from the original note_on, preserve it
+	-- This ensures note_off matches the quantized note that was actually sent
+	if data.type == 'note_off' and data.new_note then return data end
+
 	if self.bits == 0 then
 		data.new_note = data.note + self.root
 		return data

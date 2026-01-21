@@ -1,15 +1,48 @@
 local Grid = {}
 local utilities = require('Foobar/lib/utilities')
 
-Grid.rainbow_on = {{127,0,0},{127,15,0},{127,45,0},{127,100,0},{75,127,0},{40,127,0},{0,127,0},{0,127,27},{0,127,127},{0,45,127},{0,0,127},{10,0,127},{27,0,127},{55,0,127},{127,0,75},{127,0,15}}
+Grid.rainbow_on = {
+	{ 127, 0, 0 },
+	{ 127, 15, 0 },
+	{ 127, 45, 0 },
+	{ 127, 100, 0 },
+	{ 75, 127, 0 },
+	{ 40, 127, 0 },
+	{ 0, 127, 0 },
+	{ 0, 127, 27 },
+	{ 0, 127, 127 },
+	{ 0, 45, 127 },
+	{ 0, 0, 127 },
+	{ 10, 0, 127 },
+	{
+		27,
+		0,
+		127,
+	},
+	{
+		55,
+		0,
+		127,
+	},
+	{
+		127,
+		0,
+		75,
+	},
+	{
+		127,
+		0,
+		15,
+	},
+}
 Grid.rainbow_off = {}
 
 -- Creating the rainbow_off table by dividing the Grid.rainbow_on values by 4
 for i = 1, 16 do
-	Grid.rainbow_off[i] = {math.floor(Grid.rainbow_on[i][1]/4),math.floor(Grid.rainbow_on[i][2]/4),math.floor(Grid.rainbow_on[i][3]/4)}
+	Grid.rainbow_off[i] = { math.floor(Grid.rainbow_on[i][1] / 4), math.floor(Grid.rainbow_on[i][2] / 4), math.floor(Grid.rainbow_on[i][3] / 4) }
 end
 
-function Grid:new (o)
+function Grid:new(o)
 	o = o or {}
 
 	setmetatable(o, self)
@@ -18,12 +51,12 @@ function Grid:new (o)
 	o.name = o.name or 'unnamed grid'
 	o.event = o.event or function(data) end
 	o.active = o.active or false
-	o.grid_start = o.grid_start or {x = 1,y = 1}
-	o.grid_end = o.grid_end or {x = 9,y = 9}
-	
-	o.display_start = o.display_start or {x=1,y=1}
-	o.display_end = o.display_end or {x=9,y=9}
-	o.offset = o.offset or {x=0,y=0}
+	o.grid_start = o.grid_start or { x = 1, y = 1 }
+	o.grid_end = o.grid_end or { x = 9, y = 9 }
+
+	o.display_start = o.display_start or { x = 1, y = 1 }
+	o.display_end = o.display_end or { x = 9, y = 9 }
+	o.offset = o.offset or { x = 0, y = 0 }
 
 	o.set = o.set or function(s) end
 
@@ -47,50 +80,48 @@ function Grid:new (o)
 
 	-- Initialize pad hold times and long press threshold
 	o.pad_hold_times = {}
-	o.long_press_threshold = o.long_press_threshold or 0.3  -- Adjust threshold as needed
+	o.long_press_threshold = o.long_press_threshold or 0.3 -- Adjust threshold as needed
 	o.pad_down = {}
 
 	o:reset()
-  o:update_bounds()
+	o:update_bounds()
 	return o
 end
 
 function Grid:update_midi(device)
-    -- Update this grid’s MIDI device
-    self.midi = device
-    -- Recursively update all subgrids without replacing their event callbacks
-    for _, subgrid in ipairs(self.subgrids) do
-        subgrid:update_midi(device)
-    end
+	-- Update this grid’s MIDI device
+	self.midi = device
+	-- Recursively update all subgrids without replacing their event callbacks
+	for _, subgrid in ipairs(self.subgrids) do
+		subgrid:update_midi(device)
+	end
 end
 
 function Grid:update_bounds()
-
 	self.bounds = {
-		width = math.max(self.grid_start.x,self.grid_end.x) - math.min(self.grid_start.x,self.grid_end.x) + 1,
-		height = math.max(self.grid_start.y,self.grid_end.y) - math.min(self.grid_start.y,self.grid_end.y) + 1,
-		max_x = math.max(self.grid_start.x,self.grid_end.x),
-		max_y = math.max(self.grid_start.y,self.grid_end.y),
-		min_x = math.min(self.grid_start.x,self.grid_end.x),
-		min_y = math.min(self.grid_start.y,self.grid_end.y)
+		width = math.max(self.grid_start.x, self.grid_end.x) - math.min(self.grid_start.x, self.grid_end.x) + 1,
+		height = math.max(self.grid_start.y, self.grid_end.y) - math.min(self.grid_start.y, self.grid_end.y) + 1,
+		max_x = math.max(self.grid_start.x, self.grid_end.x),
+		max_y = math.max(self.grid_start.y, self.grid_end.y),
+		min_x = math.min(self.grid_start.x, self.grid_end.x),
+		min_y = math.min(self.grid_start.y, self.grid_end.y),
 	}
 
 	self.display_bounds = {
-		width = math.max(self.display_start.x,self.display_end.x) - math.min(self.display_start.x,self.display_end.x) + 1,
-		height = math.max(self.display_start.y,self.display_end.y) - math.min(self.display_start.y,self.display_end.y) + 1,
-		max_x = math.max(self.display_start.x,self.display_end.x),
-		max_y = math.max(self.display_start.y,self.display_end.y),
-		min_x = math.min(self.display_start.x,self.display_end.x),
-		min_y = math.min(self.display_start.y,self.display_end.y)
+		width = math.max(self.display_start.x, self.display_end.x) - math.min(self.display_start.x, self.display_end.x) + 1,
+		height = math.max(self.display_start.y, self.display_end.y) - math.min(self.display_start.y, self.display_end.y) + 1,
+		max_x = math.max(self.display_start.x, self.display_end.x),
+		max_y = math.max(self.display_start.y, self.display_end.y),
+		min_x = math.min(self.display_start.x, self.display_end.x),
+		min_y = math.min(self.display_start.y, self.display_end.y),
 	}
-
 end
 
 function Grid:up(amount)
 	amount = amount or 1
 	print('up')
-	
-	if self.display_start.y < self.bounds.max_y and self.display_end.y < self.bounds.max_y then    
+
+	if self.display_start.y < self.bounds.max_y and self.display_end.y < self.bounds.max_y then
 		self.display_start.y = self.display_start.y + amount
 		self.display_end.y = self.display_end.y + amount
 	else
@@ -101,7 +132,7 @@ end
 function Grid:down(amount)
 	amount = amount or 1
 	print('down')
-	if self.display_start.y > self.bounds.min_y and self.display_end.y > self.bounds.min_y then    
+	if self.display_start.y > self.bounds.min_y and self.display_end.y > self.bounds.min_y then
 		self.display_start.y = self.display_start.y - amount
 		self.display_end.y = self.display_end.y - amount
 	end
@@ -119,7 +150,7 @@ end
 function Grid:right(amount)
 	amount = amount or 1
 	print('right')
-	if self.display_start.x < self.grid_start.x and self.display_end.x < self.grid_end.x then    
+	if self.display_start.x < self.grid_start.x and self.display_end.x < self.grid_end.x then
 		self.display_start.x = self.display_start.x + amount
 		self.display_end.x = self.display_end.x + amount
 	end
@@ -132,18 +163,16 @@ function Grid:subgrid(o)
 	o.grid_end = o.grid_end or self.grid_end
 	o.display_start = o.display_start or o.grid_start
 	o.display_end = o.display_end or o.grid_end
-	o.offset = {x = o.grid_start.x - 1, y = o.grid_start.y - 1}
-	o.led = self.led            -- sharing the same map with parent grid
-	o.toggled = self.toggled    -- sharing the same toggled status with parent grid
-	o.down = self.down          -- sharing the same down status with parent grid
+	o.offset = { x = o.grid_start.x - 1, y = o.grid_start.y - 1 }
+	o.led = self.led -- sharing the same map with parent grid
+	o.toggled = self.toggled -- sharing the same toggled status with parent grid
+	o.down = self.down -- sharing the same down status with parent grid
 
 	local subgrid = Grid:new(o) -- Create a new instance of Grid
 	local event = o.event
 
 	subgrid.event = function(s, data)
-		if s:in_display(data) then
-			event(s, data)
-		end
+		if s:in_display(data) then event(s, data) end
 	end
 
 	-- Adding the newly created subgrid to the parent grid's subgrids table
@@ -164,9 +193,7 @@ function Grid:enable()
 		end
 	end
 
-	if self.set_grid then
-		self:set_grid()
-	end
+	if self.set_grid then self:set_grid() end
 end
 
 function Grid:disable()
@@ -178,52 +205,45 @@ function Grid:disable()
 			self.subgrids[i].active = false
 		end
 	end
-
 end
 
 -- Event Management Methods
 function Grid:on(device_id, event_name, callback)
-  if device_id == 0 then return end -- Prevent adding events for "None" device
+	if device_id == 0 then return end -- Prevent adding events for "None" device
 
-  if not self.event_listeners[event_name] then
-      self.event_listeners[event_name] = {}
-  end
+	if not self.event_listeners[event_name] then self.event_listeners[event_name] = {} end
 
-  table.insert(self.event_listeners[event_name], callback)
+	table.insert(self.event_listeners[event_name], callback)
 
-  local cleanup = function()
-      self:off(device_id, event_name, callback)
-  end
+	local cleanup = function() self:off(device_id, event_name, callback) end
 
-  return cleanup
+	return cleanup
 end
 
 function Grid:off(event_name, listener)
-  if device_id == 0 then return end -- Prevent removing events for "None" device
+	if device_id == 0 then return end -- Prevent removing events for "None" device
 
-  if self.event_listeners and self.event_listeners[event_name] then
-
-      for i, l in ipairs(self.event_listeners[event_name]) do
-          if l == listener then
-              table.remove(self.event_listeners[event_name], i)
-              break
-          end
-      end
-  end
+	if self.event_listeners and self.event_listeners[event_name] then
+		for i, l in ipairs(self.event_listeners[event_name]) do
+			if l == listener then
+				table.remove(self.event_listeners[event_name], i)
+				break
+			end
+		end
+	end
 end
 
 function Grid:emit(event_name, data)
-  -- Emit device event to subscribers
-  if self.event_listeners and self.event_listeners[event_name] then
-      -- Create a shallow copy of the listeners to prevent issues during iteration
-      local listeners = { table.unpack(self.event_listeners[event_name]) }
+	-- Emit device event to subscribers
+	if self.event_listeners and self.event_listeners[event_name] then
+		-- Create a shallow copy of the listeners to prevent issues during iteration
+		local listeners = { table.unpack(self.event_listeners[event_name]) }
 
-      for _, listener in ipairs(listeners) do
-          listener(data)
-      end
-  end
+		for _, listener in ipairs(listeners) do
+			listener(data)
+		end
+	end
 end
-
 
 function Grid:process(d)
 	if self.active then
@@ -231,12 +251,12 @@ function Grid:process(d)
 		local data = {}
 		local x, y
 
-		if (msg.type == 'note_on' or msg.type == 'note_off' or msg.type == 'cc') then
-			if (msg.type == 'note_on' or msg.type == 'note_off') then
+		if msg.type == 'note_on' or msg.type == 'note_off' or msg.type == 'cc' then
+			if msg.type == 'note_on' or msg.type == 'note_off' then
 				x = math.fmod(msg.note, 10)
 				y = math.floor(msg.note / 10)
 				data.state = (msg.type == 'note_on')
-			elseif (msg.type == 'cc') then
+			elseif msg.type == 'cc' then
 				x = math.fmod(msg.cc, 10)
 				y = math.floor(msg.cc / 10)
 				data.state = (msg.val == 127)
@@ -251,24 +271,26 @@ function Grid:process(d)
 			local gridWidth = maxX - minX + 1
 			local gridHeight = maxY - minY + 1
 
-			if x <= self.offset.x or y <= self.offset.y or x > gridWidth + self.offset.x or y > gridHeight + self.offset.y then
-				return false
-			end
+			if x <= self.offset.x or y <= self.offset.y or x > gridWidth + self.offset.x or y > gridHeight + self.offset.y then return false end
 
 			data.x = x
 			data.y = y
 
-			if (x == 9 and y > 1) then
+			if x == 9 and y > 1 then
 				data.type = 'row'
 				data.row = (9 - data.y)
-			elseif (x == 1 and y == 9) then data.type = 'up'
-			elseif (x == 2 and y == 9) then data.type = 'down'
-			elseif (x == 3 and y == 9) then data.type = 'left'
-			elseif (x == 4 and y == 9) then data.type = 'right'
-			elseif (x >= 5 and x <= 8 and y == 9) then
+			elseif x == 1 and y == 9 then
+				data.type = 'up'
+			elseif x == 2 and y == 9 then
+				data.type = 'down'
+			elseif x == 3 and y == 9 then
+				data.type = 'left'
+			elseif x == 4 and y == 9 then
+				data.type = 'right'
+			elseif x >= 5 and x <= 8 and y == 9 then
 				data.type = 'mode'
 				data.mode = (data.x - 4)
-			elseif (x == 9 and y == 1) then
+			elseif x == 9 and y == 1 then
 				data.type = 'alt'
 			else
 				data.type = 'pad'
@@ -283,21 +305,17 @@ function Grid:process(d)
 				-- Pad pressed down
 				if self.pad_hold_times[data.x] == nil then self.pad_hold_times[data.x] = {} end
 				self.pad_hold_times[data.x][data.y] = util.time()
-				
-				table.insert(self.pad_down, data)
-				
-			elseif data.state == false then
 
-				for i,pad in ipairs(self.pad_down) do
-					if pad.x == data.x and pad.y == data.y then
-						table.remove(self.pad_down, i)
-					end
+				table.insert(self.pad_down, data)
+			elseif data.state == false then
+				for i, pad in ipairs(self.pad_down) do
+					if pad.x == data.x and pad.y == data.y then table.remove(self.pad_down, i) end
 				end
 
 				-- Pad released
 				if self.pad_hold_times[data.x] and self.pad_hold_times[data.x][data.y] then
 					local hold_time = util.time() - self.pad_hold_times[data.x][data.y]
-					self.pad_hold_times[data.x][data.y] = nil  -- Clear the hold time
+					self.pad_hold_times[data.x][data.y] = nil -- Clear the hold time
 
 					-- Check if hold time exceeds threshold
 					if hold_time >= self.long_press_threshold then
@@ -326,13 +344,13 @@ function Grid:process(d)
 			end
 
 			-- Set toggled state
-			if data.state then
-				self.toggled[data.x][data.y] = (not self.toggled[data.x][data.y])
-			end
+			if data.state then self.toggled[data.x][data.y] = not self.toggled[data.x][data.y] end
 
 			data.toggled = self.toggled[data.x][data.y]
 
 			-- Event Handler
+			data.pad_down = self.pad_down
+			tab.print(data)
 			self:event(data)
 
 			-- Existing subgrid handling
@@ -348,16 +366,16 @@ function Grid:process(d)
 end
 
 function Grid:for_each(func)
-  local minX = self.bounds.min_x
-  local maxX = self.bounds.max_x
-  local minY = self.bounds.min_y
-  local maxY = self.bounds.max_y
+	local minX = self.bounds.min_x
+	local maxX = self.bounds.max_x
+	local minY = self.bounds.min_y
+	local maxY = self.bounds.max_y
 
-  for x = minX, maxX do
-      for y = minY, maxY do
-          func(self, x, y, self:grid_to_index({x = x, y = y}))
-      end
-  end
+	for x = minX, maxX do
+		for y = minY, maxY do
+			func(self, x, y, self:grid_to_index({ x = x, y = y }))
+		end
+	end
 end
 
 function Grid:reset()
@@ -370,7 +388,7 @@ function Grid:reset()
 end
 
 function Grid:set(x, y, z, offset)
-	offset = offset or {x = 0, y = 0}
+	offset = offset or { x = 0, y = 0 }
 	local minX = math.min(self.display_start.x, self.display_end.x)
 	local minY = math.min(self.display_start.y, self.display_end.y)
 
@@ -384,34 +402,34 @@ function Grid:set_raw(x, y, z, force)
 	local target = math.fmod(x, 10) + 10 * y
 	local message = {}
 
-	if (type(z) == 'table') then
+	if type(z) == 'table' then
 		if #z == 3 then
 			-- length of 3, RGB
-			message = utilities.concat_table(message, {3, target})
+			message = utilities.concat_table(message, { 3, target })
 			message = utilities.concat_table(message, z)
 		elseif z[2] == true and #z == 2 then
 			-- length of 2, second value is true
-			message = utilities.concat_table(message, {2, target})
-			message = utilities.concat_table(message, {z[1]})
+			message = utilities.concat_table(message, { 2, target })
+			message = utilities.concat_table(message, { z[1] })
 		elseif #z == 2 then
 			-- length of 2
-			message = utilities.concat_table(message, {1, target})
+			message = utilities.concat_table(message, { 1, target })
 			message = utilities.concat_table(message, z)
 		else
 			-- length of 1
-			message = utilities.concat_table(message, {0, target})
+			message = utilities.concat_table(message, { 0, target })
 			message = utilities.concat_table(message, z)
 		end
 	else
 		-- send single value to led
-		message = utilities.concat_table(message, {0, target})
-		message = utilities.concat_table(message, {z})
+		message = utilities.concat_table(message, { 0, target })
+		message = utilities.concat_table(message, { z })
 	end
 
 	if force then
-		local send = {240, 0, 32, 41, 2, 13, 3}
+		local send = { 240, 0, 32, 41, 2, 13, 3 }
 		send = utilities.concat_table(send, message)
-		send = utilities.concat_table(send, {247})
+		send = utilities.concat_table(send, { 247 })
 		self.midi:send(send)
 	else
 		return message
@@ -419,43 +437,43 @@ function Grid:set_raw(x, y, z, force)
 end
 
 function Grid:refresh(debug)
-  if self.active then
-      local message = {240, 0, 32, 41, 2, 13, 3}
-      
-      local minX = self.display_bounds.min_x
-      local minY = self.display_bounds.min_y
-      local gridWidth = self.display_bounds.width
-      local gridHeight = self.display_bounds.height
-      local maxX = minX + gridWidth - 1
-      local maxY = minY + gridHeight - 1
-      
-      for x = minX, maxX do
-          for y = minY, maxY do
-              local grid_x = (x - minX + 1) + self.offset.x
-              local grid_y = (y - minY + 1) + self.offset.y
-              if grid_x > self.offset.x and grid_y > self.offset.y and grid_x <= gridWidth + self.offset.x and grid_y <= gridHeight + self.offset.y then
-                  local m = nil
-                  if self.led[x] == nil or self.led[x][y] == nil then
-                      m = self:set_raw(grid_x, grid_y, 0)
-                  else
-                      m = self:set_raw(grid_x, grid_y, self.led[x][y])
-                  end
-                  message = utilities.concat_table(message, m)
-              end
-          end
-      end
+	if self.active then
+		local message = { 240, 0, 32, 41, 2, 13, 3 }
 
-      message = utilities.concat_table(message, {247})
-      self.midi:send(message)
+		local minX = self.display_bounds.min_x
+		local minY = self.display_bounds.min_y
+		local gridWidth = self.display_bounds.width
+		local gridHeight = self.display_bounds.height
+		local maxX = minX + gridWidth - 1
+		local maxY = minY + gridHeight - 1
 
-      for i = 1, #self.subgrids do
-          self.subgrids[i]:refresh()
-      end
-  end
+		for x = minX, maxX do
+			for y = minY, maxY do
+				local grid_x = (x - minX + 1) + self.offset.x
+				local grid_y = (y - minY + 1) + self.offset.y
+				if grid_x > self.offset.x and grid_y > self.offset.y and grid_x <= gridWidth + self.offset.x and grid_y <= gridHeight + self.offset.y then
+					local m = nil
+					if self.led[x] == nil or self.led[x][y] == nil then
+						m = self:set_raw(grid_x, grid_y, 0)
+					else
+						m = self:set_raw(grid_x, grid_y, self.led[x][y])
+					end
+					message = utilities.concat_table(message, m)
+				end
+			end
+		end
+
+		message = utilities.concat_table(message, { 247 })
+		self.midi:send(message)
+
+		for i = 1, #self.subgrids do
+			self.subgrids[i]:refresh()
+		end
+	end
 end
 
 function Grid:clear()
-	local message = {240, 0, 32, 41, 2, 13, 3}
+	local message = { 240, 0, 32, 41, 2, 13, 3 }
 	for x = self.display_start.x, self.display_end.x do
 		for y = self.display_start.y, self.display_end.y do
 			-- for grid values
@@ -467,17 +485,13 @@ function Grid:clear()
 		end
 	end
 
-	message = utilities.concat_table(message, {247})
+	message = utilities.concat_table(message, { 247 })
 	self.midi:send(message)
 end
 
-function Grid:in_bounds(pos)
-	return (pos.x >= self.bounds.min_x and pos.x <= self.bounds.max_x and pos.y >= self.bounds.min_y and pos.y <= self.bounds.max_y)
-end
+function Grid:in_bounds(pos) return (pos.x >= self.bounds.min_x and pos.x <= self.bounds.max_x and pos.y >= self.bounds.min_y and pos.y <= self.bounds.max_y) end
 
-function Grid:in_display(pos)
-	return (pos.x >= self.display_bounds.min_x and pos.x <= self.display_bounds.max_x and pos.y >= self.display_bounds.min_y and pos.y <= self.display_bounds.max_y)
-end
+function Grid:in_display(pos) return (pos.x >= self.display_bounds.min_x and pos.x <= self.display_bounds.max_x and pos.y >= self.display_bounds.min_y and pos.y <= self.display_bounds.max_y) end
 
 function Grid:grid_to_index(pos)
 	local b = self.bounds
@@ -491,18 +505,18 @@ function Grid:grid_to_index(pos)
 end
 
 function Grid:index_to_grid(index)
-  local minX = self.bounds.min_x
-  local minY = self.bounds.min_y
-  local width = self.bounds.width
+	local minX = self.bounds.min_x
+	local minY = self.bounds.min_y
+	local width = self.bounds.width
 
-  local x = math.fmod(index - 1, width) + minX
-  local y = math.floor((index - 1) / width) + minY
+	local x = math.fmod(index - 1, width) + minX
+	local y = math.floor((index - 1) / width) + minY
 
-  if y > self.bounds.max_y then
-      return false
-  else
-      return {x = x, y = y}
-  end
+	if y > self.bounds.max_y then
+		return false
+	else
+		return { x = x, y = y }
+	end
 end
 
 return Grid

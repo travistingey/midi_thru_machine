@@ -956,13 +956,22 @@ function Mode:enable()
 	App.screen_dirty = true
 end
 
+function Mode:reset_alt()
+	-- Reset alt state and LED
+	self.alt = false
+	if self.alt_pad then
+		self.alt_pad:reset()
+	end
+	self:emit('alt_reset')
+end
+
 function Mode:disable()
 	-- Cancel any active context or toast
 	self:cancel_context({ pop = false })
 	self:cancel_toast()
 	self.enabled = false
 	-- reset alt
-	self:emit('alt_reset')
+	self:reset_alt()
 
 	self.grid:disable()
 
