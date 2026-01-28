@@ -24,7 +24,7 @@ Key Functions:
 
 local Default = ModeComponent:new({})
 local menu_style = { inactive_color = 15 }
-
+local max_clip_slot_select = 32
 --[[
   Function: enable_event
   Purpose: Activates the default mode and sets up the initial context and screen.
@@ -402,6 +402,32 @@ function Default:track_menu()
 	})
 	-- VOICE moved under MIDI input type menu
 
+	-- Clip testing submenu
+	table.insert(
+		items,
+		Registry.menu.make_item('clip_test', {
+			label_fn = function() return 'CLIP' end,
+			value_fn = function()
+				local track = App.track[id]
+				if track and track.clip then
+					if track.clip.current_slot then
+						return 'slot ' .. track.clip.current_slot
+					else
+						return 'live buffer'
+					end
+				end
+				return 'no clip'
+			end,
+			has_submenu = true,
+			on_press = function()
+				self:sub_menu(self:clip_menu(), {
+					status = { icon = id, label = 'Clips' },
+					screen = self:submenu_screen(),
+				})
+			end,
+		})
+	)
+
 	return items
 end
 
@@ -489,6 +515,219 @@ function Default:input_menu()
 		local pid = 'track_' .. tid .. '_' .. prop
 		table.insert(items, Registry.menu.make_item(pid, { icon = '' }))
 	end
+
+	return items
+end
+
+--[[
+  Function: clip_menu
+  Purpose: Constructs a menu for testing clip save/load operations.
+  Returns: (table) List of menu items for clip testing.
+]]
+
+local function get_clip_status()
+	local tid = App.current_track
+	local track = App.track[tid]
+	if track and track.clip then
+		if track.clip.current_slot then return track.clip.current_slot end
+		return 'no clip'
+	end
+end
+
+function Default:clip_menu()
+	local tid = App.current_track
+	local track = App.track[tid]
+	local items = {}
+	local clip_status = get_clip_status()
+
+	print('clip_status: ' .. clip_status)
+
+	-- Show current playback status
+	table.insert(
+		items,
+		Registry.menu.make_item('clip_status', {
+			label_fn = function() return 'PLAYBACK' end,
+			value_fn = function()
+				if track and track.clip then
+					local clip = track.clip
+					-- Check scrub mode first
+					if clip.scrub_mode then return 'Scrub' end
+					-- Check frozen buffer
+					if clip.buffer_frozen then return 'Frozen' end
+					-- Check if clip is loaded
+					if clip.current_slot then
+						local slot = clip.current_slot
+						local clip_entry = clip.clip_bank[slot]
+						if clip_entry then return 'Slot ' .. slot .. ' (' .. (clip_entry.name or 'unnamed') .. ')' end
+						return 'Slot ' .. slot .. ' (missing)'
+					end
+					-- Check if buffer playback is active
+					if track.buffer and track.buffer.buffer_playback then return 'Live' end
+					-- Just input (no buffer playback)
+					return 'Live'
+				end
+				return 'none'
+			end,
+			disable = true,
+		})
+	)
+
+	-- List all bank slots
+	table.insert(
+		items,
+		Registry.menu.make_item('clip_list_slots', {
+			label_fn = function() return 'BANK' end,
+			value_fn = function()
+				if track and track.clip then
+					local count = 0
+					for slot = 1, max_clip_slot_select do
+						if track.clip.clip_bank[slot] then count = count + 1 end
+					end
+					return count .. ' / ' .. max_clip_slot_select
+				end
+				return '0 / ' .. max_clip_slot_select
+			end,
+			disable = true,
+		})
+	)
+
+	-- Save clip to bank slot
+	table.insert(
+		items,
+		Registry.menu.make_item('clip_save_slot', {
+			label_fn = function() return 'SAVE SLOT' end,
+			value_fn = function()
+				local slot = App.current_clip or 1
+				return tostring(slot)
+			end,
+			enc3 = function(d)
+				App.current_clip = util.clamp((App.current_clip or 1) + d, 1, max_clip_slot_select)
+				App.screen_dirty = true
+			end,
+			on_press = function()
+				if track and track.clip and track.buffer then
+					local slot = App.current_clip or 1
+					local loop_start = track.buffer.buffer_start
+					local loop_end = track.buffer.buffer_start + track.buffer.buffer_length - 1
+					local name = slot
+					local success = track.clip:save_clip_to_bank(slot, loop_start, loop_end, name)
+					if success then
+						print('Saved clip to slot ' .. slot)
+					else
+						print('Failed to save clip to slot ' .. slot)
+					end
+					App.screen_dirty = true
+				end
+			end,
+			helper_labels = {
+				enc3 = 'select slot',
+				press_fn_3 = 'save',
+			},
+		})
+	)
+
+	-- Load clip from bank slot
+	table.insert(
+		items,
+		Registry.menu.make_item('clip_load_slot', {
+			label_fn = function() return 'LOAD SLOT' end,
+			value_fn = function()
+				local slot = App.current_clip or 1
+				local track = App.track[tid]
+				if track and track.clip and track.clip.clip_bank[slot] then return tostring(slot) .. ' (' .. (track.clip.clip_bank[slot].name or 'unnamed') .. ')' end
+				return '(empty)'
+			end,
+			enc3 = function(d)
+				App.current_clip = util.clamp((App.current_clip or 1) + d, 1, max_clip_slot_select)
+				App.screen_dirty = true
+			end,
+			on_press = function()
+				if track and track.clip then
+					local slot = App.current_clip or 1
+					local success = track.clip:load_clip_from_bank(slot)
+					if success then
+						print('Loaded clip from slot ' .. slot)
+					else
+						print('Failed to load clip from slot ' .. slot)
+					end
+					App.screen_dirty = true
+				end
+			end,
+			helper_labels = {
+				enc3 = 'select slot',
+				press_fn_3 = 'load',
+			},
+		})
+	)
+
+	-- Clear clip slot
+	table.insert(
+		items,
+		Registry.menu.make_item('clip_clear_slot', {
+			label_fn = function() return 'CLEAR SLOT' end,
+			value_fn = function()
+				local slot = App.current_clip or 1
+				return tostring(slot)
+			end,
+			enc3 = function(d)
+				App.current_clip = util.clamp((App.current_clip or 1) + d, 1, max_clip_slot_select)
+				App.screen_dirty = true
+			end,
+			on_press = function()
+				if track and track.clip then
+					local slot = App.current_clip or 1
+					local success = track.clip:clear_clip_slot(slot)
+					if success then
+						print('Cleared clip slot ' .. slot)
+					else
+						print('Failed to clear clip slot ' .. slot)
+					end
+					App.screen_dirty = true
+				end
+			end,
+			helper_labels = {
+				enc3 = 'select slot',
+				press_fn_3 = 'clear',
+			},
+		})
+	)
+
+	-- Unload clip and return to live buffer (also unfreezes frozen buffer)
+	table.insert(
+		items,
+		Registry.menu.make_item('clip_unload', {
+			label_fn = function() return 'UNLOAD CLIP' end,
+			value_fn = function()
+				if track and track.clip then
+					if track.clip.current_slot then
+						return 'clip loaded'
+					elseif track.clip.buffer_frozen then
+						return 'buffer frozen'
+					end
+				end
+				return ''
+			end,
+			can_press = function() return track and track.clip and (track.clip.current_slot ~= nil or track.clip.buffer_frozen) end,
+			on_press = function()
+				if track and track.clip then
+					local success = track.clip:unload_clip()
+					if success then
+						if track.clip.current_slot then
+							print('Unloaded clip, returning to live buffer')
+						elseif track.clip.buffer_frozen then
+							print('Unfroze buffer, returning to live playback')
+						end
+					else
+						print('No clip to unload or buffer to unfreeze')
+					end
+					App.screen_dirty = true
+				end
+			end,
+			helper_labels = {
+				press_fn_3 = 'unload/unfreeze',
+			},
+		})
+	)
 
 	return items
 end

@@ -119,19 +119,15 @@ end
 
 function Grid:up(amount)
 	amount = amount or 1
-	print('up')
 
 	if self.display_start.y < self.bounds.max_y and self.display_end.y < self.bounds.max_y then
 		self.display_start.y = self.display_start.y + amount
 		self.display_end.y = self.display_end.y + amount
-	else
-		print('outta bounds')
 	end
 end
 
 function Grid:down(amount)
 	amount = amount or 1
-	print('down')
 	if self.display_start.y > self.bounds.min_y and self.display_end.y > self.bounds.min_y then
 		self.display_start.y = self.display_start.y - amount
 		self.display_end.y = self.display_end.y - amount
@@ -140,7 +136,6 @@ end
 
 function Grid:left(amount)
 	amount = amount or 1
-	print('left')
 	if self.display_end.x > self.grid_end.x and self.display_start.x > 1 then
 		self.display_start.x = self.display_start.x - amount
 		self.display_end.x = self.display_end.x - amount
@@ -149,7 +144,6 @@ end
 
 function Grid:right(amount)
 	amount = amount or 1
-	print('right')
 	if self.display_start.x < self.grid_start.x and self.display_end.x < self.grid_end.x then
 		self.display_start.x = self.display_start.x + amount
 		self.display_end.x = self.display_end.x + amount
@@ -350,7 +344,6 @@ function Grid:process(d)
 
 			-- Event Handler
 			data.pad_down = self.pad_down
-			tab.print(data)
 			self:event(data)
 
 			-- Existing subgrid handling

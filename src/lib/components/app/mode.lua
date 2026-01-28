@@ -959,9 +959,7 @@ end
 function Mode:reset_alt()
 	-- Reset alt state and LED
 	self.alt = false
-	if self.alt_pad then
-		self.alt_pad:reset()
-	end
+	if self.alt_pad then self.alt_pad:reset() end
 	self:emit('alt_reset')
 end
 
@@ -971,7 +969,7 @@ function Mode:disable()
 	self:cancel_toast()
 	self.enabled = false
 	-- reset alt
-	self:reset_alt()
+	self:emit('alt_reset')
 
 	self.grid:disable()
 

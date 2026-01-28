@@ -34,7 +34,7 @@ Output.types['midi'] = {
 			if not (track.midi_out == 17 and data.ch) then data.ch = track.midi_out end
 
 			track.output_device:send(data)
-			track:emit('record_buffer', data, App.tick)
+			track:emit('record_buffer', data)
 
 			return data
 		end

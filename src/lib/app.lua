@@ -107,8 +107,7 @@ function App:init(o)
 	self.pending_subticks = 0 -- Track how many subticks are still pending
 	self.DEBUG_TIMING = false -- Enable for timing diagnostics
 
-	-- Buffer recording mode settings (app-level)
-	self.buffer_overdub = false -- true = overdub (layer), false = overwrite (replace)
+	-- Buffer scrub mode setting (app-level)
 	self.buffer_scrub_mode = 'loop' -- 'loop' = loop scrub range, 'play_through' = play through once
 
 	-- Tick and transport timing (times in beats)
@@ -185,12 +184,6 @@ function App:init(o)
 	params:add_binary('recording', 'Recording', 'momentary', 0)
 	params:set_action('recording', function(state) self:set_recording(state == 1) end)
 
-	params:add_binary('buffer_overdub', 'Buffer Overdub', 'toggle', 0) -- Default to overwrite mode
-	params:set_action('buffer_overdub', function(d)
-		self.buffer_overdub = (d > 0)
-		App.screen_dirty = true
-	end)
-
 	params:add_option('buffer_scrub_mode', 'Scrub Mode', { 'loop', 'play_through' }, 1)
 	params:set_action('buffer_scrub_mode', function(d)
 		self.buffer_scrub_mode = d == 1 and 'loop' or 'play_through'
@@ -232,6 +225,7 @@ function App:init(o)
 	params.action_delete = function(filename, name, pset_number) Persistence.delete(pset_number) end
 
 	-- Attempt to load default PSET data (slot 1) if it exists
+	-- This also sets the PSET number for Persistence (clip persistence)
 	Persistence.load(1)
 end
 

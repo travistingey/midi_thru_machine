@@ -176,13 +176,19 @@ function BufferDefault:default_menu()
 				enc3 = 'change mode',
 			},
 		}),
-		-- Record mode (overdub/overwrite)
-		Registry.menu.make_item('buffer_overdub', {
+		-- Monitor (replaces overdub/overwrite: IN = always on, AUTO = on when not playing, OFF = never)
+		Registry.menu.make_item('track_' .. id .. '_monitor', {
 			icon = '\u{25cf}',
-			label_fn = function() return 'RECORD MODE' end,
-			value_fn = function() return App.buffer_overdub and 'overdub' or 'overwrite' end,
+			label_fn = function() return 'MONITOR' end,
+			value_fn = function()
+				local track = App.track[id]
+				if not track then return 'AUTO' end
+				local monitor = track.monitor or 2
+				local modes = { 'IN', 'AUTO', 'OFF' }
+				return modes[monitor] or 'AUTO'
+			end,
 			helper_labels = {
-				enc3 = 'toggle mode',
+				enc3 = 'change mode',
 			},
 		}),
 		-- Loop Recording/Playback vs One-shot (per-track)

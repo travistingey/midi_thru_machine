@@ -3,6 +3,7 @@ local utilities = require(path_name .. 'utilities')
 local Grid = require(path_name .. 'grid')
 local TrackComponent = require('Foobar/lib/components/track/trackcomponent')
 local Registry = require(path_name .. 'utilities/registry')
+local SequenceUtils = require(path_name .. 'utilities/sequence_utils')
 
 -- Auto is short for automation!
 
@@ -136,6 +137,11 @@ function Auto:transport_event(data)
 			self.tick = self.seq_start
 		else
 			self.tick = self.tick + 1
+		end
+		
+		-- Ensure tick is within loop bounds (safety check)
+		if not SequenceUtils.is_tick_in_loop(self.tick, self.seq_start, self.seq_length) then
+			self.tick = SequenceUtils.wrap_tick_to_loop(self.tick, self.seq_start, self.seq_length)
 		end
 
 		-- Run automation events (presets, scales, cc)

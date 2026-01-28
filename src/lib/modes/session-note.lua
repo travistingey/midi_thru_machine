@@ -4,12 +4,13 @@ local path_name = 'Foobar/lib/components/mode/'
 
 local MuteGrid = require('Foobar/lib/components/mode/mutegrid')
 local NoteGrid = require('Foobar/lib/components/mode/notegrid')
-local BufferSeq = require('Foobar/lib/components/mode/bufferseq')
+local ClipGrid = require('Foobar/lib/components/mode/clipgrid')
 local Default = require('Foobar/lib/components/mode/default')
 
 local Mode = require('Foobar/lib/components/app/mode')
 
-local bufferseq = BufferSeq:new({
+-- ClipGrid replaces BufferSeq in Session mode
+local clipgrid = ClipGrid:new({
 	track = 1,
 	grid_start = { x = 1, y = 4 },
 	grid_end = { x = 8, y = 1 },
@@ -22,45 +23,36 @@ local notegrid = NoteGrid:new({ track = 1 })
 local default = Default:new({})
 
 local SessionMode = Mode:new({
-	id = 1,
+	id = 5,
 	track = 1,
 	components = {
 		default,
-		bufferseq,
+		clipgrid,
 		mutegrid,
 		notegrid,
 	},
 	load_event = function(s, data)
-		bufferseq.track = App.current_track
+		clipgrid.track = App.current_track
 		notegrid.track = App.current_track
 
-		-- Use bufferseq's unified row pad update function
-		bufferseq:update_row_pads()
+		-- Use clipgrid's unified row pad update function
+		clipgrid:update_row_pads()
 		App.screen_dirty = true
-	end,
-	arrow_event = function(self, data)
-		if data.state then
-			-- Check for alt mode first - bufferseq handles alt mode arrow events
-			if bufferseq.arrow_event then
-				bufferseq:arrow_event(data)
-				return
-			end
-		end
 	end,
 	row_event = function(self, data)
 		if data.state then
-			-- Let bufferseq handle row events (including alt mode arming)
+			-- Let clipgrid handle row events
 			-- It will update row pads internally
-			bufferseq:row_event(data)
+			clipgrid:row_event(data)
 			
-			-- Only proceed with track switching if bufferseq didn't handle it (not alt mode)
+			-- Only proceed with track switching if not in alt mode
 			if not self.alt then
 				if data.row ~= App.current_track then
 					self.track = data.row
 					App.current_track = data.row
 					notegrid:row_event(data)
 				else
-					App:set_mode(1)
+					App:set_mode(5)
 					return
 				end
 

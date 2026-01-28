@@ -48,8 +48,7 @@ function BufferSeq:set(o)
 	self.scrub_start_tick = nil
 	self.scrub_end_tick = nil
 	self.scrub_saved_step = nil
-	self.scrub_saved_seq_start = nil
-	self.scrub_saved_seq_length = nil
+	self.scrub_saved_buffer_start = nil
 	self.held_pads = {} -- Track currently held pads for multi-pad selection
 	self.pending_scrub_pads = {} -- Track which pads are pending for scrub
 
@@ -101,20 +100,23 @@ function BufferSeq:enable_event()
 		end)
 	)
 
-	-- Listen for scrub started event from buffer (for sync)
-	table.insert(
-		self.cleanup_functions,
-		buffer:on('scrub_started', function(data)
-			-- Update bufferseq state when scrub starts via sync
-			if not self.scrub_active then
-				self.scrub_saved_seq_start = buffer.seq_start
-				self.scrub_saved_seq_length = buffer.seq_length
-				self.scrub_start_tick = data.start_tick
-				self.scrub_end_tick = data.end_tick
-				self.scrub_active = true
-			end
-		end)
-	)
+	-- Listen for scrub started event from clip (for sync)
+	local track = buffer.track
+	local clip = track and track.clip or nil
+	if clip then
+		table.insert(
+			self.cleanup_functions,
+			clip:on('scrub_started', function(data)
+				-- Update bufferseq state when scrub starts via sync
+				if not self.scrub_active then
+					self.scrub_saved_buffer_start = buffer.buffer_start
+					self.scrub_start_tick = data.start_tick
+					self.scrub_end_tick = data.end_tick
+					self.scrub_active = true
+				end
+			end)
+		)
+	end
 
 	-- Listen for track armed state changes to update row pads
 	-- Set up listeners for all tracks
@@ -242,9 +244,8 @@ function BufferSeq:start_scrub(pad_index)
 	local buffer = self:get_component()
 	local start_tick, end_tick = self:pad_to_tick_range(pad_index)
 
-	-- Save loop boundaries (buffer.tick continues updating automatically)
-	self.scrub_saved_seq_start = buffer.seq_start
-	self.scrub_saved_seq_length = buffer.seq_length
+	-- Save buffer start (buffer.tick continues updating automatically)
+	self.scrub_saved_buffer_start = buffer.buffer_start
 
 	-- Set scrub range
 	self.scrub_start_tick = start_tick
@@ -252,7 +253,9 @@ function BufferSeq:start_scrub(pad_index)
 	self.scrub_active = true
 
 	-- Start scrub playback
-	buffer:start_scrub(start_tick, end_tick, App.buffer_scrub_mode == 'loop')
+	local track = buffer.track
+	local clip = track and track.clip or nil
+	if clip then clip:start_scrub(start_tick, end_tick, App.buffer_scrub_mode == 'loop') end
 end
 
 -- Recalculate scrub range from all currently held pads
@@ -272,7 +275,9 @@ function BufferSeq:recalculate_scrub_from_held_pads()
 	-- If no pads are held, stop scrub and clear pending
 	if min_pad == nil or max_pad == nil then
 		self:stop_scrub()
-		buffer:clear_pending_scrub()
+		local track = buffer.track
+		local clip = track and track.clip or nil
+		if clip then clip:clear_pending_scrub() end
 		self.pending_scrub_pads = {}
 		return
 	end
@@ -303,18 +308,24 @@ function BufferSeq:recalculate_scrub_from_held_pads()
 		return false
 	end
 
+	-- Get clip component for scrub operations
+	local track = buffer.track
+	local clip = track and track.clip or nil
+
 	-- Check if sync is enabled and we should wait
-	if buffer.buffer_sync_length and buffer:should_wait_for_sync(display_step_length) then
+	-- Use buffer's action sync length for the check
+	local action_sync_length = buffer and buffer.action_sync_length or nil
+	if clip and action_sync_length and clip:should_wait_for_sync() then
 		-- If scrub is already active, update it immediately (no sync for updates)
 		if self.scrub_active then
 			-- Update existing scrub with new range
 			self.scrub_start_tick = start_tick
 			self.scrub_end_tick = end_tick
-			buffer:update_scrub(start_tick, end_tick)
+			if clip then clip:update_scrub(start_tick, end_tick) end
 			print('Scrub recalculated: ' .. start_tick .. '-' .. end_tick)
 		else
 			-- Queue new scrub action (this will replace any existing pending scrub)
-			buffer:queue_scrub_action(start_tick, end_tick, App.buffer_scrub_mode == 'loop', display_step_length, pad_check_fn)
+			if clip then clip:queue_scrub_action(start_tick, end_tick, App.buffer_scrub_mode == 'loop', pad_check_fn) end
 
 			-- Track pending pads
 			self.pending_scrub_pads = {}
@@ -322,8 +333,10 @@ function BufferSeq:recalculate_scrub_from_held_pads()
 				self.pending_scrub_pads[pad_idx] = true
 			end
 
-			local next_sync_tick = buffer:get_next_sync_tick(display_step_length)
-			print('Scrub queued for sync at tick: ' .. next_sync_tick)
+			if clip then
+				local next_sync_tick = clip:get_next_sync_tick()
+				print('Scrub queued for sync at tick: ' .. next_sync_tick)
+			end
 		end
 		return
 	end
@@ -333,13 +346,12 @@ function BufferSeq:recalculate_scrub_from_held_pads()
 		-- Update existing scrub with new range
 		self.scrub_start_tick = start_tick
 		self.scrub_end_tick = end_tick
-		buffer:update_scrub(start_tick, end_tick)
+		if clip then clip:update_scrub(start_tick, end_tick) end
 		print('Scrub recalculated: ' .. start_tick .. '-' .. end_tick)
 	else
 		-- Start new scrub with full range (min to max)
 		-- Save loop boundaries
-		self.scrub_saved_seq_start = buffer.seq_start
-		self.scrub_saved_seq_length = buffer.seq_length
+		self.scrub_saved_buffer_start = buffer.buffer_start
 
 		-- Set scrub range
 		self.scrub_start_tick = start_tick
@@ -347,7 +359,7 @@ function BufferSeq:recalculate_scrub_from_held_pads()
 		self.scrub_active = true
 
 		-- Start scrub playback
-		buffer:start_scrub(start_tick, end_tick, App.buffer_scrub_mode == 'loop')
+		if clip then clip:start_scrub(start_tick, end_tick, App.buffer_scrub_mode == 'loop') end
 
 		print('Scrub started: ' .. start_tick .. '-' .. end_tick .. ' (' .. App.buffer_scrub_mode .. ')')
 	end
@@ -356,27 +368,33 @@ end
 -- Jump buffer playback to a specific tick (play-through mode)
 function BufferSeq:jump_to_tick(tick)
 	local buffer = self:get_component()
+	local track = buffer.track
+	local clip = track and track.clip or nil
 
-	-- If in scrub mode, set scrub_tick; otherwise set buffer.tick
-	if buffer.scrub_mode then
-		buffer.scrub_tick = tick
+	-- If in scrub mode, set scrub_tick; otherwise set clip.tick
+	if clip and clip.scrub_mode then
+		clip.scrub_tick = tick
 		print('Scrub playback jumped to tick: ' .. tick)
-	else
-		buffer.tick = tick
-		print('Buffer playback jumped to tick: ' .. tick)
+	elseif clip then
+		clip.tick = tick
+		print('Clip playback jumped to tick: ' .. tick)
 	end
 end
 
 -- Resync buffer playback with app tick (play-through mode)
 function BufferSeq:resync_with_app()
 	local buffer = self:get_component()
+	local track = buffer.track
+	local clip = track and track.clip or nil
 
-	-- Calculate loop-aware position from App.tick
-	-- App.tick is a global counter, but buffer.tick must respect loop boundaries
-	-- Convert App.tick to position within loop: (App.tick % seq_length) + seq_start
-	buffer.tick = (App.tick % buffer.seq_length) + buffer.seq_start
+	if clip then
+		-- Calculate loop-aware position from App.tick
+		-- App.tick is a global counter, but clip.tick must respect loop boundaries
+		-- Convert App.tick to position within loop: (App.tick % buffer_length) + buffer_start
+		clip.tick = ((App.tick - buffer.buffer_start) % buffer.buffer_length) + buffer.buffer_start
 
-	print('Buffer playback resynced with app tick: ' .. App.tick .. ' -> buffer.tick: ' .. buffer.tick)
+		print('Clip playback resynced with app tick: ' .. App.tick .. ' -> clip.tick: ' .. clip.tick)
+	end
 end
 
 -- Stop scrub playback and restore normal playback
@@ -384,16 +402,17 @@ function BufferSeq:stop_scrub()
 	if not self.scrub_active then return end
 
 	local buffer = self:get_component()
+	local track = buffer.track
+	local clip = track and track.clip or nil
 
 	-- Stop scrub and restore previous state
-	-- Note: buffer.tick is already at the correct position (it's been updating in the background)
-	buffer:stop_scrub(nil, self.scrub_saved_seq_start, self.scrub_saved_seq_length)
+	-- Note: clip.tick is already at the correct position (it's been updating in the background)
+	if clip then clip:stop_scrub(nil, self.scrub_saved_buffer_start, nil) end
 
 	self.scrub_active = false
 	self.scrub_start_tick = nil
 	self.scrub_end_tick = nil
-	self.scrub_saved_seq_start = nil
-	self.scrub_saved_seq_length = nil
+	self.scrub_saved_buffer_start = nil
 
 	print('Scrub stopped')
 end
@@ -412,8 +431,7 @@ function BufferSeq:grid_event(component, data)
 	self.last_event = pad_index
 
 	-- Handle loop point setting (alt mode)
-	-- This works the same as presetseq: long press two pads to set loop boundaries
-
+	-- Gesture: Tap alt, then hold two pads simultaneously to set loop start and end points
 	if data.type == 'pad' and data.state and data.pad_down and #data.pad_down == 2 and self.mode.alt then
 		-- Ensure buffer component exists
 		if not buffer then
@@ -427,18 +445,44 @@ function BufferSeq:grid_event(component, data)
 		local selection_end = math.max(pad_1, pad_2)
 
 		local step_length = self:get_step_length()
-		local loop_start = (selection_start - 1) * step_length
-		local loop_end = selection_end * step_length - 1
+		-- Calculate loop boundaries using 1-based indexing (matching pad_to_tick_range)
+		-- pad 1 = ticks 1 to step_length, pad 2 = ticks step_length+1 to 2*step_length, etc.
+		local loop_start = (selection_start - 1) * step_length + 1
+		local loop_end = selection_end * step_length
+
+		-- Set playback loop points in Clip component (freezes playback to this range)
+		local track = buffer.track
+		local clip = track and track.clip or nil
+		if not clip then
+			print('Cannot set loop: clip component not available')
+			return
+		end
+
+		local loop_length = loop_end - loop_start + 1
 
 		-- Check if sync is enabled and we should wait
 		-- Only use sync if transport is playing, otherwise set immediately
-		if buffer.buffer_sync_length and App.playing and buffer:should_wait_for_sync(step_length) then
-			buffer:queue_loop_action(loop_start, loop_end, step_length)
-			local next_sync_tick = buffer:get_next_sync_tick(step_length)
-			print('Loop queued for sync at tick: ' .. next_sync_tick)
+		if buffer.action_sync_length and App.playing and buffer:should_wait_for_sync() then
+			-- Queue freeze action for sync
+			local action_fn = function(component, action_data)
+				component:set_playback_loop(action_data.loop_start, action_data.loop_length)
+				component:freeze_buffer()
+				print('Loop frozen (synced): ' .. action_data.loop_start .. '-' .. (action_data.loop_start + action_data.loop_length - 1))
+			end
+
+			local action_data = {
+				loop_start = loop_start,
+				loop_length = loop_length,
+			}
+
+			clip.sync_action_queue:queue_action(action_fn, action_data)
+			local next_sync_tick = buffer:get_next_sync_tick()
+			print('Loop freeze queued for sync at tick: ' .. next_sync_tick)
 		else
-			buffer:set_loop(loop_start, loop_end)
-			print('Loop set: ' .. loop_start .. '-' .. loop_end)
+			-- Set playback loop and freeze immediately
+			clip:set_playback_loop(loop_start, loop_length)
+			clip:freeze_buffer()
+			print('Loop frozen: ' .. loop_start .. '-' .. loop_end)
 		end
 	end
 
@@ -450,10 +494,18 @@ function BufferSeq:grid_event(component, data)
 			self.held_pads[pad_index] = true
 		else
 			self.held_pads[pad_index] = nil
-			-- Clear pending scrub if pad is released and no pads are held
+			-- If pad is released and no pads are held, immediately stop scrub and resume playback
 			if not next(self.held_pads) then
-				buffer:clear_pending_scrub()
+				local track = buffer.track
+				local clip = track and track.clip or nil
+				-- Clear any pending queued scrub actions
+				if clip then clip:clear_pending_scrub() end
+				-- Immediately stop scrub (no queue, immediate exit)
+				self:stop_scrub()
 				self.pending_scrub_pads = {}
+				-- Skip recalculate since we're stopping scrub
+				self:set_grid(buffer)
+				return
 			end
 		end
 
@@ -477,7 +529,9 @@ function BufferSeq:set_grid(component)
 	local RECORD_STEP = (1 << 6) -- Main playhead (recording position)
 
 	-- Check if scrub mode is active
-	local scrub_active = buffer.scrub_mode or self.scrub_active
+	local track = buffer.track
+	local clip = track and track.clip or nil
+	local scrub_active = (clip and clip.scrub_mode) or self.scrub_active
 	local scrub_start_step = nil
 	local scrub_end_step = nil
 	local scrub_playhead_step = nil
@@ -487,18 +541,60 @@ function BufferSeq:set_grid(component)
 		-- Convert ticks to 1-based step indices (ticks 1-6 = step 1, ticks 7-12 = step 2, etc.)
 		scrub_start_step = math.floor((self.scrub_start_tick - 1) / step_length) + 1
 		scrub_end_step = math.floor((self.scrub_end_tick - 1) / step_length) + 1
-		if buffer.scrub_tick then scrub_playhead_step = math.floor((buffer.scrub_tick - 1) / step_length) + 1 end
+		if clip and clip.scrub_tick then scrub_playhead_step = math.floor((clip.scrub_tick - 1) / step_length) + 1 end
+	end
+
+	-- Get the current playback source (live buffer, loaded clip, or frozen buffer)
+	local playback_source = nil
+	local playback_tick = nil
+	local playback_start = buffer.buffer_start
+	local playback_length = buffer.buffer_length
+	local frozen_active = false -- Track if frozen buffer is active (for visual display)
+
+	if clip and clip.current_slot and clip.clip_bank[clip.current_slot] then
+		-- Clip is playing - use clip buffer
+		local clip_entry = clip.clip_bank[clip.current_slot]
+		playback_source = clip_entry.buffer
+		playback_tick = clip.tick
+		-- Clips are stored with ticks starting at 1, so they display starting at step 1
+		playback_start = 1
+		playback_length = clip_entry.length or 0
+	elseif clip and clip.buffer_frozen and clip.frozen_buffer then
+		-- Frozen buffer is playing - use frozen buffer
+		playback_source = clip.frozen_buffer
+		playback_tick = clip.tick
+		-- Use frozen buffer's playback loop boundaries
+		playback_start = clip.playback_start or buffer.buffer_start
+		playback_length = clip.playback_length or buffer.buffer_length
+		frozen_active = true
+	else
+		-- Live buffer is playing
+		playback_source = buffer.buffer
+		playback_tick = buffer.tick
 	end
 
 	-- OPTIMIZATION: Build a lookup table of which steps have events
 	-- This avoids iterating through all ticks for each pad (O(n*m) -> O(m+n))
 	-- When zoomed in, this dramatically improves performance
+	-- Note: pad_to_tick_range uses 1-based ticks: pad 1 = ticks 1 to step_length
 	local steps_with_events = {}
-	for tick, events in pairs(buffer.buffer_read) do
-		if events and #events > 0 then
-			-- Convert tick to 1-based step index
-			local step_index = math.floor((tick - 1) / step_length) + 1
-			steps_with_events[step_index] = true
+	if playback_source then
+		for tick, events in pairs(playback_source) do
+			if events and #events > 0 then
+				-- Convert tick to 1-based step index
+				-- For clips: tick is already 1-based (starts at 1), so it maps directly to step 1, 2, 3...
+				-- For frozen buffer: tick is absolute (frozen_buffer stores absolute ticks from buffer)
+				-- For live buffer: tick is absolute
+				local step_index
+				if clip and clip.current_slot and clip.clip_bank[clip.current_slot] then
+					-- Clip: tick is 1-based, map directly
+					step_index = math.floor((tick - 1) / step_length) + 1
+				else
+					-- Frozen buffer and live buffer: tick is absolute
+					step_index = math.floor((tick - 1) / step_length) + 1
+				end
+				steps_with_events[step_index] = true
+			end
 		end
 	end
 
@@ -511,7 +607,9 @@ function BufferSeq:set_grid(component)
 		local global_step = i + self.step_offset
 		-- Calculate the tick position of this step (absolute tick position)
 		-- This is used for measure calculation, so we need the actual tick position
-		local step_tick = (global_step - 1) * step_length
+		-- step_tick is the START tick of this step (1-based: step 1 = tick 1, step 2 = tick step_length+1)
+		-- This matches pad_to_tick_range calculation
+		local step_tick = (global_step - 1) * step_length + 1
 		local seq_value
 
 		-- OPTIMIZED: Just look up if this step has events (O(1) lookup instead of O(m) scan)
@@ -519,17 +617,46 @@ function BufferSeq:set_grid(component)
 
 		if seq_value then pad = pad | VALUE end
 
-		local loop_start = buffer.seq_start
-		local loop_end = buffer.seq_start + buffer.seq_length - 1
-		-- Convert ticks to 1-based step indices (matching presetseq calculation)
-		local loop_start_index = math.floor(loop_start / step_length) + 1
-		local loop_end_index = math.floor(loop_end / step_length) + 1
+		-- Use appropriate loop boundaries for display
+		-- For clips: show clip's loop boundaries (starting at step 1, length in steps)
+		-- For frozen buffer: show frozen buffer's loop boundaries
+		-- For live buffer: show buffer's loop boundaries
+		-- Use (tick - 1) formula to match step calculation: step = floor((tick - 1) / step_length) + 1
+		local loop_start_index, loop_end_index
+		if clip and clip.current_slot and clip.clip_bank[clip.current_slot] then
+			-- Clip is playing: clips start at step 1, end at step (length/step_length)
+			local clip_entry = clip.clip_bank[clip.current_slot]
+			local clip_length = clip_entry.length or 0
+			loop_start_index = 1
+			-- Convert clip length (in ticks) to step index
+			-- clip_length is the last tick, so use (clip_length - 1) to get the correct step
+			loop_end_index = math.floor((clip_length - 1) / step_length) + 1
+		elseif frozen_active and clip and clip.playback_start and clip.playback_length then
+			-- Frozen buffer: use frozen buffer's playback loop boundaries (convert ticks to steps)
+			local loop_start = clip.playback_start
+			local loop_end = clip.playback_start + clip.playback_length - 1
+			loop_start_index = math.floor((loop_start - 1) / step_length) + 1
+			loop_end_index = math.floor((loop_end - 1) / step_length) + 1
+		else
+			-- Live buffer: use buffer's loop boundaries (convert ticks to steps)
+			local loop_start = buffer.buffer_start
+			local loop_end = buffer.buffer_start + buffer.buffer_length - 1
+			loop_start_index = math.floor((loop_start - 1) / step_length) + 1
+			loop_end_index = math.floor((loop_end - 1) / step_length) + 1
+		end
 
 		if global_step == loop_start_index or global_step == loop_end_index then pad = pad | LOOP_END end
 
-		-- Always calculate main playhead (recording position) - show even during scrub
-		local current_step = math.floor((buffer.tick - 1) / step_length) + 1
-		if current_step == global_step then pad = pad | RECORD_STEP end
+		-- Show recording playhead (always from buffer.tick)
+		local record_step = math.floor((buffer.tick - 1) / step_length) + 1
+		if record_step == global_step then pad = pad | RECORD_STEP end
+
+		-- Show playback playhead (from clip.tick if clip playing, otherwise buffer.tick)
+		-- playback_tick is already absolute for both clips and live buffer
+		if playback_tick then
+			local playback_step = math.floor((playback_tick - 1) / step_length) + 1
+			if playback_step == global_step and playback_step ~= record_step then pad = pad | STEP end
+		end
 
 		-- Handle scrub mode
 		if scrub_active then
@@ -539,12 +666,28 @@ function BufferSeq:set_grid(component)
 			if scrub_playhead_step and global_step == scrub_playhead_step and App.playing then pad = pad | STEP end
 		end
 
+		-- Handle frozen buffer mode (similar visual treatment to scrub mode)
+		if frozen_active then
+			-- Highlight frozen buffer range steps (same visual as scrub)
+			if global_step >= loop_start_index and global_step <= loop_end_index then pad = pad | SCRUB end
+		end
+
 		-- Mark steps outside loop bounds (before loop start or after loop end)
 		local is_outside = global_step < loop_start_index or global_step > loop_end_index
 		if is_outside then pad = pad | OUTSIDE end
 
-		-- Check if buffer playback is active
-		local playback_active = buffer.buffer_playback or false
+		-- Check if playback is active (buffer playback OR clip playing OR frozen buffer)
+		local playback_active = false
+		if clip and clip.current_slot and clip.clip_bank[clip.current_slot] then
+			-- Clip is loaded and playing
+			playback_active = true
+		elseif buffer.buffer_playback then
+			-- Live buffer playback
+			playback_active = true
+		elseif frozen_active then
+			-- Frozen buffer playback
+			playback_active = true
+		end
 
 		local color = 123
 
@@ -711,8 +854,12 @@ function BufferSeq:transport_event(buffer, data)
 		-- Use display_step_length for grid refresh boundaries (independent of buffer_step_length)
 		local display_step_length = self:get_step_length()
 		-- Calculate current display step index (1-based for display)
-		-- This uses display_step_length, which may differ from buffer.buffer_step_length
-		local current_display_step = math.floor((buffer.tick - 1) / display_step_length) + 1
+		-- Use clip.tick if clip is playing, otherwise buffer.tick
+		local track = buffer.track
+		local clip = track and track.clip or nil
+		local current_tick = buffer.tick
+		if clip and clip.current_slot and clip.clip_bank[clip.current_slot] then current_tick = clip.tick end
+		local current_display_step = math.floor((current_tick - 1) / display_step_length) + 1
 
 		-- Only refresh if display step changed
 		if self.last_rendered_step ~= current_display_step then
@@ -798,21 +945,60 @@ function BufferSeq:arrow_event(data)
 		if self.display_offset == 0 then print('At buffer start') end
 	elseif data.type == 'down' then
 		self:increase_display_offset()
-		print('Buffer offset: ' .. bufferseq.display_offset)
 	end
 end
 
 function BufferSeq:alt_event(data)
 	if data.state and self.mode.alt then
-		-- Alt mode activated - start blinking to show loop end points
-		self.index = nil
-		self.mode:cancel_context()
-		self:start_blink()
-		-- Clear any held pads and stop scrub when entering alt mode
-		if self.scrub_active then
+		-- Alt mode activated
+		local buffer = self:get_component()
+		local track = buffer and buffer.track or nil
+		local clip = track and track.clip or nil
+
+		-- If we're already in scrub mode, freeze the current scrub boundaries seamlessly
+		if self.scrub_active and clip and self.scrub_start_tick and self.scrub_end_tick then
+			local loop_start = self.scrub_start_tick
+			local loop_length = self.scrub_end_tick - self.scrub_start_tick + 1
+
+			-- Check if sync is enabled and we should wait
+			if buffer.action_sync_length and App.playing and buffer:should_wait_for_sync() then
+				-- Queue freeze action for sync
+				local action_fn = function(component, action_data)
+					component:set_playback_loop(action_data.loop_start, action_data.loop_length)
+					component:freeze_buffer()
+					print('Scrub frozen to loop (synced): ' .. action_data.loop_start .. '-' .. (action_data.loop_start + action_data.loop_length - 1))
+				end
+
+				local action_data = {
+					loop_start = loop_start,
+					loop_length = loop_length,
+				}
+
+				clip.sync_action_queue:queue_action(action_fn, action_data)
+				local next_sync_tick = buffer:get_next_sync_tick()
+				print('Scrub freeze queued for sync at tick: ' .. next_sync_tick)
+			else
+				-- Freeze immediately
+				clip:set_playback_loop(loop_start, loop_length)
+				clip:freeze_buffer()
+				print('Scrub frozen to loop: ' .. loop_start .. '-' .. self.scrub_end_tick)
+			end
+
+			-- Stop scrub mode (playback now comes from frozen_buffer)
 			self:stop_scrub()
 			self.held_pads = {}
+		else
+			-- Normal alt mode activation - start blinking to show loop end points
+			self.index = nil
+			self.mode:cancel_context()
+			self:start_blink()
+			-- Clear any held pads and stop scrub when entering alt mode
+			if self.scrub_active then
+				self:stop_scrub()
+				self.held_pads = {}
+			end
 		end
+
 		-- Ensure we're showing the current track, not defaulting to first track
 		if self.track then App.current_track = self.track end
 		local buffer = self:get_component()

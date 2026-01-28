@@ -1,0 +1,878 @@
+local path_name = 'Foobar/lib/'
+local utilities = require(path_name .. 'utilities')
+local TrackComponent = require('Foobar/lib/components/track/trackcomponent')
+local Registry = require(path_name .. 'utilities/registry')
+local flags = require(path_name .. 'utilities/flags')
+local Persistence = require(path_name .. 'utilities/persistence')
+local SequenceUtils = require(path_name .. 'utilities/sequence_utils')
+
+-- Clip component handles playback of MIDI events from buffer
+-- Separated from Buffer component for clear separation of concerns:
+-- Buffer = Recording, Clip = Playback
+
+local Clip = {}
+Clip.name = 'clip'
+Clip.__index = Clip
+setmetatable(Clip, { __index = TrackComponent })
+
+function Clip:new(o)
+	o = o or {}
+	setmetatable(o, self)
+	TrackComponent.set(o, o)
+	o:set(o)
+	return o
+end
+
+function Clip:set(o)
+	self.id = o.id or 1
+	-- Reference to buffer component for live buffer access
+	self.buffer = nil -- Will be set after buffer is loaded
+
+	-- Playback state
+	self.playing = false
+	self.tick = o.tick or 0 -- Playback position in ticks
+	self.buffer_playback = o.buffer_playback or false -- Default off for silent recording
+	self.playback_mode = o.playback_mode or 1 -- Default is Input
+	self.buffer_loop = o.buffer_loop ~= nil and o.buffer_loop or true -- Default to continuous loop
+
+	-- Frozen buffer for playback (incrementally updated snapshot)
+	self.frozen_buffer = {} -- Frozen snapshot of buffer (maintained incrementally)
+	self.buffer_frozen = false -- Whether buffer is frozen
+	self.frozen_tick = nil -- Tick when frozen (for reference)
+	self.playback_start = nil -- Playback loop start (independent of buffer.buffer_start)
+	self.playback_length = nil -- Playback loop length
+	self.last_frozen_step_index = nil -- Track step transitions for incremental updates
+	local step_size = 8 -- Hardcoded step size for incremental updates
+
+	-- Scrub playback state
+	self.scrub_mode = false
+	self.scrub_tick = nil -- Separate tick counter for scrub mode playback
+	self.scrub_start = nil
+	self.scrub_end = nil
+	self.scrub_length = nil
+	self.scrub_loop = false
+
+	-- Action sync settings (will be read from buffer after buffer is loaded)
+	self.action_sync_length = nil
+
+	-- Sync action queue for scrub actions (uses scrub_length, not action_sync)
+	-- Scrub sync queue is created dynamically when scrub is queued (based on scrub range length)
+	self.scrub_sync_queue = nil -- Created dynamically in queue_scrub_action
+	self.sync_action_queue = SequenceUtils.create_sync_action_queue(self, function(component) return SequenceUtils.get_sync_length(component.buffer, component.action_sync_length) end)
+
+	-- Clip bank management
+	self.clip_bank = {} -- 16 slots: {[1-16] = nil or {filename, name, buffer, playback_settings}}
+	self.current_slot = nil -- Which slot is currently playing (nil = live buffer)
+end
+
+-- Sync Helper Functions (delegate to SequenceUtils)
+function Clip:get_sync_boundary()
+	local sync_length = SequenceUtils.get_sync_length(self.buffer, self.action_sync_length)
+	return sync_length -- No step_length logic needed
+end
+
+function Clip:get_next_sync_tick()
+	local sync_length = SequenceUtils.get_sync_length(self.buffer, self.action_sync_length)
+	return SequenceUtils.get_next_sync_tick(sync_length)
+end
+
+function Clip:should_wait_for_sync()
+	local sync_length = SequenceUtils.get_sync_length(self.buffer, self.action_sync_length)
+	return SequenceUtils.should_wait_for_sync(sync_length)
+end
+
+-- Get the current playback source (live buffer or loaded clip)
+-- Returns the buffer table to read from
+function Clip:get_playback_source()
+	if self.current_slot and self.clip_bank[self.current_slot] then
+		-- Return loaded clip buffer
+		return self.clip_bank[self.current_slot].buffer
+	else
+		-- Return frozen buffer if frozen, otherwise live buffer
+		if self.buffer_frozen and self.frozen_buffer then
+			return self.frozen_buffer
+		elseif self.buffer then
+			return self.buffer.buffer
+		end
+		return nil
+	end
+end
+
+-- Check if clip is actively playing (outputting events)
+-- Returns true if clip is actually playing events, false otherwise
+-- Note: Scrub mode IS considered "actively playing" - it mutes input and only plays buffer
+function Clip:is_actively_playing()
+	-- Clip is actively playing if:
+	-- 1. Scrub mode is active (grid-triggered playback - mutes input, only buffer playback)
+	-- 2. Buffer playback is enabled (live buffer playback)
+	-- 3. Frozen buffer is active (frozen buffer playback)
+	-- 4. A clip is loaded and clip.playing is true (loaded clip playback)
+	return self.scrub_mode or (self.buffer and self.buffer.buffer_playback) or self.buffer_frozen or (self.playing and self.current_slot and self.clip_bank[self.current_slot])
+end
+
+-- Get the current playback length (for loop wrapping)
+-- Returns the length in ticks for the current playback source
+function Clip:get_playback_length()
+	if self.current_slot and self.clip_bank[self.current_slot] then
+		-- Return loaded clip length
+		local clip_entry = self.clip_bank[self.current_slot]
+		if clip_entry.length then return clip_entry.length end
+		-- Fallback: calculate from buffer if length not stored
+		-- Clips are 1-based, so the max_tick is the last tick (inclusive length)
+		if clip_entry.buffer then
+			local max_tick = 0
+			for tick, _ in pairs(clip_entry.buffer) do
+				if tick > max_tick then max_tick = tick end
+			end
+			-- Return max_tick as the length (1-based inclusive: tick 1 to tick max_tick = max_tick ticks)
+			return max_tick
+		end
+		return 0
+	else
+		-- Return playback loop length if buffer is frozen and playback_length is set, otherwise buffer length
+		if self.buffer_frozen and self.playback_length then
+			return self.playback_length
+		elseif self.buffer then
+			return self.buffer.buffer_length
+		end
+		return 0
+	end
+end
+
+-- Get the current playback start (for loop wrapping)
+-- Returns the start tick for the current playback source
+function Clip:get_playback_start()
+	if self.current_slot and self.clip_bank[self.current_slot] then
+		-- Clips are stored with ticks starting at 1, so they start at tick 1
+		return 1
+	else
+		-- Return playback loop start if buffer is frozen and playback_start is set, otherwise buffer start
+		if self.buffer_frozen and self.playback_start then
+			return self.playback_start
+		elseif self.buffer then
+			return self.buffer.buffer_start
+		end
+		return 0
+	end
+end
+
+-- Queue a scrub action (replaces any existing pending scrub action)
+-- pad_check_fn: function to call to verify pad is still held
+-- Sync quantization is based on scrub_length (Beatstep Pro Looper mode behavior)
+function Clip:queue_scrub_action(start_tick, end_tick, loop_mode, pad_check_fn)
+	-- Calculate scrub length for sync quantization
+	local scrub_length = end_tick - start_tick + 1
+
+	-- Create scrub-specific sync queue if it doesn't exist or scrub length changed
+	-- This queue uses scrub_length as the sync boundary (not action_sync_length)
+	if not self.scrub_sync_queue or self.scrub_sync_queue.scrub_length ~= scrub_length then
+		local function get_scrub_sync_length_fn(component)
+			-- Return the scrub_length for this specific scrub range
+			return component.scrub_sync_queue.scrub_length
+		end
+		self.scrub_sync_queue = SequenceUtils.create_sync_action_queue(self, get_scrub_sync_length_fn)
+		self.scrub_sync_queue.scrub_length = scrub_length -- Store scrub_length in queue for sync calculation
+	end
+
+	local action_fn = function(component, action_data)
+		-- Check if pad is still held before executing
+		if action_data.pad_check_fn and action_data.pad_check_fn() then
+			component:start_scrub(action_data.start_tick, action_data.end_tick, action_data.loop_mode)
+			print('Scrub started (synced to ' .. scrub_length .. ' ticks): ' .. action_data.start_tick .. '-' .. action_data.end_tick)
+			-- Emit event so bufferseq can update its state
+			component:emit('scrub_started', {
+				start_tick = action_data.start_tick,
+				end_tick = action_data.end_tick,
+			})
+		else
+			-- Pad was released, cancel the action
+			print('Scrub cancelled: pad no longer held')
+		end
+	end
+
+	local action_data = {
+		start_tick = start_tick,
+		end_tick = end_tick,
+		loop_mode = loop_mode,
+		pad_check_fn = pad_check_fn,
+	}
+
+	self.scrub_sync_queue:queue_action(action_fn, action_data)
+end
+
+-- Clear pending scrub action (called when pad is released)
+function Clip:clear_pending_scrub()
+	if self.scrub_sync_queue then self.scrub_sync_queue:clear_action() end
+end
+
+-- Incrementally update frozen_buffer by copying one step from buffer
+-- Called on step transitions to maintain frozen snapshot efficiently
+function Clip:update_frozen_step(step_index)
+	if not self.buffer or not self.playback_start or not self.playback_length then return end
+
+	local step_size = 8 -- Hardcoded step size for incremental updates
+	local step_start = self.playback_start + (step_index - 1) * step_size
+	local step_end = math.min(step_start + step_size - 1, self.playback_start + self.playback_length - 1)
+
+	-- Clamp to playback loop boundaries
+	local loop_end = self.playback_start + self.playback_length - 1
+	step_start = math.max(step_start, self.playback_start)
+	step_end = math.min(step_end, loop_end)
+
+	-- Sparse table iteration (only ticks with data)
+	for tick, events in pairs(self.buffer.buffer) do
+		if tick >= step_start and tick <= step_end then
+			-- Shallow copy (just assign reference)
+			self.frozen_buffer[tick] = events
+		end
+	end
+
+	-- Clean up ticks that no longer exist in buffer
+	for tick, events in pairs(self.frozen_buffer) do
+		if tick >= step_start and tick <= step_end then
+			if not self.buffer.buffer[tick] then self.frozen_buffer[tick] = nil end
+		end
+	end
+end
+
+-- Freeze the buffer (stop updating frozen_buffer, snapshot current playback range)
+function Clip:freeze_buffer()
+	if not self.buffer or not self.playback_start or not self.playback_length then return end
+
+	-- Copy the current playback range into frozen_buffer
+	local loop_end = self.playback_start + self.playback_length - 1
+	self.frozen_buffer = {}
+
+	-- Copy events from buffer within playback range
+	for tick, events in pairs(self.buffer.buffer) do
+		if tick >= self.playback_start and tick <= loop_end then
+			-- Shallow copy (just assign reference)
+			self.frozen_buffer[tick] = events
+		end
+	end
+
+	self.buffer_frozen = true
+	self.frozen_tick = self.buffer.tick
+	print('Clip: Buffer frozen at playback range ' .. self.playback_start .. '-' .. loop_end)
+end
+
+-- Unfreeze the buffer (resume updating frozen_buffer incrementally)
+function Clip:unfreeze_buffer()
+	self.buffer_frozen = false
+	self.frozen_tick = nil
+	-- Clear frozen buffer and reset playback loop boundaries
+	self.frozen_buffer = {}
+	self.playback_start = nil
+	self.playback_length = nil
+	-- Reset step tracking to resume incremental updates
+	self.last_frozen_step_index = nil
+	print('Clip: Buffer unfrozen, resuming live playback')
+end
+
+-- Set playback loop boundaries (for frozen buffer playback)
+function Clip:set_playback_loop(start_tick, length)
+	self.playback_start = start_tick
+	self.playback_length = length
+	-- Reset frozen buffer when loop changes (will be populated by freeze_buffer)
+	self.frozen_buffer = {}
+	self.last_frozen_step_index = nil
+	print('Clip: Playback loop set to ' .. start_tick .. '-' .. (start_tick + length - 1))
+end
+
+-- Execute pending sync actions (should be called on each clock tick)
+function Clip:execute_sync_actions() self.sync_action_queue:execute_actions() end
+
+-- Transport Event Handling
+function Clip:transport_event(data)
+	if not self.buffer then return data end
+
+	-- Timing tracking (conditional on flag)
+	local transport_start = flags.buffer_timing_stats and util.time() or nil
+
+	if data.type == 'start' then
+		self.playing = true
+		-- Start playback at appropriate position
+		-- For clips: start at loop_start; for live buffer: sync to buffer.tick (buffer is continuously running)
+		if not self.scrub_mode then
+			if self.current_slot and self.clip_bank[self.current_slot] then
+				-- Clip is playing: start at tick 1 (clips are 1-based)
+				self.tick = 1
+				-- Emit event for mode components
+				self:emit('clip_playback_started', { bank_slot = self.current_slot })
+			else
+				-- Live buffer: sync to buffer's current position (buffer is continuously running)
+				-- If frozen, start at playback_start; otherwise use buffer.tick
+				if self.buffer_frozen and self.playback_start then
+					self.tick = self.playback_start
+				elseif self.buffer then
+					self.tick = self.buffer.tick
+				end
+				-- Emit event for mode components (live buffer playback)
+				self:emit('clip_playback_started', { bank_slot = nil })
+			end
+		end
+		-- Clear any lingering buffer notes from previous playback
+		self:kill_notes()
+		-- Update monitor state when starting playback
+		if self.track.update_monitor_state then self.track:update_monitor_state() end
+	elseif data.type == 'stop' then
+		self.playing = false
+		-- Don't reset tick - buffer is continuously running
+		-- Kill all active buffer notes to prevent stuck notes
+		self:kill_notes()
+		-- Emit event for mode components
+		if self.current_slot then
+			self:emit('clip_playback_stopped', { bank_slot = self.current_slot })
+		else
+			self:emit('clip_playback_stopped', { bank_slot = nil })
+		end
+		-- Update monitor state when stopping
+		if self.track.update_monitor_state then self.track:update_monitor_state() end
+	elseif data.type == 'clock' and self.playing then
+		-- Execute any pending sync actions that have reached their boundary
+		self:execute_sync_actions()
+		-- Also execute ClipGrid's custom sync queue if it exists
+		if self._clipgrid_sync_queue then
+			self._clipgrid_sync_queue:execute_actions()
+			-- Clear the queue if it has no pending actions
+			if not self._clipgrid_sync_queue.pending_action then self._clipgrid_sync_queue = nil end
+		end
+		-- Execute scrub sync queue if it exists (uses scrub_length for sync quantization)
+		if self.scrub_sync_queue then
+			self.scrub_sync_queue:execute_actions()
+			-- Clear the queue if scrub is no longer active and no pending actions
+			if not self.scrub_mode and not self.scrub_sync_queue.pending_action then self.scrub_sync_queue = nil end
+		end
+
+		-- Ensure tick is within loop bounds (safety check for normal playback)
+		-- This handles cases where loop points changed during playback or tick got out of sync
+		if not self.scrub_mode then
+			local playback_start = self:get_playback_start()
+			local playback_length = self:get_playback_length()
+			if not SequenceUtils.is_tick_in_loop(self.tick, playback_start, playback_length) then self.tick = SequenceUtils.wrap_tick_to_loop(self.tick, playback_start, playback_length) end
+		end
+
+		-- Offset run ticks ahead of current tick
+		local run_offset = 1
+
+		-- Calculate the next tick for normal playback
+		local next_tick = self.tick + run_offset
+
+		-- Always update clip.tick based on normal playback rules (even during scrub mode)
+		-- This ensures playback can seamlessly resume when scrub stops
+		local playback_start = self:get_playback_start()
+		local playback_length = self:get_playback_length()
+
+		if next_tick >= playback_start + playback_length then
+			-- Handle clip playback modes at loop boundary
+			-- Kill all active notes before looping to prevent stuck notes
+			self:kill_notes()
+
+			-- Emit loop boundary event
+			if self.current_slot then
+				self:emit('clip_loop_boundary', { bank_slot = self.current_slot })
+			else
+				self:emit('clip_loop_boundary', { bank_slot = nil })
+			end
+
+			-- One-shot mode: disable playback after completing loop
+			if self.buffer and self.buffer.buffer_playback and not self.buffer_loop then
+				self.buffer.buffer_playback = false
+				Registry.set('track_' .. self.track.id .. '_buffer_playback', 0, 'clip_oneshot')
+				-- Emit playback stopped event for one-shot mode
+				if self.current_slot then
+					self:emit('clip_playback_stopped', { bank_slot = self.current_slot, reason = 'oneshot' })
+				else
+					self:emit('clip_playback_stopped', { bank_slot = nil, reason = 'oneshot' })
+				end
+				-- Update monitor state when playback stops (one-shot mode)
+				if self.track.update_monitor_state then self.track:update_monitor_state() end
+			end
+
+			next_tick = playback_start
+			self.tick = playback_start
+		else
+			self.tick = self.tick + 1
+		end
+
+		-- Handle scrub mode separately from normal playback
+		if self.scrub_mode then
+			-- Update scrub_tick for scrub playback
+			local next_scrub_tick = (self.scrub_tick or self.scrub_start) + run_offset
+
+			if self.scrub_loop and next_scrub_tick > self.scrub_end then
+				-- Loop back to scrub start
+				self:kill_notes()
+				next_scrub_tick = self.scrub_start
+				self.scrub_tick = self.scrub_start
+			elseif not self.scrub_loop then
+				-- Play-thru mode
+				if next_scrub_tick > self.scrub_end then
+					-- Completed one pass through scrub range
+					if not self.buffer_loop then
+						-- One-shot mode: stop scrub after one loop through range
+						self:kill_notes()
+						self:stop_scrub()
+					else
+						-- Continuous loop mode: continue playing through full buffer
+						-- Wrap at buffer end
+						local buffer_end = self.buffer.buffer_start + self.buffer.buffer_length - 1
+						if next_scrub_tick > buffer_end then
+							self:kill_notes()
+							self.scrub_tick = self.buffer.buffer_start
+						else
+							self.scrub_tick = next_scrub_tick
+						end
+					end
+				else
+					-- Still within scrub range, continue playing
+					self.scrub_tick = next_scrub_tick
+				end
+			else
+				self.scrub_tick = next_scrub_tick
+			end
+
+			-- Only run buffer events during scrub (from buffer, using scrub_tick)
+			if self.scrub_mode and self.buffer.buffer[self.scrub_tick] then self:run_events(self.buffer.buffer[self.scrub_tick]) end
+		else
+			-- Incrementally update frozen_buffer if not frozen (for live buffer playback)
+			if not self.scrub_mode and not self.buffer_frozen and self.buffer and self.playback_start and self.playback_length then
+				local step_size = 8 -- Hardcoded step size for incremental updates
+				local current_step_index = math.floor((self.buffer.tick - self.playback_start) / step_size) + 1
+				if self.last_frozen_step_index and current_step_index ~= self.last_frozen_step_index then self:update_frozen_step(self.last_frozen_step_index) end
+				self.last_frozen_step_index = current_step_index
+			end
+
+			-- Update monitor state based on playback/recording state
+			if self.track.update_monitor_state then self.track:update_monitor_state() end
+
+			-- Use get_playback_source() to get either live buffer or loaded clip
+			local playback_source = self:get_playback_source()
+			if playback_source then
+				-- For clips: next_tick is already 1-based (clips start at tick 1)
+				-- For live buffer: next_tick is absolute (1-based from buffer.buffer_start)
+				-- Both use 1-based indexing, so we can use next_tick directly
+				local lookup_tick = next_tick
+				if lookup_tick >= 1 and playback_source[lookup_tick] then self:run_events(playback_source[lookup_tick]) end
+			end
+		end
+
+		-- Record transport timing (conditional on flag)
+		if flags.buffer_timing_stats and transport_start then
+			local transport_elapsed = (util.time() - transport_start) * 1000 -- Note: timing stats would need to be added to Clip if needed
+		end
+	end
+
+	return data
+end
+
+-- Playback buffer events
+-- Respects per-track buffer_playback param, scrub mode settings, and loaded clip playback
+function Clip:run_events(events)
+	if not self.track.output_device then return end
+
+	-- Check if buffer playback is enabled for this track (via param)
+	-- OR if scrub mode is active (grid-triggered playback)
+	-- OR if a clip is loaded and playing (clip playback)
+	-- OR if frozen buffer is active (frozen buffer playback)
+	local playback_enabled = false
+
+	if self.scrub_mode or (self.buffer and self.buffer.buffer_playback) or self.buffer_frozen then
+		-- Scrub mode, buffer playback, or frozen buffer: update monitor state (may mute input based on monitor setting)
+		playback_enabled = true
+		if self.track.update_monitor_state then self.track:update_monitor_state() end
+	elseif self.playing and self.current_slot and self.clip_bank[self.current_slot] then
+		-- Loaded clip is playing: update monitor state (may mute input based on monitor setting)
+		playback_enabled = true
+		if self.track.update_monitor_state then self.track:update_monitor_state() end
+	elseif self.track.armed then
+		-- Recording armed: update monitor state (may allow input based on monitor setting)
+		playback_enabled = true
+		if self.track.update_monitor_state then self.track:update_monitor_state() end
+	end
+
+	if not playback_enabled then return end
+
+	for _, event in ipairs(events) do
+		local ch = event.ch or self.track.midi_out
+
+		local midi_msg = {}
+
+		for k, v in pairs(event) do
+			midi_msg[k] = v
+		end
+
+		-- Set buffer_sent to prevent Output component from also recording these events
+		-- (we'll record them explicitly in the clip component to control when/how they're recorded)
+		midi_msg.buffer_sent = App.tick
+
+		if self.playback_mode == 1 then
+			self.track:send(midi_msg)
+		elseif self.playback_mode == 2 then
+			self.track:send_input(midi_msg)
+		elseif self.playback_mode == 3 then
+			self.track:send_output(midi_msg)
+		elseif self.playback_mode == 4 then
+			self.track:send_scale(midi_msg)
+		end
+
+		-- Record clip playback events back into buffer at current buffer.tick
+		-- This allows clip playback to be captured in the continuously recording buffer
+		-- Works for both scrub mode and normal clip playback
+		if self.buffer and App.playing then
+			-- Create a copy of the event for recording (without buffer_sent)
+			local record_event = {}
+			for k, v in pairs(midi_msg) do
+				if k ~= 'buffer_sent' then record_event[k] = v end
+			end
+			-- Record at current App.tick (when event actually occurred)
+			-- This ensures events are recorded at the correct tick, accounting for subdivision timing
+			self.buffer:record_buffer(record_event, App.tick)
+		end
+	end
+end
+
+-- Send note_off for all active buffer notes (prevents stuck notes)
+function Clip:kill_notes()
+	if not self.track.output_device then return end
+	self.track.output_device:kill()
+end
+
+-- Scrub playback: temporarily play a range of the buffer
+-- loop_mode: true = loop the range, false = play through once then stop
+function Clip:start_scrub(start_tick, end_tick, loop_mode)
+	-- Kill any currently playing buffer notes before scrub
+	self:kill_notes()
+	-- Update monitor state when starting scrub
+	if self.track.update_monitor_state then self.track:update_monitor_state() end
+
+	-- Store scrub state
+	self.scrub_mode = true
+	self.scrub_loop = loop_mode
+	self.scrub_start = start_tick
+	self.scrub_end = end_tick
+	self.scrub_length = end_tick - start_tick + 1
+
+	-- Jump to scrub start position
+	self.scrub_tick = start_tick
+end
+
+-- Update scrub range (for multi-pad selection)
+-- If current tick is outside new range, jump to stay within boundaries
+function Clip:update_scrub(start_tick, end_tick)
+	if not self.scrub_mode then return end
+
+	-- Kill notes to prevent stuck notes when range changes
+	self:kill_notes()
+
+	-- Update scrub boundaries
+	self.scrub_start = start_tick
+	self.scrub_end = end_tick
+	self.scrub_length = end_tick - start_tick + 1
+
+	-- If current scrub_tick is now outside the new scrub range, jump to scrub start
+	if not self.scrub_tick or self.scrub_tick < start_tick or self.scrub_tick > end_tick then self.scrub_tick = start_tick end
+end
+
+-- Stop scrub and restore normal playback
+function Clip:stop_scrub(saved_tick, saved_buffer_start, saved_seq_length)
+	-- Update monitor state when stopping scrub
+	if self.track.update_monitor_state then self.track:update_monitor_state() end
+	if not self.scrub_mode then return end
+
+	-- Kill any scrub notes
+	self:kill_notes()
+
+	-- Restore previous state
+	self.scrub_mode = false
+	self.scrub_loop = false
+	self.scrub_start = nil
+	self.scrub_end = nil
+	self.scrub_length = nil
+	self.scrub_tick = nil
+
+	-- Clear scrub sync queue when scrub stops
+	if self.scrub_sync_queue then
+		self.scrub_sync_queue:clear_action()
+		self.scrub_sync_queue = nil
+	end
+
+	-- Restore buffer start if it was changed
+	-- Note: buffer.tick is already at the correct position (it's been updating in the background)
+	if saved_buffer_start and self.buffer then self.buffer:set_buffer_start(saved_buffer_start) end
+end
+
+--==============================================================================
+-- Clip Bank Management
+--==============================================================================
+
+--- Save a clip from buffer to bank slot
+-- @param bank_slot number The bank slot (positive integer)
+-- @param loop_start number The start tick of the loop
+-- @param loop_end number The end tick of the loop
+-- @param name string Optional name for the clip
+-- @return boolean True if save succeeded
+function Clip:save_clip_to_bank(bank_slot, loop_start, loop_end, name)
+	if not self.buffer then
+		print('Clip: Cannot save clip - buffer not available')
+		return false
+	end
+
+	if bank_slot < 1 then
+		print('Clip: Invalid bank slot ' .. bank_slot .. ' (must be positive)')
+		return false
+	end
+
+	-- Extract clip data from buffer or frozen_buffer
+	-- Remap ticks to start at 1 (consistent with buffer which starts at buffer_start, typically 1)
+	local clip_buffer = {}
+	local clip_length = loop_end - loop_start + 1
+
+	-- Performance optimization: Use frozen_buffer if available and range matches
+	local source_buffer = nil
+	if self.buffer_frozen and self.frozen_buffer and self.playback_start == loop_start and self.playback_length == clip_length then
+		-- Use frozen_buffer - already filtered to exact range we need!
+		source_buffer = self.frozen_buffer
+	else
+		-- Fall back to buffer (for arbitrary ranges or when not frozen)
+		source_buffer = self.buffer.buffer
+	end
+
+	-- Copy events from source buffer, remapping ticks to start at 1
+	for tick, events in pairs(source_buffer) do
+		if tick >= loop_start and tick <= loop_end then
+			-- Remap tick: tick - loop_start + 1 (so clip starts at tick 1)
+			local remapped_tick = tick - loop_start + 1
+			-- Deep copy events (necessary for persistence)
+			clip_buffer[remapped_tick] = {}
+			for _, event in ipairs(events) do
+				local event_copy = {}
+				for k, v in pairs(event) do
+					event_copy[k] = v
+				end
+				table.insert(clip_buffer[remapped_tick], event_copy)
+			end
+		end
+	end
+
+	-- Create clip data structure
+	local clip_data = {
+		name = name or string.format('Clip %03d', bank_slot),
+		length = clip_length,
+		loop_start = loop_start, -- Store original loop start for playback
+		buffer = clip_buffer,
+	}
+
+	-- Save to file
+	local filename = string.format('track_%d_clip_%03d.lua', self.track.id, bank_slot)
+	local success = Persistence.save_clip_file(self.track.id, bank_slot, clip_data)
+
+	if success then
+		-- Update clip bank
+		self.clip_bank[bank_slot] = {
+			filename = filename,
+			name = clip_data.name,
+			length = clip_length,
+			loop_start = loop_start, -- Store original loop start
+			buffer = clip_buffer,
+			playback_settings = {},
+		}
+
+		-- Save bank metadata
+		self:save_bank_metadata()
+
+		-- Emit event for mode components
+		self:emit('clip_saved', { bank_slot = bank_slot, name = clip_data.name })
+
+		print('Clip: Saved clip to bank slot ' .. bank_slot)
+		return true
+	else
+		print('Clip: Failed to save clip to bank slot ' .. bank_slot)
+		return false
+	end
+end
+
+--- Load a clip from bank slot into playback
+-- @param bank_slot number The bank slot (positive integer)
+-- @return boolean True if load succeeded
+function Clip:load_clip_from_bank(bank_slot)
+	if bank_slot < 1 then
+		print('Clip: Invalid bank slot ' .. bank_slot .. ' (must be positive)')
+		return false
+	end
+
+	if not self.clip_bank[bank_slot] then
+		print('Clip: No clip in bank slot ' .. bank_slot)
+		return false
+	end
+
+	-- Set as current playback source
+	self.current_slot = bank_slot
+
+	-- Reset tick to 1 (clips are 1-based)
+	self.tick = 1
+
+	-- Emit event for mode components
+	self:emit('clip_loaded', { bank_slot = bank_slot })
+
+	print('Clip: Loaded clip from bank slot ' .. bank_slot)
+	return true
+end
+
+--- Load a clip by filename into a bank slot
+-- @param filename string The filename
+-- @param bank_slot number The bank slot (positive integer)
+-- @param load_as_current boolean If true, load as current clip
+-- @return boolean True if load succeeded
+function Clip:load_clip_by_filename(filename, bank_slot, load_as_current)
+	if bank_slot < 1 then
+		print('Clip: Invalid bank slot ' .. bank_slot .. ' (must be positive)')
+		return false
+	end
+
+	-- Load clip file
+	local clip_data = Persistence.load_clip_file(self.track.id, filename)
+
+	if not clip_data then
+		print('Clip: Failed to load clip file ' .. filename)
+		return false
+	end
+
+	-- Store in clip bank
+	self.clip_bank[bank_slot] = {
+		filename = filename,
+		name = clip_data.name or string.format('Clip %03d', bank_slot),
+		length = clip_data.length or 0,
+		loop_start = clip_data.loop_start or 0, -- Store loop_start from loaded data
+		buffer = clip_data.buffer,
+		playback_settings = {},
+	}
+
+	-- Save bank metadata
+	self:save_bank_metadata()
+
+	-- Optionally load as current clip
+	if load_as_current then
+		self.current_slot = bank_slot
+		-- Clips are 1-based, start at tick 1
+		self.tick = 1
+		-- Emit event for mode components
+		self:emit('clip_loaded', { bank_slot = bank_slot, filename = filename })
+	end
+
+	print('Clip: Loaded clip ' .. filename .. ' into bank slot ' .. bank_slot)
+	return true
+end
+
+--- Unload current clip and return to live buffer
+-- Also unfreezes buffer if frozen
+-- @return boolean True if unload succeeded
+function Clip:unload_clip()
+	local had_clip = (self.current_slot ~= nil)
+	local was_frozen = self.buffer_frozen
+
+	if self.current_slot then
+		local previous_slot = self.current_slot
+		self.current_slot = nil
+		-- Sync clip.tick to buffer.tick (buffer is continuously running, don't reset)
+		if self.buffer then self.tick = self.buffer.tick end
+		-- Emit event for mode components
+		self:emit('clip_unloaded', { bank_slot = previous_slot })
+	end
+
+	-- Unfreeze buffer if frozen (allows returning to live playback)
+	if self.buffer_frozen then
+		self:unfreeze_buffer()
+		-- Sync clip.tick to buffer.tick when unfreezing (buffer is continuously running)
+		if self.buffer then self.tick = self.buffer.tick end
+	end
+
+	if had_clip or was_frozen then
+		if had_clip then print('Clip: Unloaded clip, returning to live buffer') end
+		if was_frozen then print('Clip: Unfroze buffer, returning to live playback') end
+		return true
+	end
+
+	return false
+end
+
+--- Clear a clip slot
+-- @param bank_slot number The bank slot (positive integer)
+-- @return boolean True if clear succeeded
+function Clip:clear_clip_slot(bank_slot)
+	if bank_slot < 1 then
+		print('Clip: Invalid bank slot ' .. bank_slot .. ' (must be positive)')
+		return false
+	end
+
+	-- If currently playing, stop playback
+	if self.current_slot == bank_slot then
+		self.current_slot = nil
+		-- Sync clip.tick to buffer.tick (buffer is continuously running, don't reset)
+		if self.buffer then self.tick = self.buffer.tick end
+	end
+
+	-- Delete the clip file if it exists
+	if self.clip_bank[bank_slot] and self.clip_bank[bank_slot].filename then Persistence.delete_clip_file(self.track.id, self.clip_bank[bank_slot].filename) end
+
+	-- Remove from clip bank
+	self.clip_bank[bank_slot] = nil
+
+	-- Save bank metadata
+	self:save_bank_metadata()
+
+	-- Emit event for mode components
+	self:emit('clip_cleared', { bank_slot = bank_slot })
+
+	print('Clip: Cleared bank slot ' .. bank_slot)
+	return true
+end
+
+--- Save bank metadata to file
+function Clip:save_bank_metadata()
+	local bank_data = {
+		slots = {},
+	}
+
+	-- Collect slot metadata
+	for slot = 1, 16 do
+		if self.clip_bank[slot] then
+			bank_data.slots[slot] = {
+				filename = self.clip_bank[slot].filename,
+				name = self.clip_bank[slot].name,
+				loop_start = self.clip_bank[slot].loop_start, -- Save loop_start
+				playback_settings = self.clip_bank[slot].playback_settings or {},
+			}
+		end
+	end
+
+	Persistence.save_clip_bank(self.track.id, bank_data)
+end
+
+--- Load bank metadata from file
+function Clip:load_bank_metadata()
+	local bank_data = Persistence.load_clip_bank(self.track.id)
+
+	if not bank_data or not bank_data.slots then return end
+
+	-- Load clips from metadata
+	for slot = 1, 16 do
+		if bank_data.slots[slot] then
+			local slot_data = bank_data.slots[slot]
+			local clip_data = Persistence.load_clip_file(self.track.id, slot_data.filename)
+
+			if clip_data then
+				self.clip_bank[slot] = {
+					filename = slot_data.filename,
+					name = slot_data.name or clip_data.name,
+					length = clip_data.length or 0,
+					loop_start = slot_data.loop_start or clip_data.loop_start or 0, -- Restore loop_start
+					buffer = clip_data.buffer,
+					playback_settings = slot_data.playback_settings or {},
+				}
+			end
+		end
+	end
+end
+
+return Clip

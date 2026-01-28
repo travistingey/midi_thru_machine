@@ -4,12 +4,13 @@ local path_name = 'Foobar/lib/components/mode/'
 
 local MuteGrid = require('Foobar/lib/components/mode/mutegrid')
 local PresetGrid = require('Foobar/lib/components/mode/presetgrid')
-local BufferSeq = require('Foobar/lib/components/mode/bufferseq')
+local ClipGrid = require('Foobar/lib/components/mode/clipgrid')
 local Default = require('Foobar/lib/components/mode/default')
 
 local Mode = require('Foobar/lib/components/app/mode')
 
-local bufferseq = BufferSeq:new({
+-- ClipGrid replaces BufferSeq in Session mode
+local clipgrid = ClipGrid:new({
 	track = 1,
 	grid_start = { x = 1, y = 4 },
 	grid_end = { x = 8, y = 1 },
@@ -26,34 +27,25 @@ local SessionMode = Mode:new({
 	track = 1,
 	components = {
 		default,
-		bufferseq,
+		clipgrid,
 		mutegrid,
 		presetgrid,
 	},
 	load_event = function(s, data)
-		bufferseq.track = App.current_track
+		clipgrid.track = App.current_track
 		presetgrid.track = App.current_track
 
-		-- Use bufferseq's unified row pad update function
-		bufferseq:update_row_pads()
+		-- Use clipgrid's unified row pad update function
+		clipgrid:update_row_pads()
 		App.screen_dirty = true
-	end,
-	arrow_event = function(self, data)
-		if data.state then
-			-- Check for alt mode first - bufferseq handles alt mode arrow events
-			if bufferseq.arrow_event then
-				bufferseq:arrow_event(data)
-				return
-			end
-		end
 	end,
 	row_event = function(self, data)
 		if data.state then
-			-- Let bufferseq handle row events (including alt mode arming)
+			-- Let clipgrid handle row events
 			-- It will update row pads internally
-			bufferseq:row_event(data)
+			clipgrid:row_event(data)
 			
-			-- Only proceed with track switching if bufferseq didn't handle it (not alt mode)
+			-- Only proceed with track switching if not in alt mode
 			if not self.alt then
 				if data.row ~= App.current_track then
 					self.track = data.row
