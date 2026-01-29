@@ -6,9 +6,9 @@ local Registry = require(path_name .. 'utilities/registry')
 local flags = require(path_name .. 'utilities/flags')
 local SequenceUtils = require(path_name .. 'utilities/sequence_utils')
 
--- Buffer component handles recording of MIDI events
+-- Buffer component handles recording of MIDI events only
 -- Separated from Auto and Clip components for clear separation of concerns:
--- Buffer = Recording, Clip = Playback, Auto = Automation
+-- Buffer = Recording only (silent, continuous recording), Clip = Playback, Auto = Automation
 
 local Buffer = {}
 Buffer.name = 'buffer'
@@ -34,13 +34,11 @@ function Buffer:set(o)
 	-- Buffer's own timing state (independent from Auto)
 	self.tick = o.tick or 0 -- Buffer's recording position in ticks (continuously running)
 	self.buffer_start = o.buffer_start or 1 -- Starting tick of the buffer
-	self.buffer_length = o.buffer_length or (App.ppqn * 64 * 4) -- Static buffer length (64 bars default)
+	self.buffer_length = o.buffer_length or (App.ppqn * 8) -- Static buffer length (64 bars default)
 	self.playing = false
 	self.enabled = true
 
-	-- buffer_playback: Stored here for Clip to read (Clip controls playback, Buffer only records)
-	-- Buffer always loops and overwrites - no loop/overdub settings needed
-	self.buffer_playback = o.buffer_playback or false -- Read by Clip for playback control
+	-- Buffer only records - Clip component handles all playback
 
 	-- Single buffer architecture: Buffer continuously records, Clip handles playback via frozen_buffer
 	-- Buffer loops back over itself at buffer_start + buffer_length
@@ -94,30 +92,17 @@ function Buffer:record_buffer(midi_event, event_tick)
 	local record_start = flags.buffer_timing_stats and util.time() or nil
 
 	-- Determine the recording tick
-	-- If event_tick is provided, it's App.tick (0-based) - map to buffer coordinates (1-based)
-	-- App.tick 0 = first subdivision period (between external clock 0 and 1) -> buffer_start (tick 1)
-	-- App.tick 1 = second subdivision period -> buffer_start + 1 (tick 2)
-	-- So: recording_tick = buffer_start + App.tick
-	-- If event_tick is not provided, use self.tick (already in buffer coordinates)
-	local recording_tick
-	if event_tick ~= nil then
-		-- event_tick is App.tick (0-based), map to buffer coordinates
-		-- Add 1 because App.tick 0 should map to buffer_start (which is 1)
-		recording_tick = self.buffer_start + event_tick
-	else
-		-- Use current buffer tick (already in buffer coordinates)
-		recording_tick = self.tick
-	end
+
+	local recording_tick = self.tick
 
 	-- Wrap tick within the buffer boundaries
 	local tick = self:wrap_tick(recording_tick)
-
 	-- Initialize buffer table for this tick if needed
 	if not self.buffer[tick] then self.buffer[tick] = {} end
 
 	midi_event.buffer_sent = nil
 	midi_event.tick = recording_tick
-
+	midi_event.external_tick = App.external_tick
 	-- Store the event (multiple events can exist at same tick)
 	table.insert(self.buffer[tick], midi_event)
 
@@ -219,7 +204,7 @@ function Buffer:transport_event(data)
 	if data.type == 'start' then
 		self.playing = true -- Track transport state for recording timing
 		-- Start recording at buffer start
-		self.tick = self.buffer_start
+		self.tick = 0
 		-- Reset overwrite tracking for new recording loop
 		self.overwrite_cleared_steps = {}
 	elseif data.type == 'stop' then

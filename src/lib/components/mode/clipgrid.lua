@@ -232,8 +232,10 @@ function ClipGrid:start_recording(clip, bank_slot)
 	local track = clip.track
 	if track then Registry.set('track_' .. track.id .. '_armed', 1, 'clipgrid_recording') end
 
-	-- Buffer records continuously - no need to set loop boundaries
-	-- Recording boundaries are tracked in ClipGrid state and used when saving the clip
+	-- Set loop boundaries for recording
+	-- Start at sync-aligned tick, end at max recording length
+	-- This ensures recording stays within bounds and can be saved correctly
+	local loop_end = recording_start_tick + self.max_recording_length - 1
 
 	-- Store recording state
 	self.recording_slot = bank_slot
@@ -291,48 +293,24 @@ function ClipGrid:stop_recording_and_save(clip, bank_slot)
 	-- Use buffer.tick to get the last tick that was actually recorded
 	-- buffer.tick increments AFTER recording each clock tick, so the last recorded tick is buffer.tick - 1
 	-- We need to use buffer.tick (not App.tick) to ensure we capture all recorded data
-	local app_tick = App.tick or 1
 	local buffer_tick = clip.buffer.tick
+	local last_recorded_tick = buffer_tick - 1
 
-	-- Use App.tick which is sync-aligned when the action executes
-	-- This ensures loop_end is aligned to sync boundaries, preventing drift
-	-- buffer.tick should be close to App.tick, but App.tick is the source of truth for sync alignment
+	-- Always use last_recorded_tick as the base (not App.tick)
+	-- App.tick points to the next tick to be processed, not the last recorded tick
+	-- Using last_recorded_tick ensures we match the behavior of menu/frozen_buffer saves
+	-- The sync alignment logic below will handle rounding down if needed
+	local loop_end = last_recorded_tick
+
+	-- Get sync length for alignment verification and later sync adjustment
 	local sync_length = SequenceUtils.get_sync_length(clip.buffer, clip.action_sync_length)
 	local boundary = sync_length -- Use sync_length directly for clip recording
 
-	-- Use App.tick as the loop_end (it's sync-aligned when the action executes)
-	-- This ensures the clip length is exactly a multiple of sync_length
-	local loop_end = app_tick
-
-	-- However, we need to ensure we don't exceed the last recorded tick
-	-- buffer.tick - 1 is the last tick that was actually recorded
-	local last_recorded_tick = buffer_tick - 1
-
-	-- If App.tick is significantly ahead of last_recorded_tick, we might be including ticks that weren't recorded
-	-- However, if App.tick is only 1 tick ahead (normal case), use App.tick directly since it's sync-aligned
-	if app_tick > last_recorded_tick + 1 then
-		-- App.tick is significantly ahead - use last_recorded_tick and align to sync boundary
-		-- This shouldn't happen normally, but handle it gracefully
-		local relative_tick = last_recorded_tick - 1
-		local sync_offset = relative_tick % boundary
-		if sync_offset == 0 then
-			loop_end = last_recorded_tick
-		else
-			-- Round up to next sync boundary to include all recorded data
-			loop_end = last_recorded_tick - sync_offset + boundary
-		end
-	else
-		-- App.tick is at, equal to, or only 1 tick ahead of last_recorded_tick (normal case)
-		-- Use App.tick directly since it's already sync-aligned
-		loop_end = app_tick
-	end
-
 	-- Verify sync alignment
-	local relative_end_tick = loop_end - 1
-	local is_aligned = (relative_end_tick % boundary == 0)
+	local is_aligned = (last_recorded_tick % boundary == 0)
 
 	print('ClipGrid: Stop recording slot ' .. bank_slot)
-	print('  App.tick: ' .. app_tick .. ', buffer.tick: ' .. buffer_tick)
+	print('  App.tick: ' .. App.tick .. ', buffer.tick: ' .. buffer_tick)
 	print('  Last recorded tick: ' .. last_recorded_tick .. ' (buffer.tick - 1)')
 	print('  Using loop_end: ' .. loop_end .. ' (sync-aligned from last recorded)')
 	print('  Recording started at: ' .. recording_start_tick)
@@ -367,6 +345,7 @@ function ClipGrid:stop_recording_and_save(clip, bank_slot)
 		loop_end = recording_start_tick + (sync_units * sync_length) - 1
 		print('ClipGrid: Adjusted loop_end from ' .. (recording_start_tick + raw_length - 1) .. ' to ' .. loop_end .. ' to ensure sync alignment')
 	end
+	print('STOP AND SAVE--------------------------------')
 
 	-- Save clip to bank
 	local clip_name = string.format('Clip %03d', bank_slot)

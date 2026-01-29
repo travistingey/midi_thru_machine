@@ -561,9 +561,7 @@ function Default:clip_menu()
 						if clip_entry then return 'Slot ' .. slot .. ' (' .. (clip_entry.name or 'unnamed') .. ')' end
 						return 'Slot ' .. slot .. ' (missing)'
 					end
-					-- Check if buffer playback is active
-					if track.buffer and track.buffer.buffer_playback then return 'Live' end
-					-- Just input (no buffer playback)
+					-- Live input
 					return 'Live'
 				end
 				return 'none'
@@ -687,6 +685,35 @@ function Default:clip_menu()
 			end,
 			helper_labels = {
 				enc3 = 'select slot',
+				press_fn_3 = 'clear',
+			},
+		})
+	)
+
+	-- Clear clip slot
+	table.insert(
+		items,
+		Registry.menu.make_item('clip_clear_all', {
+			label_fn = function() return 'CLEAR ALL' end,
+			value_fn = function()
+				local slot = App.current_clip or 1
+				return tostring(slot)
+			end,
+
+			on_press = function()
+				if track and track.clip then
+					for slot = 1, max_clip_slot_select do
+						local success = track.clip:clear_clip_slot(slot)
+						if success then
+							print('Cleared clip slot ' .. slot)
+						else
+							print('Failed to clear clip slot ' .. slot)
+						end
+					end
+					App.screen_dirty = true
+				end
+			end,
+			helper_labels = {
 				press_fn_3 = 'clear',
 			},
 		})

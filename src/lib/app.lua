@@ -94,6 +94,7 @@ function App:init(o)
 	-- Timing parameters:
 	self.ppqn = 96
 	self.external_ppqn = 24
+	self.external_tick = 0
 	self.swing = 0.5
 	self.swing_div = 6 -- 1/16 note swing
 
@@ -102,7 +103,7 @@ function App:init(o)
 	self.last_clock_time = nil -- Timestamp of last external tick
 	self.subtick_ms = nil -- Calculated duration of one subtick
 	self.use_burst_mode = true -- Dynamic flag for tick dispatch mode
-	self.burst_threshold_ms = 6 -- Below this, use burst mode
+	self.burst_threshold_ms = 4.5 -- Below this, use burst mode. Optimized for 60-200 BPM: spaced mode for natural timing up to ~150 BPM, burst above where scheduling becomes unreliable
 	self.scheduled_ticks = {} -- Track scheduled coroutines for cleanup
 	self.pending_subticks = 0 -- Track how many subticks are still pending
 	self.DEBUG_TIMING = false -- Enable for timing diagnostics
@@ -252,7 +253,7 @@ end
 function App:on_external_clock()
 	-- Only process external clock if clock source is external
 	if params:get('clock_source') ~= 2 then return end
-
+	self.external_tick = self.external_tick + 1
 	local now = util.time()
 
 	-- If a new clock tick arrives before scheduled subticks complete,
@@ -272,65 +273,130 @@ function App:on_external_clock()
 		self.pending_subticks = 0
 	end
 
-	-- First tick: no timing data yet, use burst mode
+	-- First tick: no timing data yet, process one tick and schedule the rest
 	if not self.last_clock_time then
-		for i = 1, self.tick_multiplier do
+		-- Process first tick immediately
+		self:on_tick()
+
+		-- Schedule remaining subticks to process at start of second clock signal
+		-- Store count of pending subticks (will be processed before next clock handling)
+		self.pending_subticks = self.tick_multiplier - 1
+		self.last_clock_time = now
+
+		if self.DEBUG_TIMING then print(string.format('FIRST CLOCK: Tick: %d, Pending: %d', App.tick, self.pending_subticks)) end
+		return
+	end
+
+	-- Process any pending subticks from first clock before handling new clock
+	if self.pending_subticks > 0 then
+		local remaining = self.pending_subticks
+		if self.DEBUG_TIMING then print(string.format('PROCESSING PENDING: %d subticks, starting at Tick: %d', remaining, App.tick)) end
+		for i = 1, remaining do
 			self:on_tick()
 		end
-		self.last_clock_time = now
-		return
+		self.pending_subticks = 0
+		if self.DEBUG_TIMING then print(string.format('PENDING COMPLETE: Tick: %d', App.tick)) end
 	end
 
 	-- Calculate subtick timing based on time between external ticks
 	local tick_duration = (now - self.last_clock_time) * 1000 -- Convert to ms
 	self.subtick_ms = tick_duration / self.tick_multiplier
 
-	-- Decide dispatch mode: use burst if subticks would be imperceptibly close
-	self.use_burst_mode = self.subtick_ms < self.burst_threshold_ms
+	-- Hybrid approach: calculate how many subticks can be spaced at threshold resolution
+	-- This preserves finer timing resolution instead of jumping to full burst mode
+	local spaced_subticks = math.floor(tick_duration / self.burst_threshold_ms)
+	spaced_subticks = math.min(spaced_subticks, self.tick_multiplier) -- Can't schedule more than we need
+	local burst_count = self.tick_multiplier - spaced_subticks -- Remaining subticks to burst
 
 	self.last_clock_time = now
 
-	-- Dispatch internal ticks based on mode
-	if self.use_burst_mode then
-		-- Burst mode: fire all subticks immediately
+	-- Dispatch internal ticks using hybrid approach
+	if spaced_subticks == 0 then
+		-- No spacing possible: burst all subticks immediately
 		for i = 1, self.tick_multiplier do
 			self:on_tick()
 		end
 		self.pending_subticks = 0
-	else
-		-- Spaced mode: distribute subticks across the external tick duration
+
+		if self.DEBUG_TIMING then print(string.format('FULL BURST: tick_duration=%.2fms, threshold=%.2fms', tick_duration, self.burst_threshold_ms)) end
+	elseif burst_count == 0 then
+		-- Full spaced mode: all subticks can be scheduled
 		-- Fire first subtick immediately
 		self:on_tick()
 
 		-- Track remaining subticks
-		self.pending_subticks = self.tick_multiplier - 1
+		self.pending_subticks = spaced_subticks - 1
 
-		-- Schedule remaining subticks with appropriate delays
-		for i = 2, self.tick_multiplier do
-			local delay_ms = self.subtick_ms * (i - 1)
+		-- Schedule remaining subticks with even spacing
+		local spacing_ms = tick_duration / spaced_subticks
+		for i = 2, spaced_subticks do
+			local delay_ms = spacing_ms * (i - 1)
 			local coro = clock.run(function()
 				clock.sleep(delay_ms / 1000) -- Convert ms to seconds
-				if self.playing then -- Safety check
-					-- Decrement pending count before firing
-					-- Note: If a new clock tick arrived and cancelled this,
-					-- the count may have been reset, but that's okay
+				if self.playing then
 					if self.pending_subticks > 0 then self.pending_subticks = self.pending_subticks - 1 end
 					self:on_tick()
 				end
 			end)
 			table.insert(self.scheduled_ticks, coro)
 		end
+	else
+		-- Hybrid mode: schedule spaced subticks, burst remaining at last scheduled position
+		-- Fire first subtick immediately
+		self:on_tick()
+
+		-- Track remaining spaced subticks (excluding the burst)
+		self.pending_subticks = spaced_subticks - 1
+
+		-- Schedule remaining spaced subticks with even spacing
+		local spacing_ms = tick_duration / spaced_subticks
+		for i = 2, spaced_subticks do
+			local delay_ms = spacing_ms * (i - 1)
+			local is_last_spaced = (i == spaced_subticks)
+			local coro = clock.run(function()
+				clock.sleep(delay_ms / 1000) -- Convert ms to seconds
+				if self.playing then
+					if self.pending_subticks > 0 then self.pending_subticks = self.pending_subticks - 1 end
+
+					-- At the last scheduled position, burst remaining subticks
+					if is_last_spaced and burst_count > 0 then
+						-- Fire the scheduled subtick, then burst remaining
+						self:on_tick()
+						for j = 1, burst_count do
+							self:on_tick()
+						end
+					else
+						-- Normal scheduled subtick
+						self:on_tick()
+					end
+				end
+			end)
+			table.insert(self.scheduled_ticks, coro)
+		end
+
+		if self.DEBUG_TIMING then print(string.format('HYBRID: spaced=%d, burst=%d, tick_duration=%.2fms, spacing=%.2fms', spaced_subticks, burst_count, tick_duration, spacing_ms)) end
 	end
 
 	-- Debug output (optional)
 	if self.DEBUG_TIMING then
+		local mode_str
+		if spaced_subticks == 0 then
+			mode_str = 'FULL_BURST'
+		elseif burst_count == 0 then
+			mode_str = 'FULL_SPACED'
+		else
+			mode_str = 'HYBRID'
+		end
 		print(
 			string.format(
-				'Mode: %s, Subtick: %.2fms, Threshold: %.2fms, Pending: %d',
-				self.use_burst_mode and 'BURST' or 'SPACED',
+				'Mode: %s, Spaced: %d, Burst: %d, Subtick: %.2fms, Threshold: %.2fms, Pending: %d, Tick: %d',
+				mode_str,
+				spaced_subticks,
+				burst_count,
 				self.subtick_ms or 0,
 				self.burst_threshold_ms,
-				self.pending_subticks
+				self.pending_subticks,
+				App.tick
 			)
 		)
 	end
@@ -344,6 +410,7 @@ function App:on_start(continue)
 	tracer:log('info', 'App start')
 	self.playing = true
 	self.tick = 0
+	self.external_tick = 0
 	self.start_time = clock.get_beats()
 	self.last_time = clock.get_beats()
 
@@ -368,7 +435,7 @@ function App:on_start(continue)
 	if params:get('clock_source') == 1 then self.clock = clock.run(function()
 		while true do
 			clock.sync(1 / self.ppqn)
-			App:on_tick()
+			self:on_tick()
 			App.screen_dirty = true
 		end
 	end) end

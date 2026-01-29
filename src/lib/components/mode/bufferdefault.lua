@@ -149,19 +149,6 @@ function BufferDefault:default_menu()
 				enc3 = 'toggle arm',
 			},
 		}),
-		-- Buffer playback status (per-track)
-		Registry.menu.make_item('track_' .. id .. '_buffer_playback', {
-			icon = '\u{25b6}',
-			label_fn = function() return 'PLAYBACK' end,
-			value_fn = function()
-				local track = App.track[App.current_track]
-				local playback = track and track.buffer and track.buffer.buffer_playback
-				return playback and 'on' or 'off'
-			end,
-			helper_labels = {
-				enc3 = 'toggle playback',
-			},
-		}),
 		-- Playback mode (Default/Input/Direct/Scale Only)
 		Registry.menu.make_item('track_' .. id .. '_buffer_playback_mode', {
 			icon = '\u{25cf}',

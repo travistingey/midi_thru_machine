@@ -585,7 +585,6 @@ function Track:set(o)
 		local was_armed = self.armed
 		self.armed = (d > 0)
 		if self.armed then
-			if self.buffer then params:set(track .. 'buffer_playback', 0, true) end
 			-- Always clear overwrite steps when arming (buffer always overwrites)
 			if self.auto then self.auto.overwrite_cleared_steps = {} end
 		end
@@ -593,22 +592,7 @@ function Track:set(o)
 		if self.update_monitor_state then self:update_monitor_state() end
 	end)
 
-	-- Buffer playback (per-track)
-	-- Following the pattern: parameter registered here, initial value set in Buffer:set(),
-	-- then params:default() will call set_action to sync parameter value to component
-	Registry.add('add_binary', track .. 'buffer_playback', 'Buffer Playback', 'toggle', 0)
-	Registry.set_action(track .. 'buffer_playback', function(d)
-		local buffer_playback = (d > 0)
-		if self.buffer then
-			self.buffer.buffer_playback = buffer_playback
-			if buffer_playback then params:set(track .. 'armed', 0) end
-		end
-		-- Update monitor state when buffer playback changes
-		if self.update_monitor_state then self:update_monitor_state() end
-		-- Trigger menu redraw to show updated value
-		App.screen_dirty = true
-	end)
-
+	-- Playback mode (stored in Clip component)
 	Registry.add('add_option', track .. 'buffer_playback_mode', 'Playback Mode', { 'Default', 'Input', 'Direct', 'Scale Only' }, 1)
 	Registry.set_action(track .. 'buffer_playback_mode', function(d)
 		-- Playback mode is stored in Clip component (not Buffer)
