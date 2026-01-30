@@ -66,13 +66,13 @@ function Clip:set(o)
 	self.current_slot = nil -- Which slot is currently playing (nil = live buffer)
 end
 
-function Clip:get_next_sync_tick()
-	local sync_length = SequenceUtils.get_sync_length(self.buffer, self.action_sync_length)
+function Clip:get_next_sync_tick(custom_sync_length)
+	local sync_length = custom_sync_length or SequenceUtils.get_sync_length(self.buffer, self.action_sync_length)
 	return SequenceUtils.get_next_sync_tick(sync_length)
 end
 
-function Clip:should_wait_for_sync()
-	local sync_length = SequenceUtils.get_sync_length(self.buffer, self.action_sync_length)
+function Clip:should_wait_for_sync(custom_sync_length)
+	local sync_length = custom_sync_length or SequenceUtils.get_sync_length(self.buffer, self.action_sync_length)
 	return SequenceUtils.should_wait_for_sync(sync_length)
 end
 
@@ -153,17 +153,22 @@ end
 
 -- Queue a scrub action (replaces any existing pending scrub action)
 -- pad_check_fn: function to call to verify pad is still held
--- Sync quantization is based on scrub_length (Beatstep Pro Looper mode behavior)
-function Clip:queue_scrub_action(start_tick, end_tick, loop_mode, pad_check_fn)
-	-- Calculate scrub length for sync quantization
-	local scrub_length = end_tick - start_tick + 1
+-- sync_length: optional custom sync length (defaults to minimum 1/16th note)
+function Clip:queue_scrub_action(start_tick, end_tick, loop_mode, pad_check_fn, sync_length)
+	-- Calculate scrub range length
+	local scrub_range_length = end_tick - start_tick + 1
+
+	-- Use provided sync_length or default to minimum 1/16th note
+	local min_sync_length = App.ppqn / 4 -- 1/16th note minimum (24 ticks at 96 ppqn)
+	sync_length = sync_length or min_sync_length
+	sync_length = math.max(sync_length, min_sync_length)
 
 	local action_fn = function(component, action_data)
 		-- Check if pad is still held before executing
 		if action_data.pad_check_fn and action_data.pad_check_fn() then
 			component:start_scrub(action_data.start_tick, action_data.end_tick, action_data.loop_mode)
 			if flags.debug_scrub then
-				print('Scrub started (synced to ' .. action_data.scrub_length .. ' ticks): ' .. action_data.start_tick .. '-' .. action_data.end_tick)
+				print('Scrub started (synced to ' .. action_data.sync_length .. ' ticks): ' .. action_data.start_tick .. '-' .. action_data.end_tick)
 			end
 			-- Emit event so bufferseq can update its state
 			component:emit('scrub_started', {
@@ -188,15 +193,41 @@ function Clip:queue_scrub_action(start_tick, end_tick, loop_mode, pad_check_fn)
 		end_tick = end_tick,
 		loop_mode = loop_mode,
 		pad_check_fn = pad_check_fn,
-		scrub_length = scrub_length,
+		sync_length = sync_length,
+		scrub_range_length = scrub_range_length,
 	}
 
-	-- Queue in the 'scrub' slot with scrub_length as sync boundary
-	self.sync_manager:queue('scrub', action_fn, action_data, scrub_length)
+	-- Queue in the 'scrub' slot with provided sync_length
+	self.sync_manager:queue('scrub', action_fn, action_data, sync_length)
 end
 
 -- Clear pending scrub action (called when pad is released)
 function Clip:clear_pending_scrub() self.sync_manager:clear('scrub') end
+
+-- Queue a scrub stop action (for synced scrub ending)
+-- sync_length: sync length for the stop action
+function Clip:queue_scrub_stop(sync_length)
+	if not self.scrub_mode then return end
+
+	local min_sync_length = App.ppqn / 4 -- 1/16th note minimum
+	sync_length = sync_length or min_sync_length
+	sync_length = math.max(sync_length, min_sync_length)
+
+	local action_fn = function(component, action_data)
+		if flags.debug_scrub then
+			print('Scrub stopped (synced to ' .. action_data.sync_length .. ' ticks)')
+		end
+		component:stop_scrub()
+		component:emit('scrub_stopped', {})
+	end
+
+	local action_data = {
+		sync_length = sync_length,
+	}
+
+	-- Queue in the 'scrub_stop' slot
+	self.sync_manager:queue('scrub_stop', action_fn, action_data, sync_length)
+end
 
 -- Incrementally update frozen_buffer by copying one step from buffer
 -- Called on step transitions to maintain frozen snapshot efficiently
@@ -553,18 +584,33 @@ function Clip:start_scrub(start_tick, end_tick, loop_mode)
 	self.scrub_length = end_tick - start_tick + 1
 
 	-- Create shallow copy of buffer range into scrub_buffer
+	-- Use buffer component reference (self.buffer) not track.buffer
 	self.scrub_buffer = {}
-	if self.track.buffer then
+	if self.buffer and self.buffer.buffer then
 		for tick = start_tick, end_tick do
-			if self.track.buffer.buffer[tick] then self.scrub_buffer[tick] = self.track.buffer.buffer[tick] end
+			if self.buffer.buffer[tick] then self.scrub_buffer[tick] = self.buffer.buffer[tick] end
 		end
 	end
 
 	-- Scrub mode always blocks input regardless of monitoring setting
-	self.track.mute_input = true
+	-- Use emit to ensure the event system is notified
+	self.track:emit('mute_input', true)
 
 	-- Jump to scrub start position
 	self.scrub_tick = start_tick
+
+	if flags.debug_scrub then
+		print('Scrub started: ' .. start_tick .. '-' .. end_tick .. ' (loop: ' .. tostring(loop_mode) .. ', events: ' .. self:count_scrub_events() .. ')')
+	end
+end
+
+-- Helper to count events in scrub buffer (for debugging)
+function Clip:count_scrub_events()
+	local count = 0
+	for _, events in pairs(self.scrub_buffer) do
+		count = count + #events
+	end
+	return count
 end
 
 -- Update scrub range (for multi-pad selection)
@@ -583,14 +629,15 @@ function Clip:update_scrub(start_tick, end_tick)
 	self.scrub_length = end_tick - start_tick + 1
 
 	-- Update scrub_buffer: clear old entries outside new range, add new entries
-	if self.track.buffer and self.track.buffer.buffer then
+	-- Use buffer component reference (self.buffer) not track.buffer
+	if self.buffer and self.buffer.buffer then
 		-- Clear entries that are now outside the new range
 		for tick, _ in pairs(self.scrub_buffer) do
 			if tick < start_tick or tick > end_tick then self.scrub_buffer[tick] = nil end
 		end
 		-- Add new entries from buffer for the new range
 		for tick = start_tick, end_tick do
-			if self.track.buffer.buffer[tick] and not self.scrub_buffer[tick] then self.scrub_buffer[tick] = self.track.buffer.buffer[tick] end
+			if self.buffer.buffer[tick] and not self.scrub_buffer[tick] then self.scrub_buffer[tick] = self.buffer.buffer[tick] end
 		end
 	end
 

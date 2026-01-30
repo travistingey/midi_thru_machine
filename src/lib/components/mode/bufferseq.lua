@@ -113,7 +113,23 @@ function BufferSeq:enable_event()
 					self.scrub_start_tick = data.start_tick
 					self.scrub_end_tick = data.end_tick
 					self.scrub_active = true
+					-- Refresh grid to show scrub range
+					self:set_grid(buffer)
 				end
+			end)
+		)
+
+		-- Listen for scrub stopped event from clip (for sync)
+		table.insert(
+			self.cleanup_functions,
+			clip:on('scrub_stopped', function(data)
+				-- Update bufferseq state when scrub stops via sync
+				self.scrub_active = false
+				self.scrub_start_tick = nil
+				self.scrub_end_tick = nil
+				self.scrub_saved_buffer_start = nil
+				-- Refresh grid to clear scrub range
+				self:set_grid(buffer)
 			end)
 		)
 	end
@@ -254,12 +270,23 @@ function BufferSeq:recalculate_scrub_from_held_pads()
 		if max_pad == nil or pad_index > max_pad then max_pad = pad_index end
 	end
 
-	-- If no pads are held, stop scrub and clear pending
+	-- If no pads are held, queue synced scrub stop
 	if min_pad == nil or max_pad == nil then
-		self:stop_scrub()
 		local track = buffer.track
 		local clip = track and track.clip or nil
-		if clip then clip:clear_pending_scrub() end
+		if clip then
+			clip:clear_pending_scrub()
+			-- Queue synced scrub stop (minimum 1/16th note sync)
+			if self.scrub_active then
+				local min_sync_length = App.ppqn / 4 -- 1/16th note minimum
+				local scrub_sync_length = math.max(self:get_step_length(), min_sync_length)
+				clip:queue_scrub_stop(scrub_sync_length)
+				if flags.debug_scrub then
+					local next_sync_tick = clip:get_next_sync_tick(scrub_sync_length)
+					print('Scrub stop queued for sync at tick: ' .. next_sync_tick)
+				end
+			end
+		end
 		return
 	end
 
@@ -293,56 +320,30 @@ function BufferSeq:recalculate_scrub_from_held_pads()
 	local track = buffer.track
 	local clip = track and track.clip or nil
 
-	-- Check if sync is enabled and we should wait
-	-- Use buffer's action sync length for the check
-	local action_sync_length = buffer and buffer.action_sync_length or nil
-	if clip and action_sync_length and clip:should_wait_for_sync() then
+	-- Calculate sync length for scrub operations
+	-- Use display_step_length as the sync boundary, with minimum of 1/16th note
+	local min_sync_length = App.ppqn / 4 -- 1/16th note minimum (24 ticks at 96 ppqn)
+	local scrub_sync_length = math.max(display_step_length, min_sync_length)
+
+	-- Always use sync for scrub start (minimum 1/16th note)
+	-- This ensures scrubbing is synchronized to the beat
+	if clip then
 		-- If scrub is already active, update it immediately (no sync for updates)
 		if self.scrub_active then
 			-- Update existing scrub with new range
 			self.scrub_start_tick = start_tick
 			self.scrub_end_tick = end_tick
-			if clip then clip:update_scrub(start_tick, end_tick) end
+			clip:update_scrub(start_tick, end_tick)
 			if flags.debug_scrub then
 				print('Scrub recalculated: ' .. start_tick .. '-' .. end_tick)
 			end
 		else
-			-- Queue new scrub action (this will replace any existing pending scrub)
-			if clip then
-				clip:queue_scrub_action(start_tick, end_tick, App.buffer_scrub_mode == 'loop', pad_check_fn)
-				if flags.debug_scrub then
-					local next_sync_tick = clip:get_next_sync_tick()
-					print('Scrub queued for sync at tick: ' .. next_sync_tick)
-				end
+			-- Queue new scrub action with display_step_length as sync boundary
+			clip:queue_scrub_action(start_tick, end_tick, App.buffer_scrub_mode == 'loop', pad_check_fn, scrub_sync_length)
+			if flags.debug_scrub then
+				local next_sync_tick = clip:get_next_sync_tick(scrub_sync_length)
+				print('Scrub queued for sync at tick: ' .. next_sync_tick .. ' (sync_length: ' .. scrub_sync_length .. ')')
 			end
-		end
-		return
-	end
-
-	-- No sync or already on boundary - execute immediately
-	if self.scrub_active then
-		-- Update existing scrub with new range
-		self.scrub_start_tick = start_tick
-		self.scrub_end_tick = end_tick
-		if clip then clip:update_scrub(start_tick, end_tick) end
-		if flags.debug_scrub then
-			print('Scrub recalculated: ' .. start_tick .. '-' .. end_tick)
-		end
-	else
-		-- Start new scrub with full range (min to max)
-		-- Save loop boundaries
-		self.scrub_saved_buffer_start = buffer.buffer_start
-
-		-- Set scrub range
-		self.scrub_start_tick = start_tick
-		self.scrub_end_tick = end_tick
-		self.scrub_active = true
-
-		-- Start scrub playback
-		if clip then clip:start_scrub(start_tick, end_tick, App.buffer_scrub_mode == 'loop') end
-
-		if flags.debug_scrub then
-			print('Scrub started: ' .. start_tick .. '-' .. end_tick .. ' (' .. App.buffer_scrub_mode .. ')')
 		end
 	end
 end
@@ -395,7 +396,11 @@ function BufferSeq:stop_scrub()
 
 	-- Stop scrub and restore previous state
 	-- Note: clip.tick is already at the correct position (it's been updating in the background)
-	if clip then clip:stop_scrub() end
+	if clip then
+		-- Clear any pending scrub stop action
+		clip.sync_manager:clear('scrub_stop')
+		clip:stop_scrub()
+	end
 
 	self.scrub_active = false
 	self.scrub_start_tick = nil
