@@ -5,6 +5,8 @@ local TrackComponent = require('Foobar/lib/components/track/trackcomponent')
 local Registry = require(path_name .. 'utilities/registry')
 local flags = require(path_name .. 'utilities/flags')
 local SequenceUtils = require(path_name .. 'utilities/sequence_utils')
+local TimingConstants = require(path_name .. 'utilities/timing_constants')
+local EventStore = require(path_name .. 'utilities/event_store')
 
 -- Buffer component handles recording of MIDI events only
 -- Separated from Auto and Clip components for clear separation of concerns:
@@ -34,7 +36,7 @@ function Buffer:set(o)
 	-- Buffer's own timing state (independent from Auto)
 	self.tick = o.tick or 0 -- Buffer's recording position in ticks (continuously running)
 	self.buffer_start = o.buffer_start or 1 -- Starting tick of the buffer
-	self.buffer_length = o.buffer_length or (App.ppqn * 4 * 256) -- Static buffer length (64 bars default)
+	self.buffer_length = o.buffer_length or TimingConstants.get_default_buffer_length() -- Static buffer length (64 bars default)
 	self.playing = false
 	self.enabled = true
 
@@ -42,15 +44,22 @@ function Buffer:set(o)
 
 	-- Single buffer architecture: Buffer continuously records, Clip handles playback via frozen_buffer
 	-- Buffer loops back over itself at buffer_start + buffer_length
-	self.buffer = {} -- Single buffer for recording
+	-- EventStore provides efficient range queries and maintains sorted tick index
+	self.store = EventStore.new()
+
+	-- Backward compatibility: self.buffer points to store's internal events table
+	-- This allows existing code to access buffer[tick] directly
+	self.buffer = self.store.events
 
 	-- Migrate existing buffer data if present (backward compatibility)
 	-- This handles migration from old double-buffer structure
 	if o.buffer then
-		self.buffer = o.buffer
+		self.store:from_sparse_table(o.buffer)
+		self.buffer = self.store.events
 	elseif o.buffer_write then
 		-- Migrate from old buffer_write
-		self.buffer = o.buffer_write
+		self.store:from_sparse_table(o.buffer_write)
+		self.buffer = self.store.events
 	end
 
 	-- Overwrite mode tracking: tracks which steps have been cleared in current loop iteration
@@ -83,19 +92,17 @@ function Buffer:record_buffer(midi_event, event_tick)
 	local record_start = flags.buffer_timing_stats and util.time() or nil
 
 	-- Determine the recording tick
-
 	local recording_tick = self.tick
 
 	-- Wrap tick within the buffer boundaries
 	local tick = self:wrap_tick(recording_tick)
-	-- Initialize buffer table for this tick if needed
-	if not self.buffer[tick] then self.buffer[tick] = {} end
 
 	midi_event.buffer_sent = nil
 	midi_event.tick = recording_tick
 	midi_event.external_tick = App.external_tick
-	-- Store the event (multiple events can exist at same tick)
-	table.insert(self.buffer[tick], midi_event)
+
+	-- Store the event using EventStore (maintains sorted tick index)
+	self.store:insert(tick, midi_event)
 
 	-- Record timing (conditional on flag)
 	if flags.buffer_timing_stats and record_start then
@@ -106,9 +113,7 @@ function Buffer:record_buffer(midi_event, event_tick)
 end
 
 -- Clear buffer events for a single tick (used for overwrite mode)
-function Buffer:clear_buffer_tick(tick)
-	if self.buffer[tick] then self.buffer[tick] = nil end
-end
+function Buffer:clear_buffer_tick(tick) self.store:delete(tick) end
 
 -- Clear buffer events for a tick range
 -- Used for overwrite mode when entering a new step
@@ -119,27 +124,23 @@ function Buffer:clear_buffer_range(start_tick, end_tick)
 
 	-- Handle wrap-around case
 	if start_tick <= end_tick then
-		-- Normal range (no wrap)
-		for tick = start_tick, end_tick do
-			if self.buffer[tick] then self.buffer[tick] = nil end
-		end
+		-- Normal range (no wrap) - delete_range_inclusive handles both inclusive ends
+		self.store:delete_range_inclusive(start_tick, end_tick)
 	else
 		-- Wrap-around case (start > end)
 		-- Clear from start to buffer_end
 		local buffer_end = self.buffer_start + self.buffer_length - 1
-		for tick = start_tick, buffer_end do
-			if self.buffer[tick] then self.buffer[tick] = nil end
-		end
+		self.store:delete_range_inclusive(start_tick, buffer_end)
 		-- Clear from buffer_start to end
-		for tick = self.buffer_start, end_tick do
-			if self.buffer[tick] then self.buffer[tick] = nil end
-		end
+		self.store:delete_range_inclusive(self.buffer_start, end_tick)
 	end
 end
 
 -- Clear entire buffer
 function Buffer:clear_buffer()
-	self.buffer = {}
+	self.store:clear()
+	-- Update buffer reference to new events table
+	self.buffer = self.store.events
 	self:emit('clear_buffer')
 end
 
@@ -184,14 +185,12 @@ function Buffer:transport_event(data)
 
 		-- Always overwrite: when entering a new step, clear that step
 		-- Overdub behavior is achieved through monitor settings (IN = input always flows, including clip playback)
-		-- Use a simple step size (8 ticks) for overwrite clearing
-		local step_size = 8 -- Hardcoded step size for overwrite clearing
-		local step_index = math.floor((next_tick - self.buffer_start) / step_size) + 1
+		local step_size = TimingConstants.DEFAULT_STEP_SIZE
+		local step_index = TimingConstants.tick_to_buffer_step(next_tick, self.buffer_start, step_size)
 
 		-- Clear the step if we haven't cleared it in this loop iteration
 		if not self.overwrite_cleared_steps[step_index] then
-			local step_start = self.buffer_start + (step_index - 1) * step_size
-			local step_end = math.min(step_start + step_size - 1, buffer_end)
+			local step_start, step_end = TimingConstants.buffer_step_to_tick_range(step_index, self.buffer_start, buffer_end, step_size)
 			self:clear_buffer_range(step_start, step_end)
 			self.overwrite_cleared_steps[step_index] = true
 		end
@@ -206,6 +205,62 @@ function Buffer:transport_event(data)
 
 	return data
 end
+
+-- ============================================================================
+-- EVENT STORE ACCESS METHODS
+-- These methods expose the EventStore's efficient range query capabilities
+-- ============================================================================
+
+-- Get events in a tick range (shallow copy)
+-- @param start_tick number Start of range (inclusive)
+-- @param end_tick number End of range (exclusive)
+-- @return table Sparse table of tick -> events
+function Buffer:get_range(start_tick, end_tick) return self.store:get_range(start_tick, end_tick) end
+
+-- Get events in a tick range as sorted array
+-- @param start_tick number Start of range (inclusive)
+-- @param end_tick number End of range (exclusive)
+-- @return table Array of {tick=number, events=table}
+function Buffer:get_range_array(start_tick, end_tick) return self.store:get_range_array(start_tick, end_tick) end
+
+-- Iterate over events in a range (memory efficient - no copy)
+-- @param start_tick number Start of range (inclusive)
+-- @param end_tick number End of range (exclusive)
+-- @return function Iterator returning tick, events
+function Buffer:iter_range(start_tick, end_tick) return self.store:iter_range(start_tick, end_tick) end
+
+-- Get events at a specific tick
+-- @param tick number The tick position
+-- @return table|nil Array of events or nil
+function Buffer:get_events(tick) return self.store:get(tick) end
+
+-- Check if tick has events
+-- @param tick number The tick position
+-- @return boolean True if events exist
+function Buffer:has_events(tick) return self.store:has(tick) end
+
+-- Get count of ticks with events
+-- @return number Count of ticks
+function Buffer:tick_count() return self.store:count() end
+
+-- Get total event count
+-- @return number Total number of events
+function Buffer:event_count() return self.store:event_count() end
+
+-- Get first tick with events
+-- @return number|nil First tick or nil
+function Buffer:first_tick() return self.store:first_tick() end
+
+-- Get last tick with events
+-- @return number|nil Last tick or nil
+function Buffer:last_tick() return self.store:last_tick() end
+
+-- Copy events from a range (for clip saving, scrub buffer, etc.)
+-- @param start_tick number Start of range (inclusive)
+-- @param end_tick number End of range (exclusive)
+-- @param tick_offset number Optional offset to apply to ticks (default 0)
+-- @return EventStore New EventStore with copied events
+function Buffer:copy_range(start_tick, end_tick, tick_offset) return self.store:copy_range(start_tick, end_tick, tick_offset) end
 
 -- Add diagnostic function to print stats
 function Buffer:print_timing()

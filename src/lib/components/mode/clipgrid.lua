@@ -3,6 +3,7 @@ local ModeComponent = require('Foobar/lib/components/mode/modecomponent')
 local Grid = require(path_name .. 'grid')
 local SequenceUtils = require(path_name .. 'utilities/sequence_utils')
 local Registry = require(path_name .. 'utilities/registry')
+local flags = require(path_name .. 'utilities/flags')
 
 local ClipGrid = ModeComponent:new()
 
@@ -88,7 +89,9 @@ function ClipGrid:enable_event()
 
 					if elapsed >= self.max_recording_length then
 						-- Max recording length reached: stop and save
-						print('ClipGrid: Max recording length reached for slot ' .. self.recording_slot .. ' (elapsed: ' .. elapsed .. ' ticks)')
+						if flags.debug_clip then
+							print('ClipGrid: Max recording length reached for slot ' .. self.recording_slot .. ' (elapsed: ' .. elapsed .. ' ticks)')
+						end
 						self:stop_recording_and_save(clip, self.recording_slot)
 					end
 				end
@@ -159,28 +162,30 @@ function ClipGrid:queue_recording_start(clip, bank_slot)
 
 	-- Cancel any pending recording
 	if self.recording_pending then
-		clip.sync_action_queue:clear_action()
+		clip.sync_manager:clear('clipgrid_recording')
 		self.recording_pending = nil
 	end
 
 	-- Get sync length from track parameter (respects user's action_sync setting)
 	-- For clip recording, we use the track's action_sync_length parameter for quantization
 	local sync_length = SequenceUtils.get_sync_length(clip.buffer, clip.action_sync_length)
-	local current_tick = App.tick or 1
-	-- Use sync_length as the boundary for clip recording quantization
-	local next_sync_tick = SequenceUtils.get_next_sync_tick(sync_length, current_tick)
-	local boundary = sync_length -- Use sync_length directly for clip recording
 
-	print('ClipGrid: Queue recording start for slot ' .. bank_slot)
-	print('  Current App.tick: ' .. current_tick .. ', buffer.tick: ' .. clip.buffer.tick)
-	print('  Sync length: ' .. sync_length .. ', boundary: ' .. boundary)
-	print('  Next sync tick: ' .. next_sync_tick .. ' (in ' .. (next_sync_tick - current_tick) .. ' ticks)')
+	if flags.debug_clip then
+		local current_tick = App.tick or 1
+		local next_sync_tick = SequenceUtils.get_next_sync_tick(sync_length, current_tick)
+		print('ClipGrid: Queue recording start for slot ' .. bank_slot)
+		print('  Current App.tick: ' .. current_tick .. ', buffer.tick: ' .. clip.buffer.tick)
+		print('  Sync length: ' .. sync_length)
+		print('  Next sync tick: ' .. next_sync_tick .. ' (in ' .. (next_sync_tick - current_tick) .. ' ticks)')
+	end
 
 	-- Create action to start recording
 	local action_fn = function(component, action_data)
-		local exec_tick = App.tick or 1
-		print('ClipGrid: Executing recording start for slot ' .. action_data.bank_slot)
-		print('  Execution App.tick: ' .. exec_tick .. ', buffer.tick: ' .. component.buffer.tick)
+		if flags.debug_clip then
+			local exec_tick = App.tick or 1
+			print('ClipGrid: Executing recording start for slot ' .. action_data.bank_slot)
+			print('  Execution App.tick: ' .. exec_tick .. ', buffer.tick: ' .. component.buffer.tick)
+		end
 		self:start_recording(component, action_data.bank_slot)
 	end
 
@@ -188,15 +193,9 @@ function ClipGrid:queue_recording_start(clip, bank_slot)
 		bank_slot = bank_slot,
 	}
 
-	-- Create a temporary sync action queue with the correct sync_length for clip recording
-	-- The clip's sync_action_queue uses action_sync_length from track parameter
-	local function get_sync_length_fn(component) return sync_length end
-	local temp_queue = SequenceUtils.create_sync_action_queue(clip, get_sync_length_fn)
-	temp_queue:queue_action(action_fn, action_data)
+	-- Queue in the 'clipgrid_recording' slot using SyncManager
+	clip.sync_manager:queue('clipgrid_recording', action_fn, action_data, sync_length)
 	self.recording_pending = { bank_slot = bank_slot }
-
-	-- Store the temp queue so it can execute
-	clip._clipgrid_sync_queue = temp_queue
 end
 
 -- Start recording to a bank slot
@@ -209,19 +208,21 @@ function ClipGrid:start_recording(clip, bank_slot)
 	local app_tick = App.tick or 1
 	local recording_start_tick = app_tick
 
-	-- Verify sync alignment (use track's action_sync_length parameter)
-	local sync_length = SequenceUtils.get_sync_length(clip.buffer, clip.action_sync_length)
-	local boundary = sync_length -- Use sync_length directly for clip recording
-	local relative_tick = recording_start_tick - 1
-	local is_aligned = (relative_tick % boundary == 0)
+	if flags.debug_clip then
+		-- Verify sync alignment (use track's action_sync_length parameter)
+		local sync_length = SequenceUtils.get_sync_length(clip.buffer, clip.action_sync_length)
+		local boundary = sync_length
+		local relative_tick = recording_start_tick - 1
+		local is_aligned = (relative_tick % boundary == 0)
 
-	print('ClipGrid: Start recording slot ' .. bank_slot)
-	print('  App.tick: ' .. app_tick .. ', buffer.tick: ' .. clip.buffer.tick)
-	print('  Using recording_start_tick: ' .. recording_start_tick .. ' (from App.tick)')
-	print('  Boundary: ' .. boundary .. ', aligned: ' .. tostring(is_aligned))
-	if not is_aligned then
-		print('  WARNING: App.tick not aligned to sync boundary!')
-		print('  Relative tick: ' .. relative_tick .. ', remainder: ' .. (relative_tick % boundary))
+		print('ClipGrid: Start recording slot ' .. bank_slot)
+		print('  App.tick: ' .. app_tick .. ', buffer.tick: ' .. clip.buffer.tick)
+		print('  Using recording_start_tick: ' .. recording_start_tick .. ' (from App.tick)')
+		print('  Boundary: ' .. boundary .. ', aligned: ' .. tostring(is_aligned))
+		if not is_aligned then
+			print('  WARNING: App.tick not aligned to sync boundary!')
+			print('  Relative tick: ' .. relative_tick .. ', remainder: ' .. (relative_tick % boundary))
+		end
 	end
 
 	-- Align buffer.tick to the sync-aligned App.tick
@@ -232,11 +233,6 @@ function ClipGrid:start_recording(clip, bank_slot)
 	-- This prevents doubling: the clip would play while new input is being recorded
 	-- If user wants overdub, they should record to the same slot that's already playing
 	if clip.current_slot then clip:unload_clip() end
-
-	-- Set loop boundaries for recording
-	-- Start at sync-aligned tick, end at max recording length
-	-- This ensures recording stays within bounds and can be saved correctly
-	local loop_end = recording_start_tick + self.max_recording_length - 1
 
 	-- Store recording state
 	self.recording_slot = bank_slot
@@ -253,24 +249,25 @@ function ClipGrid:queue_recording_stop(clip, bank_slot)
 	if self.recording_slot ~= bank_slot then return end
 
 	-- Get sync length from track parameter (respects user's action_sync setting)
-	-- For clip recording, we use the track's action_sync_length parameter for quantization
 	local sync_length = SequenceUtils.get_sync_length(clip.buffer, clip.action_sync_length)
-	local current_tick = App.tick or 1
-	-- Use sync_length as the boundary for clip recording quantization
-	local next_sync_tick = SequenceUtils.get_next_sync_tick(sync_length, current_tick)
-	local boundary = sync_length -- Use sync_length directly for clip recording
 
-	print('ClipGrid: Queue recording stop for slot ' .. bank_slot)
-	print('  Current App.tick: ' .. current_tick .. ', buffer.tick: ' .. clip.buffer.tick)
-	print('  Recording started at tick: ' .. (self.recording_start_tick or 'unknown'))
-	print('  Sync length: ' .. sync_length .. ', boundary: ' .. boundary)
-	print('  Next sync tick: ' .. next_sync_tick .. ' (in ' .. (next_sync_tick - current_tick) .. ' ticks)')
+	if flags.debug_clip then
+		local current_tick = App.tick or 1
+		local next_sync_tick = SequenceUtils.get_next_sync_tick(sync_length, current_tick)
+		print('ClipGrid: Queue recording stop for slot ' .. bank_slot)
+		print('  Current App.tick: ' .. current_tick .. ', buffer.tick: ' .. clip.buffer.tick)
+		print('  Recording started at tick: ' .. (self.recording_start_tick or 'unknown'))
+		print('  Sync length: ' .. sync_length)
+		print('  Next sync tick: ' .. next_sync_tick .. ' (in ' .. (next_sync_tick - current_tick) .. ' ticks)')
+	end
 
 	-- Create action to stop recording and save
 	local action_fn = function(component, action_data)
-		local exec_tick = App.tick or 1
-		print('ClipGrid: Executing recording stop for slot ' .. action_data.bank_slot)
-		print('  Execution App.tick: ' .. exec_tick .. ', buffer.tick: ' .. component.buffer.tick)
+		if flags.debug_clip then
+			local exec_tick = App.tick or 1
+			print('ClipGrid: Executing recording stop for slot ' .. action_data.bank_slot)
+			print('  Execution App.tick: ' .. exec_tick .. ', buffer.tick: ' .. component.buffer.tick)
+		end
 		self:stop_recording_and_save(component, action_data.bank_slot)
 	end
 
@@ -278,8 +275,8 @@ function ClipGrid:queue_recording_stop(clip, bank_slot)
 		bank_slot = bank_slot,
 	}
 
-	-- Queue the action
-	clip.sync_action_queue:queue_action(action_fn, action_data)
+	-- Queue in the 'clipgrid_recording_stop' slot using SyncManager
+	clip.sync_manager:queue('clipgrid_recording_stop', action_fn, action_data, sync_length)
 end
 
 -- Stop recording and save clip to bank slot
@@ -292,88 +289,58 @@ function ClipGrid:stop_recording_and_save(clip, bank_slot)
 	if not recording_start_tick then return end
 
 	-- Use buffer.tick to get the last tick that was actually recorded
-	-- buffer.tick increments AFTER recording each clock tick, so the last recorded tick is buffer.tick - 1
-	-- We need to use buffer.tick (not App.tick) to ensure we capture all recorded data
 	local buffer_tick = clip.buffer.tick
 	local last_recorded_tick = buffer_tick - 1
-
-	-- Always use last_recorded_tick as the base (not App.tick)
-	-- App.tick points to the next tick to be processed, not the last recorded tick
-	-- Using last_recorded_tick ensures we match the behavior of menu/frozen_buffer saves
-	-- The sync alignment logic below will handle rounding down if needed
 	local loop_end = last_recorded_tick
 
-	-- Get sync length for alignment verification and later sync adjustment
+	-- Get sync length for alignment
 	local sync_length = SequenceUtils.get_sync_length(clip.buffer, clip.action_sync_length)
-	local boundary = sync_length -- Use sync_length directly for clip recording
 
-	-- Verify sync alignment
-	local is_aligned = (last_recorded_tick % boundary == 0)
-
-	print('ClipGrid: Stop recording slot ' .. bank_slot)
-	print('  Last recorded tick: ' .. last_recorded_tick .. ' (buffer.tick - 1)')
-	print('  Using loop_end: ' .. loop_end .. ' (sync-aligned from last recorded)')
-	print('  Recording started at: ' .. recording_start_tick)
-	print('  Boundary: ' .. boundary .. ', aligned: ' .. tostring(is_aligned))
-	if not is_aligned then print('  WARNING: loop_end not aligned to sync boundary!') end
+	if flags.debug_clip then
+		local is_aligned = (last_recorded_tick % sync_length == 0)
+		print('ClipGrid: Stop recording slot ' .. bank_slot)
+		print('  Last recorded tick: ' .. last_recorded_tick .. ' (buffer.tick - 1)')
+		print('  Recording started at: ' .. recording_start_tick)
+		print('  Sync length: ' .. sync_length .. ', aligned: ' .. tostring(is_aligned))
+	end
 
 	-- Clamp to max recording length
 	local max_end_tick = recording_start_tick + self.max_recording_length - 1
 	loop_end = math.min(loop_end, max_end_tick)
 
-	-- Ensure we have at least 1 tick of data (minimum clip length)
+	-- Ensure we have at least 1 tick of data
 	if loop_end < recording_start_tick then loop_end = recording_start_tick end
 
-	-- Ensure loop_end doesn't exceed buffer's current loop end (set during recording start)
+	-- Ensure loop_end doesn't exceed buffer's current loop end
 	local buffer_loop_end = clip.buffer.buffer_start + clip.buffer.buffer_length - 1
 	loop_end = math.min(loop_end, buffer_loop_end)
 
-	-- Ensure loop_end creates a clip length that is a multiple of sync_length
-	-- This prevents drift by ensuring the clip loops perfectly
-	local sync_length = SequenceUtils.get_sync_length(clip.buffer, clip.action_sync_length)
+	-- Ensure clip length is a multiple of sync_length to prevent drift
 	local raw_length = loop_end - recording_start_tick + 1
 	local sync_units = math.floor(raw_length / sync_length)
 	local remainder = raw_length % sync_length
 
-	-- If there's a remainder, adjust loop_end to make the length a perfect multiple
 	if remainder ~= 0 then
-		-- Round down to the previous sync boundary to ensure perfect alignment
-		-- This might cut off a few ticks, but prevents drift
 		loop_end = recording_start_tick + (sync_units * sync_length) - 1
-		print('ClipGrid: Adjusted loop_end from ' .. (recording_start_tick + raw_length - 1) .. ' to ' .. loop_end .. ' to ensure sync alignment')
+		if flags.debug_clip then
+			print('ClipGrid: Adjusted loop_end to ' .. loop_end .. ' for sync alignment')
+		end
 	end
-	print('STOP AND SAVE--------------------------------')
 
 	-- Save clip to bank
 	local clip_name = string.format('Clip %03d', bank_slot)
 	local success = clip:save_clip_to_bank(bank_slot, recording_start_tick, loop_end, clip_name)
 
 	if success then
-		local clip_length = loop_end - recording_start_tick + 1
-		local expected_bars = clip_length / (App.ppqn * 4) -- 1 bar = 4 beats * App.ppqn ticks
-		local final_sync_units = clip_length / sync_length
-		local final_remainder = clip_length % sync_length
-
-		print('ClipGrid: Saved clip to slot ' .. bank_slot)
-		print('  Tick range: ' .. recording_start_tick .. ' to ' .. loop_end .. ' (inclusive)')
-		print('  Clip length: ' .. clip_length .. ' ticks')
-		print('  Sync length: ' .. sync_length .. ' ticks (action_sync setting)')
-		print('  Expected bars: ' .. string.format('%.2f', expected_bars) .. ' bars')
-		print('  Sync units: ' .. string.format('%.2f', final_sync_units) .. ' units')
-		print('  Remainder: ' .. final_remainder .. ' ticks (should be 0 for perfect sync alignment)')
-		if final_remainder ~= 0 then
-			print('  WARNING: Clip length is NOT a multiple of sync_length! This will cause drift.')
-		else
-			print('  ✓ Clip length is perfectly aligned to sync boundaries')
+		if flags.debug_clip then
+			local clip_length = loop_end - recording_start_tick + 1
+			print('ClipGrid: Saved clip to slot ' .. bank_slot .. ' (' .. clip_length .. ' ticks)')
 		end
 
 		-- Auto-load and play the clip that was just saved
-		-- This ensures playback starts immediately after recording
 		if App.playing then
-			-- Queue playback on next sync tick (or start immediately if already on sync boundary)
 			self:queue_clip_playback(clip, bank_slot)
 		else
-			-- Transport not playing: just load the clip (will play when transport starts)
 			clip:load_clip_from_bank(bank_slot)
 		end
 
@@ -392,29 +359,24 @@ end
 function ClipGrid:queue_clip_playback(clip, bank_slot)
 	if not clip or not clip.clip_bank[bank_slot] then return end
 
-	-- If same clip is already playing, don't queue playback (should use queue_clip_stop instead)
-	if clip.current_slot == bank_slot then
-		-- Already playing this clip: no action needed (caller should use queue_clip_stop)
-		return
-	end
+	-- If same clip is already playing, don't queue playback
+	if clip.current_slot == bank_slot then return end
 
-	-- Get sync length from track parameter (respects user's action_sync setting)
-	-- For clip playback, we use the track's action_sync_length parameter for quantization
+	-- Get sync length from track parameter
 	local sync_length = SequenceUtils.get_sync_length(clip.buffer, clip.action_sync_length)
-	local current_tick = App.tick or 1
-	-- Use sync_length as the boundary for clip playback quantization
-	local next_sync_tick = SequenceUtils.get_next_sync_tick(sync_length, current_tick)
-	local boundary = sync_length -- Use sync_length directly for clip playback
 
-	print('ClipGrid: Queue clip playback for slot ' .. bank_slot)
-	print('  Current App.tick: ' .. current_tick .. ', buffer.tick: ' .. clip.buffer.tick)
-	print('  Sync length: ' .. sync_length .. ', boundary: ' .. boundary)
-	print('  Next sync tick: ' .. next_sync_tick .. ' (in ' .. (next_sync_tick - current_tick) .. ' ticks)')
+	if flags.debug_clip then
+		local current_tick = App.tick or 1
+		local next_sync_tick = SequenceUtils.get_next_sync_tick(sync_length, current_tick)
+		print('ClipGrid: Queue clip playback for slot ' .. bank_slot)
+		print('  Current App.tick: ' .. current_tick .. ', sync tick: ' .. next_sync_tick)
+	end
 
 	-- Create action to load and play clip
 	local action_fn = function(component, action_data)
-		local exec_tick = App.tick or 1
-		print('ClipGrid: Executing clip playback for slot ' .. action_data.bank_slot .. ' at App.tick: ' .. exec_tick)
+		if flags.debug_clip then
+			print('ClipGrid: Executing clip playback for slot ' .. action_data.bank_slot .. ' at App.tick: ' .. (App.tick or 1))
+		end
 		component:load_clip_from_bank(action_data.bank_slot)
 	end
 
@@ -422,36 +384,31 @@ function ClipGrid:queue_clip_playback(clip, bank_slot)
 		bank_slot = bank_slot,
 	}
 
-	-- Create a temporary sync action queue with the correct sync_length for clip playback
-	-- The clip's sync_action_queue uses action_sync_length from track parameter
-	local function get_sync_length_fn(component) return sync_length end
-	local temp_queue = SequenceUtils.create_sync_action_queue(clip, get_sync_length_fn)
-	temp_queue:queue_action(action_fn, action_data)
-
-	-- Store the temp queue so it can execute
-	clip._clipgrid_sync_queue = temp_queue
+	-- Queue in the 'clipgrid_playback' slot using SyncManager
+	clip.sync_manager:queue('clipgrid_playback', action_fn, action_data, sync_length)
 end
 
 -- Queue clip stop on next sync tick
 function ClipGrid:queue_clip_stop(clip, bank_slot)
 	if not clip or clip.current_slot ~= bank_slot then return end
 
-	-- Get sync length from track parameter (respects user's action_sync setting)
+	-- Get sync length from track parameter
 	local sync_length = SequenceUtils.get_sync_length(clip.buffer, clip.action_sync_length)
-	local current_tick = App.tick or 1
-	local next_sync_tick = SequenceUtils.get_next_sync_tick(sync_length, current_tick)
 
-	print('ClipGrid: Queue clip stop for slot ' .. bank_slot)
-	print('  Current App.tick: ' .. current_tick .. ', buffer.tick: ' .. clip.buffer.tick)
-	print('  Sync length: ' .. sync_length)
-	print('  Next sync tick: ' .. next_sync_tick .. ' (in ' .. (next_sync_tick - current_tick) .. ' ticks)')
+	if flags.debug_clip then
+		local current_tick = App.tick or 1
+		local next_sync_tick = SequenceUtils.get_next_sync_tick(sync_length, current_tick)
+		print('ClipGrid: Queue clip stop for slot ' .. bank_slot)
+		print('  Current App.tick: ' .. current_tick .. ', sync tick: ' .. next_sync_tick)
+	end
 
 	-- Create action to unload clip (stops playback)
 	local action_fn = function(component, action_data)
-		local exec_tick = App.tick or 1
-		print('ClipGrid: Executing clip stop for slot ' .. action_data.bank_slot .. ' at App.tick: ' .. exec_tick)
+		if flags.debug_clip then
+			print('ClipGrid: Executing clip stop for slot ' .. action_data.bank_slot .. ' at App.tick: ' .. (App.tick or 1))
+		end
 		component:unload_clip()
-		-- Emit event so grid can update
+		-- Update grid display
 		if self.set_grid then self:set_grid(component) end
 	end
 
@@ -459,13 +416,8 @@ function ClipGrid:queue_clip_stop(clip, bank_slot)
 		bank_slot = bank_slot,
 	}
 
-	-- Create a temporary sync action queue with the correct sync_length for clip stop
-	local function get_sync_length_fn(component) return sync_length end
-	local temp_queue = SequenceUtils.create_sync_action_queue(clip, get_sync_length_fn)
-	temp_queue:queue_action(action_fn, action_data)
-
-	-- Store the temp queue so it can execute
-	clip._clipgrid_sync_queue = temp_queue
+	-- Queue in the 'clipgrid_stop' slot using SyncManager
+	clip.sync_manager:queue('clipgrid_stop', action_fn, action_data, sync_length)
 end
 
 function ClipGrid:transport_event(clip, data)

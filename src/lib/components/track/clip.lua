@@ -5,6 +5,8 @@ local Registry = require(path_name .. 'utilities/registry')
 local flags = require(path_name .. 'utilities/flags')
 local Persistence = require(path_name .. 'utilities/persistence')
 local SequenceUtils = require(path_name .. 'utilities/sequence_utils')
+local TimingConstants = require(path_name .. 'utilities/timing_constants')
+local SyncManager = require(path_name .. 'utilities/sync_manager')
 
 -- Clip component handles playback of MIDI events from buffer
 -- Separated from Buffer component for clear separation of concerns:
@@ -40,7 +42,6 @@ function Clip:set(o)
 	self.playback_start = nil -- Playback loop start (independent of buffer.buffer_start)
 	self.playback_length = nil -- Playback loop length
 	self.last_frozen_step_index = nil -- Track step transitions for incremental updates
-	local step_size = 8 -- Hardcoded step size for incremental updates
 
 	-- Scrub playback state
 	self.scrub_mode = false
@@ -54,10 +55,11 @@ function Clip:set(o)
 	-- Action sync settings (will be read from buffer after buffer is loaded)
 	self.action_sync_length = nil
 
-	-- Sync action queue for scrub actions (uses scrub_length, not action_sync)
-	-- Scrub sync queue is created dynamically when scrub is queued (based on scrub range length)
-	self.scrub_sync_queue = nil -- Created dynamically in queue_scrub_action
-	self.sync_action_queue = SequenceUtils.create_sync_action_queue(self, function(component) return SequenceUtils.get_sync_length(component.buffer, component.action_sync_length) end)
+	-- Unified sync manager replaces multiple sync queues
+	-- Provides named slots: 'scrub', 'clip', 'general', etc.
+	self.sync_manager = SyncManager.new(self, function(component)
+		return SequenceUtils.get_sync_length(component.buffer, component.action_sync_length)
+	end)
 
 	-- Clip bank management
 	self.clip_bank = {} -- 16 slots: {[1-16] = nil or {filename, name, buffer, playback_settings}}
@@ -156,22 +158,13 @@ function Clip:queue_scrub_action(start_tick, end_tick, loop_mode, pad_check_fn)
 	-- Calculate scrub length for sync quantization
 	local scrub_length = end_tick - start_tick + 1
 
-	-- Create scrub-specific sync queue if it doesn't exist or scrub length changed
-	-- This queue uses scrub_length as the sync boundary (not action_sync_length)
-	if not self.scrub_sync_queue or self.scrub_sync_queue.scrub_length ~= scrub_length then
-		local function get_scrub_sync_length_fn(component)
-			-- Return the scrub_length for this specific scrub range
-			return component.scrub_sync_queue.scrub_length
-		end
-		self.scrub_sync_queue = SequenceUtils.create_sync_action_queue(self, get_scrub_sync_length_fn)
-		self.scrub_sync_queue.scrub_length = scrub_length -- Store scrub_length in queue for sync calculation
-	end
-
 	local action_fn = function(component, action_data)
 		-- Check if pad is still held before executing
 		if action_data.pad_check_fn and action_data.pad_check_fn() then
 			component:start_scrub(action_data.start_tick, action_data.end_tick, action_data.loop_mode)
-			print('Scrub started (synced to ' .. scrub_length .. ' ticks): ' .. action_data.start_tick .. '-' .. action_data.end_tick)
+			if flags.debug_scrub then
+				print('Scrub started (synced to ' .. action_data.scrub_length .. ' ticks): ' .. action_data.start_tick .. '-' .. action_data.end_tick)
+			end
 			-- Emit event so bufferseq can update its state
 			component:emit('scrub_started', {
 				start_tick = action_data.start_tick,
@@ -180,7 +173,9 @@ function Clip:queue_scrub_action(start_tick, end_tick, loop_mode, pad_check_fn)
 		else
 			component:stop_scrub()
 			-- Pad was released, cancel the action
-			print('Scrub cancelled: pad no longer held')
+			if flags.debug_scrub then
+				print('Scrub cancelled: pad no longer held')
+			end
 			component:emit('scrub_stopped', {
 				start_tick = action_data.start_tick,
 				end_tick = action_data.end_tick,
@@ -193,27 +188,26 @@ function Clip:queue_scrub_action(start_tick, end_tick, loop_mode, pad_check_fn)
 		end_tick = end_tick,
 		loop_mode = loop_mode,
 		pad_check_fn = pad_check_fn,
+		scrub_length = scrub_length,
 	}
 
-	self.scrub_sync_queue:queue_action(action_fn, action_data)
+	-- Queue in the 'scrub' slot with scrub_length as sync boundary
+	self.sync_manager:queue('scrub', action_fn, action_data, scrub_length)
 end
 
 -- Clear pending scrub action (called when pad is released)
-function Clip:clear_pending_scrub()
-	if self.scrub_sync_queue then self.scrub_sync_queue:clear_action() end
-end
+function Clip:clear_pending_scrub() self.sync_manager:clear('scrub') end
 
 -- Incrementally update frozen_buffer by copying one step from buffer
 -- Called on step transitions to maintain frozen snapshot efficiently
 function Clip:update_frozen_step(step_index)
 	if not self.buffer or not self.playback_start or not self.playback_length then return end
 
-	local step_size = 8 -- Hardcoded step size for incremental updates
-	local step_start = self.playback_start + (step_index - 1) * step_size
-	local step_end = math.min(step_start + step_size - 1, self.playback_start + self.playback_length - 1)
+	local step_size = TimingConstants.DEFAULT_STEP_SIZE
+	local loop_end = self.playback_start + self.playback_length - 1
+	local step_start, step_end = TimingConstants.buffer_step_to_tick_range(step_index, self.playback_start, loop_end, step_size)
 
 	-- Clamp to playback loop boundaries
-	local loop_end = self.playback_start + self.playback_length - 1
 	step_start = math.max(step_start, self.playback_start)
 	step_end = math.min(step_end, loop_end)
 
@@ -251,7 +245,9 @@ function Clip:freeze_buffer()
 
 	self.buffer_frozen = true
 	self.frozen_tick = self.buffer.tick
-	print('Clip: Buffer frozen at playback range ' .. self.playback_start .. '-' .. loop_end)
+	if flags.debug_clip then
+		print('Clip: Buffer frozen at playback range ' .. self.playback_start .. '-' .. loop_end)
+	end
 
 	-- Kill notes when freezing buffer to prevent stuck notes from previous playback
 	if App.playing then self:kill_notes() end
@@ -262,6 +258,7 @@ end
 
 -- Unfreeze the buffer (resume updating frozen_buffer incrementally)
 function Clip:unfreeze_buffer()
+	local was_frozen = self.buffer_frozen
 	self.buffer_frozen = false
 	self.frozen_tick = nil
 	-- Clear frozen buffer and reset playback loop boundaries
@@ -270,7 +267,6 @@ function Clip:unfreeze_buffer()
 	self.playback_length = nil
 	-- Reset step tracking to resume incremental updates
 	self.last_frozen_step_index = nil
-	print('Clip: Buffer unfrozen, resuming live playback')
 
 	-- Kill notes when unfreezing buffer to prevent stuck notes from frozen playback
 	if was_frozen and App.playing then self:kill_notes() end
@@ -304,11 +300,13 @@ function Clip:set_playback_loop(start_tick, length)
 	end
 
 	self.last_frozen_step_index = nil
-	print('Clip: Playback loop set to ' .. start_tick .. '-' .. new_end)
+	if flags.debug_clip then
+		print('Clip: Playback loop set to ' .. start_tick .. '-' .. new_end)
+	end
 end
 
 -- Execute pending sync actions (should be called on each clock tick)
-function Clip:execute_sync_actions() self.sync_action_queue:execute_actions() end
+function Clip:execute_sync_actions() self.sync_manager:execute_all() end
 
 -- Transport Event Handling
 function Clip:transport_event(data)
@@ -355,19 +353,8 @@ function Clip:transport_event(data)
 		self.track:update_monitor_state()
 	elseif data.type == 'clock' and App.playing then
 		-- Execute any pending sync actions that have reached their boundary
+		-- SyncManager handles all sync slots: scrub, clip, general, etc.
 		self:execute_sync_actions()
-		-- Also execute ClipGrid's custom sync queue if it exists
-		if self._clipgrid_sync_queue then
-			self._clipgrid_sync_queue:execute_actions()
-			-- Clear the queue if it has no pending actions
-			if not self._clipgrid_sync_queue.pending_action then self._clipgrid_sync_queue = nil end
-		end
-		-- Execute scrub sync queue if it exists (uses scrub_length for sync quantization)
-		if self.scrub_sync_queue then
-			self.scrub_sync_queue:execute_actions()
-			-- Clear the queue if scrub is no longer active and no pending actions
-			if not self.scrub_mode and not self.scrub_sync_queue.pending_action then self.scrub_sync_queue = nil end
-		end
 
 		-- Ensure tick is within loop bounds (safety check for normal playback)
 		-- This handles cases where loop points changed during playback or tick got out of sync
@@ -468,8 +455,8 @@ function Clip:transport_event(data)
 		else
 			-- Incrementally update frozen_buffer if not frozen (for live buffer playback)
 			if not self.scrub_mode and not self.buffer_frozen and self.buffer and self.playback_start and self.playback_length then
-				local step_size = 8 -- Hardcoded step size for incremental updates
-				local current_step_index = math.floor((self.buffer.tick - self.playback_start) / step_size) + 1
+				local step_size = TimingConstants.DEFAULT_STEP_SIZE
+				local current_step_index = TimingConstants.tick_to_buffer_step(self.buffer.tick, self.playback_start, step_size)
 				if self.last_frozen_step_index and current_step_index ~= self.last_frozen_step_index then self:update_frozen_step(self.last_frozen_step_index) end
 				self.last_frozen_step_index = current_step_index
 			end
@@ -629,11 +616,8 @@ function Clip:stop_scrub()
 	self.scrub_length = nil
 	self.scrub_tick = nil
 
-	-- Clear scrub sync queue when scrub stops
-	if self.scrub_sync_queue then
-		self.scrub_sync_queue:clear_action()
-		self.scrub_sync_queue = nil
-	end
+	-- Clear any pending scrub action
+	self.sync_manager:clear('scrub')
 
 	-- Restore input monitoring
 	self.track:update_monitor_state()

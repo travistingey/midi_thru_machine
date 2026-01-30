@@ -3,6 +3,7 @@ local ModeComponent = require(path_name .. 'components/mode/modecomponent')
 local Grid = require(path_name .. 'grid')
 local UI = require(path_name .. 'ui')
 local Registry = require('Foobar/lib/utilities/registry')
+local flags = require(path_name .. 'utilities/flags')
 
 local BufferSeq = ModeComponent:new()
 BufferSeq.__base = ModeComponent
@@ -302,13 +303,17 @@ function BufferSeq:recalculate_scrub_from_held_pads()
 			self.scrub_start_tick = start_tick
 			self.scrub_end_tick = end_tick
 			if clip then clip:update_scrub(start_tick, end_tick) end
-			print('Scrub recalculated: ' .. start_tick .. '-' .. end_tick)
+			if flags.debug_scrub then
+				print('Scrub recalculated: ' .. start_tick .. '-' .. end_tick)
+			end
 		else
 			-- Queue new scrub action (this will replace any existing pending scrub)
 			if clip then
 				clip:queue_scrub_action(start_tick, end_tick, App.buffer_scrub_mode == 'loop', pad_check_fn)
-				local next_sync_tick = clip:get_next_sync_tick()
-				print('Scrub queued for sync at tick: ' .. next_sync_tick)
+				if flags.debug_scrub then
+					local next_sync_tick = clip:get_next_sync_tick()
+					print('Scrub queued for sync at tick: ' .. next_sync_tick)
+				end
 			end
 		end
 		return
@@ -320,7 +325,9 @@ function BufferSeq:recalculate_scrub_from_held_pads()
 		self.scrub_start_tick = start_tick
 		self.scrub_end_tick = end_tick
 		if clip then clip:update_scrub(start_tick, end_tick) end
-		print('Scrub recalculated: ' .. start_tick .. '-' .. end_tick)
+		if flags.debug_scrub then
+			print('Scrub recalculated: ' .. start_tick .. '-' .. end_tick)
+		end
 	else
 		-- Start new scrub with full range (min to max)
 		-- Save loop boundaries
@@ -334,7 +341,9 @@ function BufferSeq:recalculate_scrub_from_held_pads()
 		-- Start scrub playback
 		if clip then clip:start_scrub(start_tick, end_tick, App.buffer_scrub_mode == 'loop') end
 
-		print('Scrub started: ' .. start_tick .. '-' .. end_tick .. ' (' .. App.buffer_scrub_mode .. ')')
+		if flags.debug_scrub then
+			print('Scrub started: ' .. start_tick .. '-' .. end_tick .. ' (' .. App.buffer_scrub_mode .. ')')
+		end
 	end
 end
 
@@ -347,10 +356,14 @@ function BufferSeq:jump_to_tick(tick)
 	-- If in scrub mode, set scrub_tick; otherwise set clip.tick
 	if clip and clip.scrub_mode then
 		clip.scrub_tick = tick
-		print('Scrub playback jumped to tick: ' .. tick)
+		if flags.debug_scrub then
+			print('Scrub playback jumped to tick: ' .. tick)
+		end
 	elseif clip then
 		clip.tick = tick
-		print('Clip playback jumped to tick: ' .. tick)
+		if flags.debug_clip then
+			print('Clip playback jumped to tick: ' .. tick)
+		end
 	end
 end
 
@@ -366,7 +379,9 @@ function BufferSeq:resync_with_app()
 		-- Convert App.tick to position within loop: (App.tick % buffer_length) + buffer_start
 		clip.tick = ((App.tick - buffer.buffer_start) % buffer.buffer_length) + buffer.buffer_start
 
-		print('Clip playback resynced with app tick: ' .. App.tick .. ' -> clip.tick: ' .. clip.tick)
+		if flags.debug_clip then
+			print('Clip playback resynced with app tick: ' .. App.tick .. ' -> clip.tick: ' .. clip.tick)
+		end
 	end
 end
 
@@ -387,7 +402,9 @@ function BufferSeq:stop_scrub()
 	self.scrub_end_tick = nil
 	self.scrub_saved_buffer_start = nil
 
-	print('Scrub stopped')
+	if flags.debug_scrub then
+		print('Scrub stopped')
+	end
 end
 
 function BufferSeq:grid_event(component, data)
@@ -436,7 +453,9 @@ function BufferSeq:grid_event(component, data)
 		-- Set playback loop and freeze immediately
 		clip:set_playback_loop(loop_start, loop_length)
 		clip:freeze_buffer()
-		print('Loop frozen: ' .. loop_start .. '-' .. loop_end)
+		if flags.debug_clip then
+			print('Loop frozen: ' .. loop_start .. '-' .. loop_end)
+		end
 	end
 
 	-- Handle pad press (start/update scrub)
@@ -897,7 +916,9 @@ function BufferSeq:alt_event(data)
 			-- Freeze immediately
 			clip:set_playback_loop(loop_start, loop_length)
 			clip:freeze_buffer()
-			print('Scrub frozen to loop: ' .. loop_start .. '-' .. self.scrub_end_tick)
+			if flags.debug_scrub then
+				print('Scrub frozen to loop: ' .. loop_start .. '-' .. self.scrub_end_tick)
+			end
 
 			-- Stop scrub mode (playback now comes from frozen_buffer)
 			self:stop_scrub()
