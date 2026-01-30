@@ -50,7 +50,6 @@ function BufferSeq:set(o)
 	self.scrub_saved_step = nil
 	self.scrub_saved_buffer_start = nil
 	self.held_pads = {} -- Track currently held pads for multi-pad selection
-	self.pending_scrub_pads = {} -- Track which pads are pending for scrub
 
 	-- Grid refresh optimization: track last rendered step to avoid refreshing every tick
 	self.last_rendered_step = nil
@@ -117,24 +116,6 @@ function BufferSeq:enable_event()
 			end)
 		)
 	end
-
-	-- Listen for track armed state changes to update row pads
-	-- Set up listeners for all tracks
-	local function setup_armed_listeners()
-		for track_id = 1, 8 do
-			local track = App.track[track_id]
-			if track then
-				table.insert(
-					self.cleanup_functions,
-					track:on('armed', function(armed)
-						-- Update row pads when any track's armed status changes
-						if self.mode and self.mode.enabled then self:update_row_pads() end
-					end)
-				)
-			end
-		end
-	end
-	setup_armed_listeners()
 
 	-- Initialize display calculations now that we can access the component
 	self:recalculate_display()
@@ -278,7 +259,6 @@ function BufferSeq:recalculate_scrub_from_held_pads()
 		local track = buffer.track
 		local clip = track and track.clip or nil
 		if clip then clip:clear_pending_scrub() end
-		self.pending_scrub_pads = {}
 		return
 	end
 
@@ -325,15 +305,8 @@ function BufferSeq:recalculate_scrub_from_held_pads()
 			print('Scrub recalculated: ' .. start_tick .. '-' .. end_tick)
 		else
 			-- Queue new scrub action (this will replace any existing pending scrub)
-			if clip then clip:queue_scrub_action(start_tick, end_tick, App.buffer_scrub_mode == 'loop', pad_check_fn) end
-
-			-- Track pending pads
-			self.pending_scrub_pads = {}
-			for pad_idx, _ in pairs(self.held_pads) do
-				self.pending_scrub_pads[pad_idx] = true
-			end
-
 			if clip then
+				clip:queue_scrub_action(start_tick, end_tick, App.buffer_scrub_mode == 'loop', pad_check_fn)
 				local next_sync_tick = clip:get_next_sync_tick()
 				print('Scrub queued for sync at tick: ' .. next_sync_tick)
 			end
@@ -407,7 +380,7 @@ function BufferSeq:stop_scrub()
 
 	-- Stop scrub and restore previous state
 	-- Note: clip.tick is already at the correct position (it's been updating in the background)
-	if clip then clip:stop_scrub(nil, self.scrub_saved_buffer_start, nil) end
+	if clip then clip:stop_scrub() end
 
 	self.scrub_active = false
 	self.scrub_start_tick = nil
@@ -460,30 +433,10 @@ function BufferSeq:grid_event(component, data)
 
 		local loop_length = loop_end - loop_start + 1
 
-		-- Check if sync is enabled and we should wait
-		-- Only use sync if transport is playing, otherwise set immediately
-		if buffer.action_sync_length and App.playing and buffer:should_wait_for_sync() then
-			-- Queue freeze action for sync
-			local action_fn = function(component, action_data)
-				component:set_playback_loop(action_data.loop_start, action_data.loop_length)
-				component:freeze_buffer()
-				print('Loop frozen (synced): ' .. action_data.loop_start .. '-' .. (action_data.loop_start + action_data.loop_length - 1))
-			end
-
-			local action_data = {
-				loop_start = loop_start,
-				loop_length = loop_length,
-			}
-
-			clip.sync_action_queue:queue_action(action_fn, action_data)
-			local next_sync_tick = buffer:get_next_sync_tick()
-			print('Loop freeze queued for sync at tick: ' .. next_sync_tick)
-		else
-			-- Set playback loop and freeze immediately
-			clip:set_playback_loop(loop_start, loop_length)
-			clip:freeze_buffer()
-			print('Loop frozen: ' .. loop_start .. '-' .. loop_end)
-		end
+		-- Set playback loop and freeze immediately
+		clip:set_playback_loop(loop_start, loop_length)
+		clip:freeze_buffer()
+		print('Loop frozen: ' .. loop_start .. '-' .. loop_end)
 	end
 
 	-- Handle pad press (start/update scrub)
@@ -500,12 +453,6 @@ function BufferSeq:grid_event(component, data)
 				local clip = track and track.clip or nil
 				-- Clear any pending queued scrub actions
 				if clip then clip:clear_pending_scrub() end
-				-- Immediately stop scrub (no queue, immediate exit)
-				self:stop_scrub()
-				self.pending_scrub_pads = {}
-				-- Skip recalculate since we're stopping scrub
-				self:set_grid(buffer)
-				return
 			end
 		end
 
@@ -580,30 +527,9 @@ function BufferSeq:set_grid(component)
 		playback_tick = buffer.tick
 	end
 
-	-- OPTIMIZATION: Build a lookup table of which steps have events
-	-- This avoids iterating through all ticks for each pad (O(n*m) -> O(m+n))
-	-- When zoomed in, this dramatically improves performance
-	-- Note: pad_to_tick_range uses 1-based ticks: pad 1 = ticks 1 to step_length
-	local steps_with_events = {}
-	if playback_source then
-		for tick, events in pairs(playback_source) do
-			if events and #events > 0 then
-				-- Convert tick to 1-based step index
-				-- For clips: tick is already 1-based (starts at 1), so it maps directly to step 1, 2, 3...
-				-- For frozen buffer: tick is absolute (frozen_buffer stores absolute ticks from buffer)
-				-- For live buffer: tick is absolute
-				local step_index
-				if clip and clip.current_slot and clip.clip_bank[clip.current_slot] then
-					-- Clip: tick is 1-based, map directly
-					step_index = math.floor((tick - 1) / step_length) + 1
-				else
-					-- Frozen buffer and live buffer: tick is absolute
-					step_index = math.floor((tick - 1) / step_length) + 1
-				end
-				steps_with_events[step_index] = true
-			end
-		end
-	end
+	-- OPTIMIZATION: Zero event scanning - just show playhead and range highlighting
+	-- No buffer scanning means maximum performance regardless of buffer size
+	local is_actively_playing = clip and clip:is_actively_playing() or false
 
 	grid:for_each(function(s, x, y, i)
 		local pad = 0
@@ -617,23 +543,9 @@ function BufferSeq:set_grid(component)
 		-- step_tick is the START tick of this step (1-based: step 1 = tick 1, step 2 = tick step_length+1)
 		-- This matches pad_to_tick_range calculation
 		local step_tick = (global_step - 1) * step_length + 1
-		local seq_value
 
-		-- OPTIMIZED: Just look up if this step has events (O(1) lookup instead of O(m) scan)
-		-- For clips: steps_with_events uses clip's 1-based coordinate system (1, 2, 3, 4...)
-		-- but global_step is in buffer's coordinate system, so we need to wrap it
-		local lookup_step = global_step
-		if clip and clip.current_slot and clip.clip_bank[clip.current_slot] then
-			-- Clip is playing: wrap global_step to clip's coordinate system
-			local clip_entry = clip.clip_bank[clip.current_slot]
-			local clip_length = clip_entry.length or 0
-			local clip_end_step = math.floor((clip_length - 1) / step_length) + 1
-			-- Wrap global_step to clip's range (1 to clip_end_step)
-			lookup_step = ((global_step - 1) % clip_end_step) + 1
-		end
-		if steps_with_events[lookup_step] then seq_value = 1 end
-
-		if seq_value then pad = pad | VALUE end
+		-- No event scanning - we just show playhead and range highlighting
+		-- When clip/frozen/scrub is playing, we highlight the entire range regardless of events
 
 		-- Use appropriate loop boundaries for display
 		-- For clips: show clip's loop boundaries (starting at step 1, length in steps)
@@ -725,6 +637,14 @@ function BufferSeq:set_grid(component)
 			if global_step >= loop_start_index and global_step <= loop_end_index then pad = pad | SCRUB end
 		end
 
+		-- Handle loaded clip range highlighting (when clip is loaded)
+		-- This provides visual feedback about the clip's range, similar to scrub/frozen
+		-- Show range both when actively playing and when not actively playing
+		if clip and clip.current_slot and clip.clip_bank[clip.current_slot] then
+			-- Highlight clip range steps (same visual as scrub/frozen)
+			if global_step >= loop_start_index and global_step <= loop_end_index then pad = pad | SCRUB end
+		end
+
 		-- Mark steps outside loop bounds (before loop start or after loop end)
 		local is_outside = global_step < loop_start_index or global_step > loop_end_index
 		if is_outside then pad = pad | OUTSIDE end
@@ -739,127 +659,89 @@ function BufferSeq:set_grid(component)
 			playback_active = true
 		end
 
+		-- Calculate current playback step for determining passed steps
+		-- This is used to show dim white for steps that have already passed
+		-- Only show dim white if: step has passed AND (pad is outside loop OR clip is not actively playing)
+		local step_has_passed = false
+		if App.playing then
+			if scrub_playhead_step then
+				-- Scrub mode: compare global_step to scrub playhead (absolute coordinates)
+				step_has_passed = global_step < scrub_playhead_step
+			elseif clip_playback_step then
+				-- Clip playback: need to handle coordinate system differences
+				-- Clips use relative coordinates (starting at step 1), global_step is absolute
+				if global_step >= loop_start_index and global_step <= loop_end_index then
+					-- Within clip range: compare relative positions
+					local clip_entry = clip.clip_bank[clip.current_slot]
+					local clip_length = clip_entry.length or 0
+					local clip_end_step = math.floor((clip_length - 1) / step_length) + 1
+					local relative_global_step = ((global_step - 1) % clip_end_step) + 1
+					step_has_passed = relative_global_step < clip_playback_step
+				else
+					-- Outside clip range: can't determine if passed (clip doesn't extend here)
+					step_has_passed = false
+				end
+			elseif frozen_playback_step then
+				-- Frozen buffer: compare global_step to frozen playback position (absolute)
+				step_has_passed = global_step < frozen_playback_step
+			elseif playback_tick then
+				-- Live buffer: compare global_step to playback position (absolute)
+				local playback_step = math.floor((playback_tick - 1) / step_length) + 1
+				step_has_passed = global_step < playback_step
+			else
+				-- Fallback to record step if no playback position
+				step_has_passed = global_step < record_step
+			end
+		end
+
 		local color = 123
 
+		-- Use rainbow colors to show measure boundaries (no event scanning)
+		-- Calculate rainbow color index based on step_tick (measure position)
+		local color_index = self:get_rainbow_color_index(step_tick, nil)
+
 		-- Handle blink mode first (like presetseq)
-		if pad & (BLINK | OUTSIDE) == (BLINK | OUTSIDE) and pad & VALUE > 0 then
-			-- Value steps outside the loop during blink
-			color = { 6, 0, 0 }
-		elseif pad & (BLINK | OUTSIDE) == (BLINK | OUTSIDE) and pad & VALUE == 0 then
-			-- Blink empty steps outside the loop
-			color = 0
-		-- Handle out-of-bounds steps (when not blinking)
-		elseif is_outside then
-			if seq_value then
-				-- Out-of-bounds with events: always {5,5,5}
+		if pad & (BLINK | OUTSIDE) == (BLINK | OUTSIDE) then
+			-- Blink steps outside the loop
+			if self.blink_state then
 				color = { 5, 5, 5 }
 			else
-				-- Out-of-bounds without events: always 0
 				color = 0
 			end
+		-- Handle passed steps with dim white (only if outside loop OR not actively playing)
+		elseif step_has_passed and (is_outside or not is_actively_playing) then
+			-- Show passed steps in dim white
+			color = { 5, 5, 5 }
+		-- Handle out-of-bounds steps (when not blinking and not passed)
+		elseif is_outside then
+			color = 0
 		-- When playback is OFF
 		elseif not playback_active then
-			-- If scrub mode is active, use rainbow colors for scrub range
-			if scrub_active and pad & SCRUB > 0 then
-				if pad & STEP > 0 then
-					-- Scrub playhead with value (rainbow on)
-					if seq_value then
-						local color_index = self:get_rainbow_color_index(step_tick, seq_value)
-						color = grid.rainbow_on[color_index]
-					else
-						color = { 5, 5, 5 }
-					end
-				elseif seq_value then
-					-- Scrub range with value (rainbow off)
-					local color_index = self:get_rainbow_color_index(step_tick, seq_value)
-					color = grid.rainbow_off[color_index]
-				else
-					-- Scrub range without value
-					color = { 5, 5, 5 }
-				end
-				-- Also show main playhead (recording position) with color = 1 if on this step
-				if pad & RECORD_STEP > 0 then color = 1 end
-			-- Outside scrub range when playback is off
+			-- Show playback playhead (scrub/clip/frozen) with rainbow color (if set)
+			if pad & STEP > 0 then
+				color = Grid.rainbow_on[color_index]
+			-- Show recording playhead with rainbow color
+			elseif pad & RECORD_STEP > 0 then
+				color = Grid.rainbow_on[color_index]
+			-- Highlight range if scrub/frozen/clip is active (even if not playing) with rainbow colors
+			elseif pad & SCRUB > 0 then
+				color = Grid.rainbow_off[color_index]
 			else
-				-- Show main playhead with color = 1 when playback is off (for recording position)
-				if pad & RECORD_STEP > 0 then
-					color = 1
-				elseif seq_value then
-					-- Pads with events: {5,5,5}
-					color = { 5, 5, 5 }
-				else
-					-- Empty pads: 0
-					color = 0
-				end
+				color = 0
 			end
-		-- When playback is ON (normal rendering with rainbow colors)
+		-- When playback is ON
 		else
-			-- Handle scrub mode highlighting during playback
-			if scrub_active and pad & SCRUB > 0 then
-				if pad & STEP > 0 then
-					-- Scrub playhead with value (rainbow on)
-					if seq_value then
-						local color_index = self:get_rainbow_color_index(step_tick, seq_value)
-						color = grid.rainbow_on[color_index]
-					else
-						color = { 5, 5, 5 }
-					end
-				elseif seq_value then
-					-- Scrub range with value (rainbow off)
-					local color_index = self:get_rainbow_color_index(step_tick, seq_value)
-					color = grid.rainbow_off[color_index]
-				else
-					-- Scrub range without value
-					color = { 5, 5, 5 }
-				end
-				-- Also show main playhead (recording position) if on this step
-				-- If both playheads are on same step, prioritize scrub playhead (already set above)
-				-- If main playhead is on different step, show it with rainbow colors
-				if pad & RECORD_STEP > 0 and pad & STEP == 0 then
-					-- Main playhead on different step from scrub playhead
-					if seq_value then
-						local color_index = self:get_rainbow_color_index(step_tick, seq_value)
-						color = grid.rainbow_on[color_index]
-					else
-						color = { 5, 5, 5 }
-					end
-				end
-			-- Normal playback rendering (not scrub, not out-of-bounds)
-			elseif pad & (BLINK | VALUE | RECORD_STEP | STEP) == 0 or pad == BLINK then
-				color = 0 -- empty
-			elseif pad & STEP > 0 then
-				-- Playback playhead (clip, frozen buffer, or live buffer) - prioritize over RECORD_STEP
-				if pad & VALUE > 0 then
-					-- Playback playhead with value (on colors)
-					if seq_value then
-						local color_index = self:get_rainbow_color_index(step_tick, seq_value)
-						color = grid.rainbow_on[color_index]
-					else
-						color = { 5, 5, 5 }
-					end
-				else
-					-- Playback playhead without value
-					color = { 5, 5, 5 }
-				end
-			elseif pad & RECORD_STEP > 0 and pad & (BLINK | VALUE) == 0 or pad == (BLINK | RECORD_STEP) then
-				-- Main playhead without value
-				color = { 5, 5, 5 }
-			elseif pad & VALUE > 0 and pad & (BLINK | RECORD_STEP) == 0 or pad == (BLINK | VALUE) then
-				-- Value without playhead (off colors)
-				if seq_value then
-					local color_index = self:get_rainbow_color_index(step_tick, seq_value)
-					color = grid.rainbow_off[color_index]
-				else
-					color = 0
-				end
-			elseif pad & VALUE > 0 and pad & RECORD_STEP > 0 then
-				-- Main playhead with value (on colors)
-				if seq_value then
-					local color_index = self:get_rainbow_color_index(step_tick, seq_value)
-					color = grid.rainbow_on[color_index]
-				else
-					color = { 5, 5, 5 }
-				end
+			-- Show playhead (playback position) with bright rainbow color
+			if pad & STEP > 0 then
+				color = Grid.rainbow_on[color_index]
+			-- Show recording playhead with bright rainbow color (if different from playback)
+			elseif pad & RECORD_STEP > 0 then
+				color = Grid.rainbow_on[color_index]
+			-- Highlight range (scrub/frozen/clip) with dim rainbow color
+			elseif pad & SCRUB > 0 then
+				color = Grid.rainbow_off[color_index]
+			else
+				color = 0
 			end
 		end
 
@@ -875,13 +757,8 @@ function BufferSeq:set_grid(component)
 						color = 0
 					end
 				else
-					-- Alt mode active but blink not started yet - show with value if present
-					if seq_value then
-						local color_index = self:get_rainbow_color_index(step_tick, seq_value)
-						color = grid.rainbow_off[color_index]
-					else
-						color = { 5, 5, 5 }
-					end
+					-- Alt mode active but blink not started yet
+					color = { 5, 5, 5 }
 				end
 			end
 			-- If alt mode is not active, don't override - let normal rendering handle it
@@ -1017,29 +894,10 @@ function BufferSeq:alt_event(data)
 			local loop_start = self.scrub_start_tick
 			local loop_length = self.scrub_end_tick - self.scrub_start_tick + 1
 
-			-- Check if sync is enabled and we should wait
-			if buffer.action_sync_length and App.playing and buffer:should_wait_for_sync() then
-				-- Queue freeze action for sync
-				local action_fn = function(component, action_data)
-					component:set_playback_loop(action_data.loop_start, action_data.loop_length)
-					component:freeze_buffer()
-					print('Scrub frozen to loop (synced): ' .. action_data.loop_start .. '-' .. (action_data.loop_start + action_data.loop_length - 1))
-				end
-
-				local action_data = {
-					loop_start = loop_start,
-					loop_length = loop_length,
-				}
-
-				clip.sync_action_queue:queue_action(action_fn, action_data)
-				local next_sync_tick = buffer:get_next_sync_tick()
-				print('Scrub freeze queued for sync at tick: ' .. next_sync_tick)
-			else
-				-- Freeze immediately
-				clip:set_playback_loop(loop_start, loop_length)
-				clip:freeze_buffer()
-				print('Scrub frozen to loop: ' .. loop_start .. '-' .. self.scrub_end_tick)
-			end
+			-- Freeze immediately
+			clip:set_playback_loop(loop_start, loop_length)
+			clip:freeze_buffer()
+			print('Scrub frozen to loop: ' .. loop_start .. '-' .. self.scrub_end_tick)
 
 			-- Stop scrub mode (playback now comes from frozen_buffer)
 			self:stop_scrub()
@@ -1087,18 +945,6 @@ end
 function BufferSeq:row_event(data)
 	if data.state then
 		-- If alt mode is active, arm/disarm the track instead of switching tracks
-		if self.mode.alt then
-			local track = App.track[data.row]
-			if track then
-				local Registry = require('Foobar/lib/utilities/registry')
-				local was_armed = track.armed
-				-- Toggle armed state
-				local new_armed_state = was_armed and 0 or 1
-				Registry.set('track_' .. track.id .. '_armed', new_armed_state, 'alt_row_tap')
-				-- Update row pads to reflect the change
-				self:update_row_pads()
-			end
-		end
 
 		-- Stop any active scrub when changing tracks
 		if self.scrub_active then
@@ -1130,7 +976,7 @@ function BufferSeq:disable_event()
 	end
 end
 
--- Update row pads to show current track and armed status
+-- Update row pads to show current track
 -- Armed tracks: rainbow_off[1] when not selected, rainbow_on[1] when selected
 -- Current track: always shows with brightness 1 (white)
 function BufferSeq:update_row_pads()
@@ -1147,17 +993,8 @@ function BufferSeq:update_row_pads()
 		local track = App.track[track_id]
 		if track then
 			local row_y = 9 - track_id
-			if track.armed then
-				-- Armed track: use rainbow colors
-				if track_id == current_track then
-					-- Selected and armed: bright red (rainbow_on[1])
-					self.mode.row_pads.led[9][row_y] = Grid.rainbow_on[track_id]
-				else
-					-- Armed but not selected: dim red (rainbow_off[1])
-					self.mode.row_pads.led[9][row_y] = Grid.rainbow_off[track_id]
-				end
-			elseif track_id == current_track then
-				-- Current track but not armed: white (brightness 1)
+			if track_id == current_track then
+				-- Current track: white (brightness 1)
 				self.mode.row_pads.led[9][row_y] = 1
 			end
 		end

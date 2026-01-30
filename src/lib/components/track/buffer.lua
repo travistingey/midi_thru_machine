@@ -34,7 +34,7 @@ function Buffer:set(o)
 	-- Buffer's own timing state (independent from Auto)
 	self.tick = o.tick or 0 -- Buffer's recording position in ticks (continuously running)
 	self.buffer_start = o.buffer_start or 1 -- Starting tick of the buffer
-	self.buffer_length = o.buffer_length or (App.ppqn * 8) -- Static buffer length (64 bars default)
+	self.buffer_length = o.buffer_length or (App.ppqn * 4 * 256) -- Static buffer length (64 bars default)
 	self.playing = false
 	self.enabled = true
 
@@ -56,15 +56,6 @@ function Buffer:set(o)
 	-- Overwrite mode tracking: tracks which steps have been cleared in current loop iteration
 	-- Key: step_index (step number within loop), Value: true
 	self.overwrite_cleared_steps = {}
-
-	-- Action sync settings (shared across all sequences: Auto, Buffer, Clip)
-	-- Used for quantization of sync actions (loop changes, clip loading, etc.)
-	-- Stored here for parameter sync, but used by Buffer, Clip, and Auto components
-	self.action_sync_length = o.action_sync_length or (App.ppqn * 4) -- Default 1 bar
-
-	-- Sync action queue for loop changes
-	local function get_sync_length_fn(component) return component.action_sync_length or (App.ppqn * 4) end
-	self.sync_action_queue = SequenceUtils.create_sync_action_queue(self, get_sync_length_fn)
 end
 
 -- Helper: Wrap tick within buffer boundaries
@@ -84,7 +75,7 @@ end
 -- Record a MIDI event to the buffer at the current tick
 -- Events wrap around within the buffer boundaries (buffer_start to buffer_start + buffer_length - 1)
 -- Overwrite mode clearing is handled in transport_event when entering new steps
--- Always records to buffer (regardless of armed state)
+-- Always records to buffer
 -- @param midi_event table The MIDI event to record
 -- @param event_tick number Optional: The tick when the event occurred (App.tick). If not provided, uses self.tick
 function Buffer:record_buffer(midi_event, event_tick)
@@ -152,50 +143,6 @@ function Buffer:clear_buffer()
 	self:emit('clear_buffer')
 end
 
--- Set buffer start position (for playback loop boundaries, Clip handles this)
--- Buffer length is static, this just changes where the buffer starts
-function Buffer:set_buffer_start(start_tick)
-	self.buffer_start = start_tick
-	-- Reset overwrite tracking when buffer start changes
-	self.overwrite_cleared_steps = {}
-	print('Buffer: buffer_start=' .. self.buffer_start .. ' buffer_length=' .. self.buffer_length)
-	-- Ensure buffer.tick is within the buffer bounds
-	if not SequenceUtils.is_tick_in_loop(self.tick, self.buffer_start, self.buffer_length) then self.tick = SequenceUtils.wrap_tick_to_loop(self.tick, self.buffer_start, self.buffer_length) end
-end
-
--- Sync Helper Functions (delegate to SequenceUtils)
-function Buffer:get_sync_boundary()
-	local sync_length = SequenceUtils.get_sync_length(self, self.action_sync_length)
-	return sync_length -- No step_length logic needed
-end
-
-function Buffer:get_next_sync_tick()
-	local sync_length = SequenceUtils.get_sync_length(self, self.action_sync_length)
-	return SequenceUtils.get_next_sync_tick(sync_length)
-end
-
-function Buffer:should_wait_for_sync()
-	local sync_length = SequenceUtils.get_sync_length(self, self.action_sync_length)
-	return SequenceUtils.should_wait_for_sync(sync_length)
-end
-
--- Queue a buffer start change action (replaces any existing pending action)
-function Buffer:queue_buffer_start_action(start_tick)
-	local action_fn = function(component, action_data)
-		component:set_buffer_start(action_data.start_tick)
-		print('Buffer start set (synced): ' .. action_data.start_tick)
-	end
-
-	local action_data = {
-		start_tick = start_tick,
-	}
-
-	self.sync_action_queue:queue_action(action_fn, action_data)
-end
-
--- Execute pending sync actions (should be called on each clock tick)
-function Buffer:execute_sync_actions() self.sync_action_queue:execute_actions() end
-
 -- Transport Event Handling
 function Buffer:transport_event(data)
 	-- Timing tracking (conditional on flag)
@@ -211,9 +158,6 @@ function Buffer:transport_event(data)
 		self.playing = false -- Track transport state for recording timing
 		-- Don't reset tick - buffer is continuously running
 	elseif data.type == 'clock' and self.playing then
-		-- Execute any pending sync actions that have reached their boundary
-		self:execute_sync_actions()
-
 		-- Ensure tick is within buffer bounds (safety check)
 		-- This handles cases where buffer start changed during recording or tick got out of sync
 		if not SequenceUtils.is_tick_in_loop(self.tick, self.buffer_start, self.buffer_length) then self.tick = SequenceUtils.wrap_tick_to_loop(self.tick, self.buffer_start, self.buffer_length) end
@@ -238,7 +182,7 @@ function Buffer:transport_event(data)
 			self.tick = self.tick + 1
 		end
 
-		-- Always overwrite: when entering a new step and track is armed, clear that step
+		-- Always overwrite: when entering a new step, clear that step
 		-- Overdub behavior is achieved through monitor settings (IN = input always flows, including clip playback)
 		-- Use a simple step size (8 ticks) for overwrite clearing
 		local step_size = 8 -- Hardcoded step size for overwrite clearing

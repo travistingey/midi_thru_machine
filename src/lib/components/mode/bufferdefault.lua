@@ -137,18 +137,7 @@ function BufferDefault:default_menu()
 	local id = App.current_track
 
 	local items = {
-		-- Track armed status
-		Registry.menu.make_item('track_' .. id .. '_armed', {
-			icon = '\u{25cf}',
-			label_fn = function() return 'ARMED' end,
-			value_fn = function()
-				local armed = App.track[App.current_track] and App.track[App.current_track].armed
-				return armed and 'yes' or 'no'
-			end,
-			helper_labels = {
-				enc3 = 'toggle arm',
-			},
-		}),
+
 		-- Playback mode (Default/Input/Direct/Scale Only)
 		Registry.menu.make_item('track_' .. id .. '_buffer_playback_mode', {
 			icon = '\u{25cf}',

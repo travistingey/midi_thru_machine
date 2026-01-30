@@ -43,24 +43,7 @@ function Track:new(o)
 		o.clip:load_bank_metadata()
 	end
 
-	o.scale = App.scale[o.scale_select]
-
 	self.build_chain(o)
-
-	-- Initialize monitor state after all components are loaded
-	if o.update_monitor_state then o:update_monitor_state() end
-
-	o:on('mixer_event', function(data)
-		if o.output_device then o.output_device:send(data) end
-	end)
-
-	App:on('transport_event', function(data)
-		if o.process_transport and o.enabled then o.process_transport(o, data) end
-	end)
-
-	o:on('cc_event', function(data)
-		if o.output_device then o.output_device:send(data) end
-	end)
 
 	return o
 end
@@ -90,6 +73,8 @@ function Track:set(o)
 	self.event_listeners = {}
 	self.triggered = o.triggered or false
 
+	self.scale = App.scale[o.scale_select]
+
 	local track = 'track_' .. self.id .. '_'
 
 	Registry.add('add_group', 'Track ' .. self.id, 30)
@@ -111,7 +96,18 @@ function Track:set(o)
 		end
 	end
 
-	-- Keep an updated cache of held notes for follow modes that rely on note_on state
+	self:on('mixer_event', function(data)
+		if self.output_device then self.output_device:send(data) end
+	end)
+
+	App:on('transport_event', function(data)
+		if self.process_transport and self.enabled then self:process_transport(data) end
+	end)
+
+	self:on('cc_event', function(data)
+		if self.output_device then self.output_device:send(data) end
+	end)
+
 	self:on('midi_event', input_event)
 	self:on('midi_trigger', input_event)
 	self:on('mute_input', function(state) self.mute_input = state end)
@@ -120,7 +116,7 @@ function Track:set(o)
 		-- This prevents playback events from being recorded back into the buffer, causing doubling
 		if data.buffer_sent then return end
 
-		-- Always record to buffer when transport is playing (regardless of armed state)
+		-- Always record to buffer when transport is playing
 		if App.playing and self.buffer then self.buffer:record_buffer(data) end
 	end)
 
@@ -411,7 +407,6 @@ function Track:set(o)
 	end)
 
 	-- Scale
-	self.scale_select = o.scale_select or 0
 
 	Registry.add('add_number', track .. 'scale_select', 'Scale', 0, 3, 0, function(param)
 		local ch = param:get()
@@ -559,44 +554,22 @@ function Track:set(o)
 	function Track:update_monitor_state()
 		if self.monitor == 1 then
 			-- IN: always allow input (for overdub when clip is playing)
-			self.mute_input = false
+			self:emit('mute_input', false)
 		elseif self.monitor == 2 then
-			-- AUTO: allow input when clip is not actively playing (regardless of armed)
-			-- When clip is actively playing, only allow input if track is armed for recording
-			local clip_actively_playing = (self.clip and self.clip:is_actively_playing()) or false
-
-			if clip_actively_playing then
-				-- Clip is actively playing: only allow input if armed
-				self.mute_input = not self.armed
-			else
-				-- Clip is not actively playing: always allow input
-				self.mute_input = false
-			end
+			-- AUTO: allow input when clip is not actively playing
+			local clip_actively_playing = self.clip:is_actively_playing() or false
+			self:emit('mute_input', clip_actively_playing)
 		elseif self.monitor == 3 then
 			-- OFF: never allow input
-			self.mute_input = true
+			self:emit('mute_input', true)
 		end
 	end
-
-	-- Armed for buffer recording
-	self.armed = o.armed or false
-	Registry.add('add_binary', track .. 'armed', 'Armed', 'toggle', 0)
-	Registry.set_action(track .. 'armed', function(d)
-		local was_armed = self.armed
-		self.armed = (d > 0)
-		if self.armed then
-			-- Always clear overwrite steps when arming (buffer always overwrites)
-			if self.auto then self.auto.overwrite_cleared_steps = {} end
-		end
-		-- Update monitor state when armed state changes (affects AUTO monitor behavior)
-		if self.update_monitor_state then self:update_monitor_state() end
-	end)
 
 	-- Playback mode (stored in Clip component)
 	Registry.add('add_option', track .. 'buffer_playback_mode', 'Playback Mode', { 'Default', 'Input', 'Direct', 'Scale Only' }, 1)
 	Registry.set_action(track .. 'buffer_playback_mode', function(d)
 		-- Playback mode is stored in Clip component (not Buffer)
-		if self.clip then self.clip.playback_mode = d end
+		self.clip.playback_mode = d
 	end)
 
 	-- Clip Loop (controls clip playback: true = continuous loop, false = one-shot)
@@ -605,7 +578,7 @@ function Track:set(o)
 	Registry.set_action(track .. 'buffer_loop', function(d)
 		App.settings[track .. 'buffer_loop'] = d
 		local buffer_loop = (d > 0)
-		if self.clip then self.clip.buffer_loop = buffer_loop end
+		self.clip.buffer_loop = buffer_loop
 		-- Trigger menu redraw to show updated value
 		App.screen_dirty = true
 	end)
@@ -619,10 +592,9 @@ function Track:set(o)
 		App.settings[track .. 'action_sync'] = d
 		local buffer_step_values = calculate_step_values(true)
 		local new_sync_length = buffer_step_values[d + 1] -- +1 because we removed 'step' option
-		if self.buffer then self.buffer.action_sync_length = new_sync_length end
-		-- Also update clip's action_sync_length so launch quantization works
-		if self.clip then self.clip.action_sync_length = new_sync_length end
-		-- Trigger menu redraw to show updated value
+
+		self.clip.action_sync_length = new_sync_length
+
 		App.screen_dirty = true
 	end)
 end

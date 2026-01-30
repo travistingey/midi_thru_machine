@@ -145,7 +145,7 @@ function ClipGrid:grid_event(clip, data)
 			end
 		else
 			-- Slot is empty: queue recording start on next sync tick
-			-- If a clip is currently playing, it will continue playing during recording (overdub)
+			-- Any currently playing clip will be unloaded to prevent doubling
 			self:queue_recording_start(clip, bank_slot)
 		end
 
@@ -228,9 +228,10 @@ function ClipGrid:start_recording(clip, bank_slot)
 	-- This ensures buffer recording starts at the correct sync boundary
 	clip.buffer.tick = recording_start_tick
 
-	-- Arm the track for recording
-	local track = clip.track
-	if track then Registry.set('track_' .. track.id .. '_armed', 1, 'clipgrid_recording') end
+	-- Unload any currently playing clip when starting a new recording to an empty slot
+	-- This prevents doubling: the clip would play while new input is being recorded
+	-- If user wants overdub, they should record to the same slot that's already playing
+	if clip.current_slot then clip:unload_clip() end
 
 	-- Set loop boundaries for recording
 	-- Start at sync-aligned tick, end at max recording length
@@ -310,15 +311,11 @@ function ClipGrid:stop_recording_and_save(clip, bank_slot)
 	local is_aligned = (last_recorded_tick % boundary == 0)
 
 	print('ClipGrid: Stop recording slot ' .. bank_slot)
-	print('  App.tick: ' .. App.tick .. ', buffer.tick: ' .. buffer_tick)
 	print('  Last recorded tick: ' .. last_recorded_tick .. ' (buffer.tick - 1)')
 	print('  Using loop_end: ' .. loop_end .. ' (sync-aligned from last recorded)')
 	print('  Recording started at: ' .. recording_start_tick)
 	print('  Boundary: ' .. boundary .. ', aligned: ' .. tostring(is_aligned))
-	if not is_aligned then
-		print('  WARNING: loop_end not aligned to sync boundary!')
-		print('  Relative tick: ' .. relative_end_tick .. ', remainder: ' .. (relative_end_tick % boundary))
-	end
+	if not is_aligned then print('  WARNING: loop_end not aligned to sync boundary!') end
 
 	-- Clamp to max recording length
 	local max_end_tick = recording_start_tick + self.max_recording_length - 1
@@ -369,10 +366,6 @@ function ClipGrid:stop_recording_and_save(clip, bank_slot)
 		else
 			print('  ✓ Clip length is perfectly aligned to sync boundaries')
 		end
-
-		-- Disarm track
-		local track = clip.track
-		if track then Registry.set('track_' .. track.id .. '_armed', 0, 'clipgrid_recording_done') end
 
 		-- Auto-load and play the clip that was just saved
 		-- This ensures playback starts immediately after recording
@@ -561,17 +554,8 @@ function ClipGrid:update_row_pads()
 		local track = App.track[track_id]
 		if track then
 			local row_y = 9 - track_id
-			if track.armed then
-				-- Armed track: use rainbow colors
-				if track_id == current_track then
-					-- Selected and armed: bright color
-					self.mode.row_pads.led[9][row_y] = Grid.rainbow_on[track_id]
-				else
-					-- Armed but not selected: dim color
-					self.mode.row_pads.led[9][row_y] = Grid.rainbow_off[track_id]
-				end
-			elseif track_id == current_track then
-				-- Current track but not armed: white (brightness 1)
+			if track_id == current_track then
+				-- Current track: white (brightness 1)
 				self.mode.row_pads.led[9][row_y] = 1
 			end
 		end
