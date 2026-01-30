@@ -87,6 +87,9 @@ local feature_flag_values = {
 	unit_test = false,
 	verbose = false,
 	buffer_timing_stats = false, -- Enable buffer timing statistics collection
+	debug_clip = false, -- Enable clip component debug logging
+	debug_sync = false, -- Enable sync queue debug logging
+	debug_scrub = false, -- Enable scrub mode debug logging
 }
 
 -- Application runtime state flags (mutated by the app itself)

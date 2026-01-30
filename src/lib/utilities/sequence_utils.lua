@@ -2,6 +2,8 @@
 -- Shared library for tick/step conversions, sync boundaries, and sync actions
 -- Used by Auto, Buffer, and Clip components for consistent sequence handling
 
+local flags = require('Foobar/lib/utilities/flags')
+
 local SequenceUtils = {}
 
 --==============================================================================
@@ -156,10 +158,12 @@ function SequenceUtils.create_sync_action_queue(component, get_sync_length_fn)
 		local current_tick = App.tick or 1 -- 1-based: first clock = tick 1
 		local next_sync_tick = SequenceUtils.get_next_sync_tick(sync_length, current_tick)
 
-		print('SequenceUtils: Queue action')
-		print('  Current App.tick: ' .. current_tick)
-		print('  Sync length: ' .. sync_length .. ', boundary: ' .. sync_length)
-		print('  Next sync tick: ' .. next_sync_tick .. ' (in ' .. (next_sync_tick - current_tick) .. ' ticks)')
+		if flags.debug_sync then
+			print('SequenceUtils: Queue action')
+			print('  Current App.tick: ' .. current_tick)
+			print('  Sync length: ' .. sync_length .. ', boundary: ' .. sync_length)
+			print('  Next sync tick: ' .. next_sync_tick .. ' (in ' .. (next_sync_tick - current_tick) .. ' ticks)')
+		end
 
 		self.pending_action = {
 			action_fn = action_fn,
@@ -169,7 +173,9 @@ function SequenceUtils.create_sync_action_queue(component, get_sync_length_fn)
 
 		-- If we're already at the sync boundary, execute immediately
 		if not SequenceUtils.should_wait_for_sync(sync_length, current_tick) then
-			print('SequenceUtils: Already on sync boundary, executing immediately')
+			if flags.debug_sync then
+				print('SequenceUtils: Already on sync boundary, executing immediately')
+			end
 			self:execute_actions()
 		end
 	end
@@ -186,7 +192,9 @@ function SequenceUtils.create_sync_action_queue(component, get_sync_length_fn)
 
 		local current_tick = App.tick or 1 -- 1-based: first clock = tick 1
 		if current_tick >= self.pending_action.sync_tick then
-			print('SequenceUtils: Execute action at App.tick: ' .. current_tick .. ' (target was: ' .. self.pending_action.sync_tick .. ')')
+			if flags.debug_sync then
+				print('SequenceUtils: Execute action at App.tick: ' .. current_tick .. ' (target was: ' .. self.pending_action.sync_tick .. ')')
+			end
 			-- Execute the action
 			self.pending_action.action_fn(self.component, self.pending_action.action_data)
 
