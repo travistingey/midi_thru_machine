@@ -456,4 +456,210 @@ function EventStore:delete_bar_range(bar_start, bar_end, ppqn)
 	return self:delete_range(start_tick, end_tick)
 end
 
+-- ============================================================================
+-- EDITING OPERATIONS
+-- For clip editing functionality (insert, delete, shift)
+-- ============================================================================
+
+-- Shift all events at or after a tick by an offset
+-- Positive offset moves events forward (later in time)
+-- Negative offset moves events backward (earlier in time)
+-- @param from_tick number Shift events at or after this tick
+-- @param offset number Amount to shift (positive = forward, negative = backward)
+-- @return number Count of events shifted
+function EventStore:shift_events(from_tick, offset)
+	if offset == 0 then return 0 end
+
+	local start_idx = self:_binary_search_ge(from_tick)
+	if not start_idx then return 0 end
+
+	local count = 0
+
+	-- Build new events table and ticks array
+	local new_events = {}
+	local new_ticks = {}
+
+	-- Copy events before from_tick unchanged
+	for i = 1, start_idx - 1 do
+		local tick = self.ticks[i]
+		table.insert(new_ticks, tick)
+		new_events[tick] = self.events[tick]
+	end
+
+	-- Shift events at or after from_tick
+	for i = start_idx, #self.ticks do
+		local old_tick = self.ticks[i]
+		local new_tick = old_tick + offset
+
+		-- Only include if new tick is valid (>= 1)
+		if new_tick >= 1 then
+			table.insert(new_ticks, new_tick)
+			new_events[new_tick] = self.events[old_tick]
+			count = count + 1
+		end
+	end
+
+	self.events = new_events
+	self.ticks = new_ticks
+
+	return count
+end
+
+-- Insert empty time at a position (shift events forward)
+-- Events at or after insert_tick are shifted by duration
+-- @param insert_tick number Position to insert time
+-- @param duration number Amount of time to insert (in ticks)
+-- @return number Count of events shifted
+function EventStore:insert_time(insert_tick, duration)
+	if duration <= 0 then return 0 end
+	return self:shift_events(insert_tick, duration)
+end
+
+-- Delete time range and shift remaining events backward
+-- Events in the range are deleted, events after are shifted back
+-- @param start_tick number Start of range to delete (inclusive)
+-- @param end_tick number End of range to delete (exclusive)
+-- @return number Count of events deleted
+function EventStore:delete_time(start_tick, end_tick)
+	local duration = end_tick - start_tick
+	if duration <= 0 then return 0 end
+
+	-- First delete the range
+	local deleted = self:delete_range(start_tick, end_tick)
+
+	-- Then shift remaining events backward
+	self:shift_events(end_tick, -duration)
+
+	return deleted
+end
+
+-- Quantize events to a grid
+-- @param grid_size number Grid size in ticks (e.g., 24 for 1/16 note at 96 ppqn)
+-- @param start_tick number Optional start of range (default: all events)
+-- @param end_tick number Optional end of range (exclusive)
+-- @return number Count of events moved
+function EventStore:quantize(grid_size, start_tick, end_tick)
+	if grid_size <= 0 then return 0 end
+
+	start_tick = start_tick or 1
+	end_tick = end_tick or (self:last_tick() and self:last_tick() + 1) or 1
+
+	local start_idx = self:_binary_search_ge(start_tick)
+	if not start_idx then return 0 end
+
+	local count = 0
+	local moves = {} -- {old_tick, new_tick, events}
+
+	-- Collect events to move
+	for i = start_idx, #self.ticks do
+		local tick = self.ticks[i]
+		if tick >= end_tick then break end
+
+		-- Quantize to nearest grid position
+		local relative = tick - 1 -- 0-based for math
+		local quantized = math.floor((relative + grid_size / 2) / grid_size) * grid_size + 1
+
+		if quantized ~= tick then
+			table.insert(moves, { old_tick = tick, new_tick = quantized, events = self.events[tick] })
+			count = count + 1
+		end
+	end
+
+	-- Apply moves (delete old, insert new)
+	for _, move in ipairs(moves) do
+		self.events[move.old_tick] = nil
+		-- Remove from ticks array (will rebuild)
+	end
+
+	-- Rebuild ticks array and merge quantized events
+	local new_ticks = {}
+	local seen = {}
+
+	for tick, events in pairs(self.events) do
+		if not seen[tick] then
+			table.insert(new_ticks, tick)
+			seen[tick] = true
+		end
+	end
+
+	-- Add quantized events (merge if tick already exists)
+	for _, move in ipairs(moves) do
+		if self.events[move.new_tick] then
+			-- Merge events at same tick
+			for _, event in ipairs(move.events) do
+				table.insert(self.events[move.new_tick], event)
+			end
+		else
+			self.events[move.new_tick] = move.events
+			if not seen[move.new_tick] then
+				table.insert(new_ticks, move.new_tick)
+				seen[move.new_tick] = true
+			end
+		end
+	end
+
+	table.sort(new_ticks)
+	self.ticks = new_ticks
+
+	return count
+end
+
+-- Transpose MIDI note events by semitones
+-- @param semitones number Number of semitones to transpose (positive = up, negative = down)
+-- @param start_tick number Optional start of range (default: all events)
+-- @param end_tick number Optional end of range (exclusive)
+-- @return number Count of events transposed
+function EventStore:transpose(semitones, start_tick, end_tick)
+	if semitones == 0 then return 0 end
+
+	start_tick = start_tick or 1
+	end_tick = end_tick or (self:last_tick() and self:last_tick() + 1) or 1
+
+	local count = 0
+
+	for tick, events in self:iter_range(start_tick, end_tick) do
+		for _, event in ipairs(events) do
+			-- Check if this is a note event (has note field)
+			if event.note then
+				local new_note = event.note + semitones
+				-- Clamp to valid MIDI range (0-127)
+				if new_note >= 0 and new_note <= 127 then
+					event.note = new_note
+					count = count + 1
+				end
+			end
+		end
+	end
+
+	return count
+end
+
+-- Scale event velocities
+-- @param factor number Velocity multiplier (e.g., 0.5 = half, 2.0 = double)
+-- @param start_tick number Optional start of range (default: all events)
+-- @param end_tick number Optional end of range (exclusive)
+-- @return number Count of events scaled
+function EventStore:scale_velocity(factor, start_tick, end_tick)
+	if factor == 1.0 then return 0 end
+
+	start_tick = start_tick or 1
+	end_tick = end_tick or (self:last_tick() and self:last_tick() + 1) or 1
+
+	local count = 0
+
+	for tick, events in self:iter_range(start_tick, end_tick) do
+		for _, event in ipairs(events) do
+			-- Check if this is a note event with velocity
+			if event.vel then
+				local new_vel = math.floor(event.vel * factor + 0.5)
+				-- Clamp to valid MIDI range (1-127, 0 is note-off)
+				event.vel = math.max(1, math.min(127, new_vel))
+				count = count + 1
+			end
+		end
+	end
+
+	return count
+end
+
 return EventStore

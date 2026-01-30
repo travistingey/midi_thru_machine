@@ -262,6 +262,74 @@ function Buffer:last_tick() return self.store:last_tick() end
 -- @return EventStore New EventStore with copied events
 function Buffer:copy_range(start_tick, end_tick, tick_offset) return self.store:copy_range(start_tick, end_tick, tick_offset) end
 
+-- ============================================================================
+-- EDITING METHODS
+-- For clip editing functionality (insert, delete, shift, quantize, etc.)
+-- ============================================================================
+
+-- Shift events by an offset (for moving/nudging events)
+-- @param from_tick number Shift events at or after this tick
+-- @param offset number Amount to shift (positive = forward, negative = backward)
+-- @return number Count of events shifted
+function Buffer:shift_events(from_tick, offset)
+	local count = self.store:shift_events(from_tick, offset)
+	self:emit('events_shifted', { from_tick = from_tick, offset = offset, count = count })
+	return count
+end
+
+-- Insert empty time at a position (shift events forward)
+-- @param insert_tick number Position to insert time
+-- @param duration number Amount of time to insert (in ticks)
+-- @return number Count of events shifted
+function Buffer:insert_time(insert_tick, duration)
+	local count = self.store:insert_time(insert_tick, duration)
+	self:emit('time_inserted', { tick = insert_tick, duration = duration, count = count })
+	return count
+end
+
+-- Delete time range and shift remaining events backward
+-- @param start_tick number Start of range to delete (inclusive)
+-- @param end_tick number End of range to delete (exclusive)
+-- @return number Count of events deleted
+function Buffer:delete_time(start_tick, end_tick)
+	local count = self.store:delete_time(start_tick, end_tick)
+	self:emit('time_deleted', { start_tick = start_tick, end_tick = end_tick, count = count })
+	return count
+end
+
+-- Quantize events to a grid
+-- @param grid_size number Grid size in ticks
+-- @param start_tick number Optional start of range
+-- @param end_tick number Optional end of range
+-- @return number Count of events moved
+function Buffer:quantize(grid_size, start_tick, end_tick)
+	local count = self.store:quantize(grid_size, start_tick, end_tick)
+	self:emit('events_quantized', { grid_size = grid_size, count = count })
+	return count
+end
+
+-- Transpose MIDI note events
+-- @param semitones number Number of semitones to transpose
+-- @param start_tick number Optional start of range
+-- @param end_tick number Optional end of range
+-- @return number Count of events transposed
+function Buffer:transpose(semitones, start_tick, end_tick)
+	local count = self.store:transpose(semitones, start_tick, end_tick)
+	self:emit('events_transposed', { semitones = semitones, count = count })
+	return count
+end
+
+-- Scale event velocities
+-- @param factor number Velocity multiplier
+-- @param start_tick number Optional start of range
+-- @param end_tick number Optional end of range
+-- @return number Count of events scaled
+function Buffer:scale_velocity(factor, start_tick, end_tick)
+	local count = self.store:scale_velocity(factor, start_tick, end_tick)
+	self:emit('velocity_scaled', { factor = factor, count = count })
+	return count
+end
+
 -- Add diagnostic function to print stats
 function Buffer:print_timing()
 	local function avg(times)

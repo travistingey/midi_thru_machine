@@ -7,6 +7,7 @@ local Persistence = require(path_name .. 'utilities/persistence')
 local SequenceUtils = require(path_name .. 'utilities/sequence_utils')
 local TimingConstants = require(path_name .. 'utilities/timing_constants')
 local SyncManager = require(path_name .. 'utilities/sync_manager')
+local PlaybackSources = require(path_name .. 'utilities/playback_source')
 
 -- Clip component handles playback of MIDI events from buffer
 -- Separated from Buffer component for clear separation of concerns:
@@ -64,6 +65,27 @@ function Clip:set(o)
 	-- Clip bank management
 	self.clip_bank = {} -- 16 slots: {[1-16] = nil or {filename, name, buffer, playback_settings}}
 	self.current_slot = nil -- Which slot is currently playing (nil = live buffer)
+
+	-- PlaybackSource instances (new unified abstraction)
+	-- These work alongside existing state for backward compatibility
+	self.sources = {
+		live = nil, -- LiveBufferSource - created when buffer is set
+		frozen = PlaybackSources.FrozenBufferSource.new({}),
+		scrub = PlaybackSources.ScrubSource.new({}),
+		clip_bank = nil, -- ClipBankSource - created when clip is loaded
+	}
+	self.active_source = nil -- Reference to currently active PlaybackSource
+end
+
+-- Set buffer reference and initialize LiveBufferSource
+-- Should be called by Track instead of directly setting self.buffer
+function Clip:set_buffer(buffer_component)
+	self.buffer = buffer_component
+	if buffer_component then
+		self.sources.live = PlaybackSources.LiveBufferSource.new(buffer_component)
+	else
+		self.sources.live = nil
+	end
 end
 
 function Clip:get_next_sync_tick(custom_sync_length)
@@ -262,21 +284,18 @@ end
 function Clip:freeze_buffer()
 	if not self.buffer or not self.playback_start or not self.playback_length then return end
 
-	-- Copy the current playback range into frozen_buffer
-	local loop_end = self.playback_start + self.playback_length - 1
-	self.frozen_buffer = {}
+	-- Use FrozenBufferSource to create snapshot
+	self.sources.frozen:freeze_from_buffer(self.buffer, self.playback_start, self.playback_length)
+	self.sources.frozen:activate()
+	self.active_source = self.sources.frozen
 
-	-- Copy events from buffer within playback range
-	for tick, events in pairs(self.buffer.buffer) do
-		if tick >= self.playback_start and tick <= loop_end then
-			-- Shallow copy (just assign reference)
-			self.frozen_buffer[tick] = events
-		end
-	end
+	-- Keep backward compatible frozen_buffer (points to FrozenBufferSource events)
+	self.frozen_buffer = self.sources.frozen.events
 
 	self.buffer_frozen = true
 	self.frozen_tick = self.buffer.tick
 	if flags.debug_clip then
+		local loop_end = self.playback_start + self.playback_length - 1
 		print('Clip: Buffer frozen at playback range ' .. self.playback_start .. '-' .. loop_end)
 	end
 
@@ -290,9 +309,16 @@ end
 -- Unfreeze the buffer (resume updating frozen_buffer incrementally)
 function Clip:unfreeze_buffer()
 	local was_frozen = self.buffer_frozen
+
+	-- Deactivate FrozenBufferSource
+	self.sources.frozen:deactivate()
+	if self.active_source == self.sources.frozen then
+		self.active_source = nil
+	end
+
 	self.buffer_frozen = false
 	self.frozen_tick = nil
-	-- Clear frozen buffer and reset playback loop boundaries
+	-- Clear frozen buffer and reset playback loop boundaries (backward compatibility)
 	self.frozen_buffer = {}
 	self.playback_start = nil
 	self.playback_length = nil
@@ -576,27 +602,28 @@ function Clip:start_scrub(start_tick, end_tick, loop_mode)
 	-- Kill any currently playing buffer notes before scrub
 	self:kill_notes()
 
-	-- Store scrub state
+	-- Store scrub state (backward compatibility)
 	self.scrub_mode = true
 	self.scrub_loop = loop_mode
 	self.scrub_start = start_tick
 	self.scrub_end = end_tick
 	self.scrub_length = end_tick - start_tick + 1
 
-	-- Create shallow copy of buffer range into scrub_buffer
-	-- Use buffer component reference (self.buffer) not track.buffer
-	self.scrub_buffer = {}
-	if self.buffer and self.buffer.buffer then
-		for tick = start_tick, end_tick do
-			if self.buffer.buffer[tick] then self.scrub_buffer[tick] = self.buffer.buffer[tick] end
-		end
+	-- Initialize ScrubSource and activate it
+	if self.buffer then
+		self.sources.scrub:create_from_buffer(self.buffer, start_tick, end_tick, loop_mode)
+		self.sources.scrub:activate()
+		self.active_source = self.sources.scrub
 	end
+
+	-- Keep backward compatible scrub_buffer (points to ScrubSource events)
+	self.scrub_buffer = self.sources.scrub.events
 
 	-- Scrub mode always blocks input regardless of monitoring setting
 	-- Use emit to ensure the event system is notified
 	self.track:emit('mute_input', true)
 
-	-- Jump to scrub start position
+	-- Jump to scrub start position (backward compatibility)
 	self.scrub_tick = start_tick
 
 	if flags.debug_scrub then
@@ -621,28 +648,21 @@ function Clip:update_scrub(start_tick, end_tick)
 	-- Kill notes to prevent stuck notes when range changes
 	self:kill_notes()
 
-	-- Update scrub boundaries
-	local old_start = self.scrub_start
-	local old_end = self.scrub_end
+	-- Update scrub boundaries (backward compatibility)
 	self.scrub_start = start_tick
 	self.scrub_end = end_tick
 	self.scrub_length = end_tick - start_tick + 1
 
-	-- Update scrub_buffer: clear old entries outside new range, add new entries
-	-- Use buffer component reference (self.buffer) not track.buffer
-	if self.buffer and self.buffer.buffer then
-		-- Clear entries that are now outside the new range
-		for tick, _ in pairs(self.scrub_buffer) do
-			if tick < start_tick or tick > end_tick then self.scrub_buffer[tick] = nil end
-		end
-		-- Add new entries from buffer for the new range
-		for tick = start_tick, end_tick do
-			if self.buffer.buffer[tick] and not self.scrub_buffer[tick] then self.scrub_buffer[tick] = self.buffer.buffer[tick] end
-		end
+	-- Update ScrubSource range
+	if self.buffer then
+		self.sources.scrub:update_range(self.buffer, start_tick, end_tick)
 	end
 
-	-- If current scrub_tick is now outside the new scrub range, jump to scrub start
-	if not self.scrub_tick or self.scrub_tick < start_tick or self.scrub_tick > end_tick then self.scrub_tick = start_tick end
+	-- Keep backward compatible scrub_buffer synced
+	self.scrub_buffer = self.sources.scrub.events
+
+	-- Sync scrub_tick from ScrubSource (backward compatibility)
+	self.scrub_tick = self.sources.scrub.tick
 end
 
 -- Stop scrub and restore normal playback
@@ -652,10 +672,16 @@ function Clip:stop_scrub()
 	-- Kill any scrub notes
 	self:kill_notes()
 
-	-- Clear scrub_buffer
+	-- Deactivate ScrubSource
+	self.sources.scrub:deactivate()
+	if self.active_source == self.sources.scrub then
+		self.active_source = nil
+	end
+
+	-- Clear scrub_buffer (backward compatibility)
 	self.scrub_buffer = {}
 
-	-- Restore previous state
+	-- Restore previous state (backward compatibility)
 	self.scrub_mode = false
 	self.scrub_loop = false
 	self.scrub_start = nil
@@ -783,10 +809,18 @@ function Clip:load_clip_from_bank(bank_slot)
 	-- Kill notes when loading a clip to prevent stuck notes from previous playback
 	if App.playing then self:kill_notes() end
 
-	-- Set as current playback source
+	-- Create and activate ClipBankSource
+	self.sources.clip_bank = PlaybackSources.ClipBankSource.new({
+		slot = bank_slot,
+	})
+	self.sources.clip_bank:load_from_bank_entry(self.clip_bank[bank_slot], bank_slot)
+	self.sources.clip_bank:activate()
+	self.active_source = self.sources.clip_bank
+
+	-- Set as current playback source (backward compatibility)
 	self.current_slot = bank_slot
 
-	-- Reset tick to 1 (clips are 1-based)
+	-- Reset tick to 1 (clips are 1-based) - backward compatibility
 	self.tick = 1
 
 	-- Emit event for mode components
@@ -855,6 +889,16 @@ function Clip:unload_clip()
 
 	if self.current_slot then
 		local previous_slot = self.current_slot
+
+		-- Deactivate ClipBankSource
+		if self.sources.clip_bank then
+			self.sources.clip_bank:deactivate()
+		end
+		if self.active_source == self.sources.clip_bank then
+			self.active_source = nil
+		end
+		self.sources.clip_bank = nil
+
 		self.current_slot = nil
 		-- Sync clip.tick to buffer.tick (buffer is continuously running, don't reset)
 		if self.buffer then self.tick = self.buffer.tick end

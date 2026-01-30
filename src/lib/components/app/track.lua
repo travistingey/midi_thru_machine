@@ -35,9 +35,10 @@ function Track:new(o)
 	self.load_component(o, Output)
 
 	-- Set buffer reference in clip after buffer is loaded
+	-- Uses set_buffer() to also initialize PlaybackSource
 	-- Also sync action_sync_length from buffer to clip
 	if o.clip and o.buffer then
-		o.clip.buffer = o.buffer
+		o.clip:set_buffer(o.buffer)
 		o.clip.action_sync_length = o.buffer.action_sync_length
 		-- Load clip bank metadata on track initialization
 		o.clip:load_bank_metadata()
