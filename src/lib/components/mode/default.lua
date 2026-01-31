@@ -24,6 +24,7 @@ Key Functions:
 ]]
 
 local Default = ModeComponent:new({})
+Default.name = 'default'
 local menu_style = { inactive_color = 15 }
 local max_clip_slot_select = 32
 --[[
