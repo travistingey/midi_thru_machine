@@ -4,6 +4,7 @@ local Grid = require(path_name .. 'grid')
 local UI = require(path_name .. 'ui')
 local Registry = require('Foobar/lib/utilities/registry')
 local flags = require(path_name .. 'utilities/flags')
+local TimingConstants = require(path_name .. 'utilities/timing_constants')
 
 local BufferSeq = ModeComponent:new()
 BufferSeq.__base = ModeComponent
@@ -52,6 +53,12 @@ function BufferSeq:set(o)
 	self.scrub_saved_buffer_start = nil
 	self.held_pads = {} -- Track currently held pads for multi-pad selection
 
+	-- Edit selection state (for range-based editing operations)
+	self.selection_start_tick = nil -- Start tick of selected range
+	self.selection_end_tick = nil -- End tick of selected range
+	self.selection_active = false -- Whether a selection is currently active
+	self.selection_blink_active = false -- Whether blink mode is active for selection
+
 	-- Grid refresh optimization: track last rendered step to avoid refreshing every tick
 	self.last_rendered_step = nil
 
@@ -62,7 +69,12 @@ function BufferSeq:set(o)
 	self.grid:refresh()
 
 	self.context = {
-		press_fn_3 = function() print('press_fn_3') end,
+		press_fn_3 = function()
+			-- Open edit menu if selection is active, otherwise show step info
+			if self.selection_active then
+				self:open_edit_menu()
+			end
+		end,
 	}
 
 	self.screen = function(text, completion)
@@ -70,7 +82,11 @@ function BufferSeq:set(o)
 		if self.mode then has_menu = self.mode:has_active_menu() end
 
 		if not has_menu then
-			if self.scrub_active then
+			if self.selection_active and self.selection_start_tick and self.selection_end_tick then
+				-- Show selection range in bars:beats:sixteenths format
+				local range_str = TimingConstants.tick_range_to_time_string(self.selection_start_tick, self.selection_end_tick)
+				UI:draw_tag(1, 36, 'sel', range_str)
+			elseif self.scrub_active then
 				-- Convert tick values to integers for display (indices should be whole numbers)
 				local start_tick = math.floor(self.scrub_start_tick)
 				local end_tick = math.floor(self.scrub_end_tick)
@@ -80,6 +96,70 @@ function BufferSeq:set(o)
 			end
 		end
 	end
+end
+
+-- Open the edit menu for the current selection
+function BufferSeq:open_edit_menu()
+	if not self.selection_active then return end
+
+	-- Get the Default mode component to access edit menu
+	local default_mode = nil
+	for _, mc in pairs(self.mode.components) do
+		if mc.name == 'default' then
+			default_mode = mc
+			break
+		end
+	end
+
+	if default_mode and default_mode.edit_menu then
+		-- Pass selection info to edit menu
+		local config = {
+			status = { icon = App.current_track, label = 'Edit' },
+			options = { timeout = false },
+			screen = default_mode:submenu_screen(),
+		}
+		default_mode:sub_menu(default_mode:edit_menu(self), config)
+	end
+end
+
+-- Clear the current selection
+function BufferSeq:clear_selection()
+	self.selection_start_tick = nil
+	self.selection_end_tick = nil
+	self.selection_active = false
+	if self.selection_blink_active then
+		self:end_blink()
+		self.selection_blink_active = false
+	end
+	local buffer = self:get_component()
+	if buffer then self:set_grid(buffer) end
+end
+
+-- Set selection range from pad indices
+function BufferSeq:set_selection_from_pads(min_pad, max_pad)
+	local start_tick, _ = self:pad_to_tick_range(min_pad)
+	local _, end_tick = self:pad_to_tick_range(max_pad)
+
+	self.selection_start_tick = start_tick
+	self.selection_end_tick = end_tick
+	self.selection_active = true
+
+	-- Start blink mode for selection
+	if not self.selection_blink_active then
+		self:start_blink()
+		self.selection_blink_active = true
+	end
+
+	local buffer = self:get_component()
+	if buffer then self:set_grid(buffer) end
+end
+
+-- Get selection range
+function BufferSeq:get_selection()
+	if self.selection_active and self.selection_start_tick and self.selection_end_tick then
+		return self.selection_start_tick, self.selection_end_tick
+	end
+	return nil, nil
 end
 
 function BufferSeq:enable_event()
@@ -498,6 +578,7 @@ function BufferSeq:set_grid(component)
 	local OUTSIDE = (1 << 4)
 	local SCRUB = (1 << 5)
 	local RECORD_STEP = (1 << 6) -- Main playhead (recording position)
+	local SELECTION = (1 << 7) -- Edit selection range
 
 	-- Check if scrub mode is active
 	local track = buffer.track
@@ -507,6 +588,14 @@ function BufferSeq:set_grid(component)
 	local scrub_end_step = nil
 	local scrub_playhead_step = nil
 	local step_length = self:get_step_length()
+
+	-- Check for edit selection
+	local selection_start_step = nil
+	local selection_end_step = nil
+	if self.selection_active and self.selection_start_tick and self.selection_end_tick then
+		selection_start_step = math.floor((self.selection_start_tick - 1) / step_length) + 1
+		selection_end_step = math.floor((self.selection_end_tick - 1) / step_length) + 1
+	end
 
 	if scrub_active and self.scrub_start_tick and self.scrub_end_tick then
 		-- Convert ticks to 1-based step indices (ticks 1-6 = step 1, ticks 7-12 = step 2, etc.)
@@ -669,6 +758,13 @@ function BufferSeq:set_grid(component)
 			if global_step >= loop_start_index and global_step <= loop_end_index then pad = pad | SCRUB end
 		end
 
+		-- Handle edit selection highlighting (for range-based editing)
+		if selection_start_step and selection_end_step then
+			if global_step >= selection_start_step and global_step <= selection_end_step then
+				pad = pad | SELECTION
+			end
+		end
+
 		-- Mark steps outside loop bounds (before loop start or after loop end)
 		local is_outside = global_step < loop_start_index or global_step > loop_end_index
 		if is_outside then pad = pad | OUTSIDE end
@@ -788,6 +884,15 @@ function BufferSeq:set_grid(component)
 			-- If alt mode is not active, don't override - let normal rendering handle it
 		end
 
+		-- Edit selection: blink white when selection is active
+		if pad & SELECTION > 0 and self.selection_blink_active then
+			if self.blink_state then
+				color = { 15, 15, 15 } -- Bright white
+			else
+				color = Grid.rainbow_off[color_index] -- Dim rainbow
+			end
+		end
+
 		s.led[x][y] = color
 	end)
 	grid:refresh('BufferSeq:set_grid')
@@ -894,16 +999,33 @@ function BufferSeq:arrow_event(data)
 	elseif data.type == 'left' then
 		-- Left/Right: zoom in/out (step length)
 		-- Up/Down: scroll through buffer
-
 		self:increase_step_length()
+		-- Toast the new step resolution
+		local step_str = TimingConstants.step_length_to_note_string(self:get_step_length())
+		self.mode:toast('steps: ' .. step_str, { timeout = 1.5 })
 	elseif data.type == 'right' then
 		self:decrease_step_length()
+		-- Toast the new step resolution
+		local step_str = TimingConstants.step_length_to_note_string(self:get_step_length())
+		self.mode:toast('steps: ' .. step_str, { timeout = 1.5 })
 	elseif data.type == 'up' then
 		self:decrease_display_offset()
-		if self.display_offset == 0 then print('At buffer start') end
+		-- Toast the visible range
+		self:toast_visible_range()
 	elseif data.type == 'down' then
 		self:increase_display_offset()
+		-- Toast the visible range
+		self:toast_visible_range()
 	end
+end
+
+-- Toast the currently visible range in bars:beats:sixteenths format
+function BufferSeq:toast_visible_range()
+	local step_length = self:get_step_length()
+	local start_tick = self.step_offset * step_length + 1
+	local end_tick = start_tick + (self.display_length * step_length) - 1
+	local range_str = TimingConstants.tick_range_to_time_string(start_tick, end_tick)
+	self.mode:toast(range_str, { timeout = 1.5 })
 end
 
 function BufferSeq:alt_event(data)

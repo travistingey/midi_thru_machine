@@ -85,4 +85,88 @@ function TimingConstants.buffer_step_to_tick_range(step_index, buffer_start, buf
 	return step_start, step_end
 end
 
+-- ============================================================================
+-- TIME FORMATTING HELPERS
+-- Format tick positions as bars:beats:sixteenths (e.g., "1:1:1")
+-- Uses musical time: bar 1 starts at tick 1
+-- ============================================================================
+
+-- Convert tick to bars:beats:sixteenths string
+-- Format: "bar:beat:sixteenth" (all 1-based)
+-- @param tick number Tick position (1-based)
+-- @param ppqn number Pulses per quarter note (defaults to App.ppqn or 96)
+-- @return string Formatted time string (e.g., "1:1:1")
+function TimingConstants.tick_to_time_string(tick, ppqn)
+	ppqn = ppqn or (App and App.ppqn) or 96
+	local ticks_per_sixteenth = ppqn / 4
+	local ticks_per_beat = ppqn
+	local ticks_per_bar = ppqn * 4
+
+	-- Convert 1-based tick to 0-based for math
+	local t = tick - 1
+
+	local bar = math.floor(t / ticks_per_bar) + 1
+	local beat_offset = t % ticks_per_bar
+	local beat = math.floor(beat_offset / ticks_per_beat) + 1
+	local sixteenth_offset = beat_offset % ticks_per_beat
+	local sixteenth = math.floor(sixteenth_offset / ticks_per_sixteenth) + 1
+
+	return bar .. ':' .. beat .. ':' .. sixteenth
+end
+
+-- Format a tick range as "start – end" time string
+-- @param start_tick number Start tick (1-based)
+-- @param end_tick number End tick (1-based)
+-- @param ppqn number Pulses per quarter note (defaults to App.ppqn or 96)
+-- @return string Formatted range string (e.g., "1:1:1 – 2:4:4")
+function TimingConstants.tick_range_to_time_string(start_tick, end_tick, ppqn)
+	return TimingConstants.tick_to_time_string(start_tick, ppqn) .. ' – ' .. TimingConstants.tick_to_time_string(end_tick, ppqn)
+end
+
+-- Format step length as note value string
+-- @param step_length number Step length in ticks
+-- @param ppqn number Pulses per quarter note (defaults to App.ppqn or 96)
+-- @return string Note value string (e.g., "1/16", "1/4", "1 bar", "4 bars")
+function TimingConstants.step_length_to_note_string(step_length, ppqn)
+	ppqn = ppqn or (App and App.ppqn) or 96
+	local ticks_per_bar = ppqn * 4
+
+	-- Check for bar-based values first
+	if step_length >= ticks_per_bar then
+		local bars = step_length / ticks_per_bar
+		if bars == 1 then
+			return '1 bar'
+		else
+			return bars .. ' bars'
+		end
+	end
+
+	-- Check for beat-based values
+	local note_values = {
+		{ div = ppqn * 4, name = '1' }, -- whole note
+		{ div = ppqn * 2, name = '1/2' }, -- half note
+		{ div = ppqn, name = '1/4' }, -- quarter note
+		{ div = ppqn / 2, name = '1/8' }, -- eighth note
+		{ div = ppqn / 4, name = '1/16' }, -- sixteenth note
+		{ div = ppqn / 8, name = '1/32' }, -- thirty-second note
+	}
+
+	for _, nv in ipairs(note_values) do
+		if step_length == nv.div then
+			return nv.name
+		end
+	end
+
+	-- Fallback: show ticks
+	return step_length .. ' ticks'
+end
+
+-- Calculate minimum selection resolution (32nd note)
+-- @param ppqn number Pulses per quarter note (defaults to App.ppqn or 96)
+-- @return number Minimum selection step in ticks
+function TimingConstants.get_min_selection_step(ppqn)
+	ppqn = ppqn or (App and App.ppqn) or 96
+	return ppqn / 8 -- 32nd note
+end
+
 return TimingConstants
