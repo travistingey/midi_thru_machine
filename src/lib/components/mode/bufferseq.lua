@@ -497,11 +497,60 @@ function BufferSeq:grid_event(component, data)
 	local buffer = component
 	local pad_index = self.grid:grid_to_index(data) + self.step_offset
 
+	-- Handle edit selection on pad press (before scrub logic)
+	-- Single pad tap sets selection start, second tap sets selection end
+	if data.type == 'pad' and data.state and not self.mode.alt then
+		local start_tick, end_tick = self:pad_to_tick_range(pad_index)
+
+		if not self.selection_active then
+			-- First tap: set selection start
+			self.selection_start_tick = start_tick
+			self.selection_end_tick = end_tick
+			self.selection_active = true
+			-- Start blink mode for selection
+			if not self.selection_blink_active then
+				self:start_blink()
+				self.selection_blink_active = true
+			end
+		else
+			-- Second tap: extend or update selection
+			local current_start_step = math.floor((self.selection_start_tick - 1) / self:get_step_length()) + 1
+			if pad_index == current_start_step then
+				-- Same pad: clear selection (toggle off)
+				self:clear_selection()
+			else
+				-- Different pad: extend selection to include this pad
+				local min_pad = math.min(current_start_step, pad_index)
+				local max_pad = math.max(current_start_step, pad_index)
+				self:set_selection_from_pads(min_pad, max_pad)
+			end
+		end
+	end
+
+	-- Handle two-pad selection (two pads pressed simultaneously)
+	if data.type == 'pad' and data.state and data.pad_down and #data.pad_down == 2 and not self.mode.alt then
+		local pad_1 = self.grid:grid_to_index(data) + self.step_offset
+		local pad_2 = self.grid:grid_to_index(data.pad_down[1]) + self.step_offset
+		local min_pad = math.min(pad_1, pad_2)
+		local max_pad = math.max(pad_1, pad_2)
+		self:set_selection_from_pads(min_pad, max_pad)
+	end
+
 	-- Update context/screen overlay
 	if self.mode:has_active_menu() then
 		self.mode:toast(self.last_event, self.screen, { timeout = 2 })
 	else
-		self.mode:use_context(self.context, self.screen, { timeout = true, interrupt = true })
+		-- Use selection-aware timeout that clears selection when toast expires
+		local toast_options = { timeout = true, interrupt = true }
+		if self.selection_active then
+			toast_options.callback = function()
+				-- Clear selection when toast times out (unless in edit menu)
+				if not self.mode:has_active_menu() then
+					self:clear_selection()
+				end
+			end
+		end
+		self.mode:use_context(self.context, self.screen, toast_options)
 	end
 	self.last_event = pad_index
 
@@ -1121,6 +1170,10 @@ function BufferSeq:disable_event()
 	if self.scrub_active then
 		self:stop_scrub()
 		self.held_pads = {}
+	end
+	-- Clean up selection state
+	if self.selection_active then
+		self:clear_selection()
 	end
 end
 
