@@ -5,6 +5,7 @@ local UI = require(path_name .. 'ui')
 local Registry = require(path_name .. 'utilities/registry')
 local textentry = require('textentry')
 local Input = require(path_name .. 'components/track/input')
+local TimingConstants = require(path_name .. 'utilities/timing_constants')
 --[[
 Default Mode Component
 
@@ -542,10 +543,10 @@ function Default:clip_menu()
 
 	print('clip_status: ' .. clip_status)
 
-	-- Show current playback status
+	-- Playback settings submenu
 	table.insert(
 		items,
-		Registry.menu.make_item('clip_status', {
+		Registry.menu.make_item('clip_playback_settings', {
 			label_fn = function() return 'PLAYBACK' end,
 			value_fn = function()
 				if track and track.clip then
@@ -558,7 +559,7 @@ function Default:clip_menu()
 					if clip.current_slot then
 						local slot = clip.current_slot
 						local clip_entry = clip.clip_bank[slot]
-						if clip_entry then return 'Slot ' .. slot .. ' (' .. (clip_entry.name or 'unnamed') .. ')' end
+						if clip_entry then return 'Slot ' .. slot end
 						return 'Slot ' .. slot .. ' (missing)'
 					end
 					-- Live input
@@ -566,7 +567,13 @@ function Default:clip_menu()
 				end
 				return 'none'
 			end,
-			disable = true,
+			has_submenu = true,
+			on_press = function()
+				self:sub_menu(self:clip_playback_menu(), {
+					status = { icon = tid, label = 'Playback' },
+					screen = self:submenu_screen(),
+				})
+			end,
 		})
 	)
 
@@ -753,6 +760,397 @@ function Default:clip_menu()
 			helper_labels = {
 				press_fn_3 = 'unload/unfreeze',
 			},
+		})
+	)
+
+	return items
+end
+
+--[[
+  Function: edit_menu
+  Purpose: Constructs the edit menu for buffer editing operations.
+  Parameters:
+    bufferseq: Reference to the BufferSeq component with selection state
+  Returns: (table) List of menu items for editing operations.
+]]
+function Default:edit_menu(bufferseq)
+	local tid = App.current_track
+	local track = App.track[tid]
+	local items = {}
+
+	-- Get selection range from bufferseq
+	local start_tick, end_tick = nil, nil
+	if bufferseq and bufferseq.get_selection then
+		start_tick, end_tick = bufferseq:get_selection()
+	end
+
+	-- Selection range display (read-only info)
+	table.insert(
+		items,
+		Registry.menu.make_item('edit_selection_range', {
+			label_fn = function() return 'RANGE' end,
+			value_fn = function()
+				if start_tick and end_tick then
+					return TimingConstants.tick_range_to_time_string(start_tick, end_tick)
+				end
+				return 'none'
+			end,
+			disable = true,
+		})
+	)
+
+	-- Quantize setting
+	local quantize_values = {
+		{ ticks = App.ppqn / 8, name = '1/32' },
+		{ ticks = App.ppqn / 4, name = '1/16' },
+		{ ticks = App.ppqn / 2, name = '1/8' },
+		{ ticks = App.ppqn, name = '1/4' },
+	}
+	local quantize_index = 2 -- Default to 1/16
+
+	table.insert(
+		items,
+		Registry.menu.make_item('edit_quantize', {
+			label_fn = function() return 'QUANTIZE' end,
+			value_fn = function() return quantize_values[quantize_index].name end,
+			enc3 = function(d)
+				quantize_index = util.clamp(quantize_index + d, 1, #quantize_values)
+				App.screen_dirty = true
+			end,
+			on_press = function()
+				if track and track.buffer and start_tick and end_tick then
+					local grid_size = quantize_values[quantize_index].ticks
+					local count = track.buffer:quantize(grid_size, start_tick, end_tick + 1)
+					self.mode:toast('Quantized ' .. count .. ' events', { timeout = 2 })
+					App.screen_dirty = true
+				else
+					self.mode:toast('No selection', { timeout = 2 })
+				end
+			end,
+			helper_labels = {
+				enc3 = 'grid size',
+				press_fn_3 = 'apply',
+			},
+		})
+	)
+
+	-- Transpose setting
+	local transpose_semitones = 0
+
+	table.insert(
+		items,
+		Registry.menu.make_item('edit_transpose', {
+			label_fn = function() return 'TRANSPOSE' end,
+			value_fn = function()
+				if transpose_semitones == 0 then
+					return '0'
+				elseif transpose_semitones > 0 then
+					return '+' .. transpose_semitones
+				else
+					return tostring(transpose_semitones)
+				end
+			end,
+			enc3 = function(d)
+				transpose_semitones = util.clamp(transpose_semitones + d, -48, 48)
+				App.screen_dirty = true
+			end,
+			on_press = function()
+				if track and track.buffer and start_tick and end_tick and transpose_semitones ~= 0 then
+					local count = track.buffer:transpose(transpose_semitones, start_tick, end_tick + 1)
+					self.mode:toast('Transposed ' .. count .. ' notes', { timeout = 2 })
+					transpose_semitones = 0 -- Reset after applying
+					App.screen_dirty = true
+				else
+					self.mode:toast('No selection or no transpose', { timeout = 2 })
+				end
+			end,
+			helper_labels = {
+				enc3 = 'semitones',
+				press_fn_3 = 'apply',
+			},
+		})
+	)
+
+	-- Velocity scale setting
+	local velocity_percent = 100
+
+	table.insert(
+		items,
+		Registry.menu.make_item('edit_velocity', {
+			label_fn = function() return 'VELOCITY' end,
+			value_fn = function() return velocity_percent .. '%' end,
+			enc3 = function(d)
+				velocity_percent = util.clamp(velocity_percent + d * 5, 10, 200)
+				App.screen_dirty = true
+			end,
+			on_press = function()
+				if track and track.buffer and start_tick and end_tick and velocity_percent ~= 100 then
+					local factor = velocity_percent / 100
+					local count = track.buffer:scale_velocity(factor, start_tick, end_tick + 1)
+					self.mode:toast('Scaled ' .. count .. ' velocities', { timeout = 2 })
+					velocity_percent = 100 -- Reset after applying
+					App.screen_dirty = true
+				else
+					self.mode:toast('No selection or 100%', { timeout = 2 })
+				end
+			end,
+			helper_labels = {
+				enc3 = 'scale %',
+				press_fn_3 = 'apply',
+			},
+		})
+	)
+
+	-- Shift events forward/backward
+	local shift_amount = 0 -- in 32nd notes
+
+	table.insert(
+		items,
+		Registry.menu.make_item('edit_shift', {
+			label_fn = function() return 'SHIFT' end,
+			value_fn = function()
+				if shift_amount == 0 then
+					return '0'
+				else
+					local ticks = shift_amount * (App.ppqn / 8)
+					return (shift_amount > 0 and '+' or '') .. shift_amount .. ' (32nds)'
+				end
+			end,
+			enc3 = function(d)
+				shift_amount = util.clamp(shift_amount + d, -64, 64)
+				App.screen_dirty = true
+			end,
+			on_press = function()
+				if track and track.buffer and start_tick and end_tick and shift_amount ~= 0 then
+					local ticks = shift_amount * (App.ppqn / 8)
+					local count = track.buffer:shift_events(start_tick, ticks)
+					self.mode:toast('Shifted ' .. count .. ' events', { timeout = 2 })
+					shift_amount = 0 -- Reset after applying
+					App.screen_dirty = true
+				else
+					self.mode:toast('No selection or no shift', { timeout = 2 })
+				end
+			end,
+			helper_labels = {
+				enc3 = '32nd notes',
+				press_fn_3 = 'apply',
+			},
+		})
+	)
+
+	-- Delete events in range
+	table.insert(
+		items,
+		Registry.menu.make_item('edit_delete', {
+			label_fn = function() return 'DELETE' end,
+			value_fn = function()
+				if start_tick and end_tick then
+					return 'events in range'
+				end
+				return ''
+			end,
+			can_press = function() return start_tick and end_tick end,
+			on_press = function()
+				if track and track.buffer and start_tick and end_tick then
+					local count = track.buffer:clear_buffer_range(start_tick, end_tick)
+					self.mode:toast('Deleted events', { timeout = 2 })
+					App.screen_dirty = true
+				else
+					self.mode:toast('No selection', { timeout = 2 })
+				end
+			end,
+			helper_labels = {
+				press_fn_3 = 'delete',
+			},
+		})
+	)
+
+	-- Save selection to clip bank
+	table.insert(
+		items,
+		Registry.menu.make_item('edit_save_to_clip', {
+			label_fn = function() return 'SAVE TO CLIP' end,
+			value_fn = function()
+				local slot = App.current_clip or 1
+				return 'slot ' .. slot
+			end,
+			enc3 = function(d)
+				App.current_clip = util.clamp((App.current_clip or 1) + d, 1, max_clip_slot_select)
+				App.screen_dirty = true
+			end,
+			can_press = function() return start_tick and end_tick end,
+			on_press = function()
+				if track and track.clip and start_tick and end_tick then
+					local slot = App.current_clip or 1
+					local success = track.clip:save_clip_to_bank(slot, start_tick, end_tick, 'Clip ' .. slot)
+					if success then
+						self.mode:toast('Saved to slot ' .. slot, { timeout = 2 })
+					else
+						self.mode:toast('Save failed', { timeout = 2 })
+					end
+					App.screen_dirty = true
+				else
+					self.mode:toast('No selection', { timeout = 2 })
+				end
+			end,
+			helper_labels = {
+				enc3 = 'select slot',
+				press_fn_3 = 'save',
+			},
+		})
+	)
+
+	-- Clear selection
+	table.insert(
+		items,
+		Registry.menu.make_item('edit_clear_selection', {
+			label_fn = function() return 'CLEAR SEL' end,
+			value_fn = function() return '' end,
+			on_press = function()
+				if bufferseq and bufferseq.clear_selection then
+					bufferseq:clear_selection()
+					self.mode:toast('Selection cleared', { timeout = 1.5 })
+				end
+				-- Return to previous menu
+				if self.current and self.current.options and self.current.options.callback then
+					self.current.options.callback()
+				end
+			end,
+			helper_labels = {
+				press_fn_3 = 'clear',
+			},
+		})
+	)
+
+	return items
+end
+
+--[[
+  Function: clip_playback_menu
+  Purpose: Constructs the clip playback settings submenu.
+  Returns: (table) List of menu items for playback settings.
+]]
+function Default:clip_playback_menu()
+	local tid = App.current_track
+	local track = App.track[tid]
+	local items = {}
+
+	if not track or not track.clip then return items end
+
+	local clip = track.clip
+
+	-- Playback mode (where to inject playback events)
+	local playback_modes = { 'Input', 'Scale', 'Output', 'Direct' }
+	table.insert(
+		items,
+		Registry.menu.make_item('clip_playback_mode', {
+			label_fn = function() return 'MODE' end,
+			value_fn = function() return playback_modes[clip.playback_mode] or 'Input' end,
+			enc3 = function(d)
+				clip.playback_mode = util.clamp(clip.playback_mode + d, 1, #playback_modes)
+				App.screen_dirty = true
+			end,
+			helper_labels = {
+				enc3 = 'select mode',
+			},
+		})
+	)
+
+	-- Loop mode (continuous vs one-shot)
+	table.insert(
+		items,
+		Registry.menu.make_item('clip_loop_mode', {
+			label_fn = function() return 'LOOP' end,
+			value_fn = function() return clip.buffer_loop and 'on' or 'off' end,
+			enc3 = function(d)
+				if d ~= 0 then clip.buffer_loop = not clip.buffer_loop end
+				App.screen_dirty = true
+			end,
+			helper_labels = {
+				enc3 = 'toggle',
+			},
+		})
+	)
+
+	-- Sync length (action sync for clip operations)
+	local sync_options = {
+		{ value = nil, name = 'off' },
+		{ value = App.ppqn / 4, name = '1/16' },
+		{ value = App.ppqn / 2, name = '1/8' },
+		{ value = App.ppqn, name = '1/4' },
+		{ value = App.ppqn * 2, name = '1/2' },
+		{ value = App.ppqn * 4, name = '1 bar' },
+		{ value = App.ppqn * 8, name = '2 bars' },
+		{ value = App.ppqn * 16, name = '4 bars' },
+	}
+
+	local function get_sync_index()
+		for i, opt in ipairs(sync_options) do
+			if opt.value == clip.action_sync_length then return i end
+		end
+		return 1
+	end
+
+	table.insert(
+		items,
+		Registry.menu.make_item('clip_sync_length', {
+			label_fn = function() return 'SYNC' end,
+			value_fn = function() return sync_options[get_sync_index()].name end,
+			enc3 = function(d)
+				local idx = util.clamp(get_sync_index() + d, 1, #sync_options)
+				clip.action_sync_length = sync_options[idx].value
+				App.screen_dirty = true
+			end,
+			helper_labels = {
+				enc3 = 'sync length',
+			},
+		})
+	)
+
+	-- Playback start (if frozen or clip loaded)
+	table.insert(
+		items,
+		Registry.menu.make_item('clip_playback_start', {
+			label_fn = function() return 'START' end,
+			value_fn = function()
+				local start = clip:get_playback_start()
+				return TimingConstants.tick_to_time_string(start)
+			end,
+			disable = true,
+		})
+	)
+
+	-- Playback length
+	table.insert(
+		items,
+		Registry.menu.make_item('clip_playback_length', {
+			label_fn = function() return 'LENGTH' end,
+			value_fn = function()
+				local length = clip:get_playback_length()
+				local bars = length / (App.ppqn * 4)
+				if bars >= 1 then
+					return string.format('%.1f bars', bars)
+				else
+					return length .. ' ticks'
+				end
+			end,
+			disable = true,
+		})
+	)
+
+	-- Current position
+	table.insert(
+		items,
+		Registry.menu.make_item('clip_position', {
+			label_fn = function() return 'POSITION' end,
+			value_fn = function()
+				if clip.scrub_mode and clip.scrub_tick then
+					return TimingConstants.tick_to_time_string(clip.scrub_tick) .. ' (scrub)'
+				else
+					return TimingConstants.tick_to_time_string(clip.tick)
+				end
+			end,
+			disable = true,
 		})
 	)
 
