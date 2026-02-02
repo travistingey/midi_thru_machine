@@ -71,9 +71,7 @@ function BufferSeq:set(o)
 	self.context = {
 		press_fn_3 = function()
 			-- Open edit menu if selection is active, otherwise show step info
-			if self.selection_active then
-				self:open_edit_menu()
-			end
+			if self.selection_active then self:open_edit_menu() end
 		end,
 	}
 
@@ -156,9 +154,7 @@ end
 
 -- Get selection range
 function BufferSeq:get_selection()
-	if self.selection_active and self.selection_start_tick and self.selection_end_tick then
-		return self.selection_start_tick, self.selection_end_tick
-	end
+	if self.selection_active and self.selection_start_tick and self.selection_end_tick then return self.selection_start_tick, self.selection_end_tick end
 	return nil, nil
 end
 
@@ -414,9 +410,7 @@ function BufferSeq:recalculate_scrub_from_held_pads()
 			self.scrub_start_tick = start_tick
 			self.scrub_end_tick = end_tick
 			clip:update_scrub(start_tick, end_tick)
-			if flags.debug_scrub then
-				print('Scrub recalculated: ' .. start_tick .. '-' .. end_tick)
-			end
+			if flags.debug_scrub then print('Scrub recalculated: ' .. start_tick .. '-' .. end_tick) end
 		else
 			-- Queue new scrub action with display_step_length as sync boundary
 			clip:queue_scrub_action(start_tick, end_tick, App.buffer_scrub_mode == 'loop', pad_check_fn, scrub_sync_length)
@@ -437,14 +431,10 @@ function BufferSeq:jump_to_tick(tick)
 	-- If in scrub mode, set scrub_tick; otherwise set clip.tick
 	if clip and clip.scrub_mode then
 		clip.scrub_tick = tick
-		if flags.debug_scrub then
-			print('Scrub playback jumped to tick: ' .. tick)
-		end
+		if flags.debug_scrub then print('Scrub playback jumped to tick: ' .. tick) end
 	elseif clip then
 		clip.tick = tick
-		if flags.debug_clip then
-			print('Clip playback jumped to tick: ' .. tick)
-		end
+		if flags.debug_clip then print('Clip playback jumped to tick: ' .. tick) end
 	end
 end
 
@@ -460,9 +450,7 @@ function BufferSeq:resync_with_app()
 		-- Convert App.tick to position within loop: (App.tick % buffer_length) + buffer_start
 		clip.tick = ((App.tick - buffer.buffer_start) % buffer.buffer_length) + buffer.buffer_start
 
-		if flags.debug_clip then
-			print('Clip playback resynced with app tick: ' .. App.tick .. ' -> clip.tick: ' .. clip.tick)
-		end
+		if flags.debug_clip then print('Clip playback resynced with app tick: ' .. App.tick .. ' -> clip.tick: ' .. clip.tick) end
 	end
 end
 
@@ -487,9 +475,7 @@ function BufferSeq:stop_scrub()
 	self.scrub_end_tick = nil
 	self.scrub_saved_buffer_start = nil
 
-	if flags.debug_scrub then
-		print('Scrub stopped')
-	end
+	if flags.debug_scrub then print('Scrub stopped') end
 end
 
 function BufferSeq:grid_event(component, data)
@@ -545,9 +531,7 @@ function BufferSeq:grid_event(component, data)
 		if self.selection_active then
 			toast_options.callback = function()
 				-- Clear selection when toast times out (unless in edit menu)
-				if not self.mode:has_active_menu() then
-					self:clear_selection()
-				end
+				if not self.mode:has_active_menu() then self:clear_selection() end
 			end
 		end
 		self.mode:use_context(self.context, self.screen, toast_options)
@@ -587,9 +571,7 @@ function BufferSeq:grid_event(component, data)
 		-- Set playback loop and freeze immediately
 		clip:set_playback_loop(loop_start, loop_length)
 		clip:freeze_buffer()
-		if flags.debug_clip then
-			print('Loop frozen: ' .. loop_start .. '-' .. loop_end)
-		end
+		if flags.debug_clip then print('Loop frozen: ' .. loop_start .. '-' .. loop_end) end
 	end
 
 	-- Handle pad press (start/update scrub)
@@ -809,9 +791,7 @@ function BufferSeq:set_grid(component)
 
 		-- Handle edit selection highlighting (for range-based editing)
 		if selection_start_step and selection_end_step then
-			if global_step >= selection_start_step and global_step <= selection_end_step then
-				pad = pad | SELECTION
-			end
+			if global_step >= selection_start_step and global_step <= selection_end_step then pad = pad | SELECTION end
 		end
 
 		-- Mark steps outside loop bounds (before loop start or after loop end)
@@ -1092,9 +1072,7 @@ function BufferSeq:alt_event(data)
 			-- Freeze immediately
 			clip:set_playback_loop(loop_start, loop_length)
 			clip:freeze_buffer()
-			if flags.debug_scrub then
-				print('Scrub frozen to loop: ' .. loop_start .. '-' .. self.scrub_end_tick)
-			end
+			if flags.debug_scrub then print('Scrub frozen to loop: ' .. loop_start .. '-' .. self.scrub_end_tick) end
 
 			-- Stop scrub mode (playback now comes from frozen_buffer)
 			self:stop_scrub()
@@ -1172,9 +1150,7 @@ function BufferSeq:disable_event()
 		self.held_pads = {}
 	end
 	-- Clean up selection state
-	if self.selection_active then
-		self:clear_selection()
-	end
+	if self.selection_active then self:clear_selection() end
 end
 
 -- Update row pads to show current track

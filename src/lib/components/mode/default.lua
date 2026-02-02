@@ -791,9 +791,7 @@ function Default:edit_menu(bufferseq)
 		Registry.menu.make_item('edit_selection_range', {
 			label_fn = function() return 'RANGE' end,
 			value_fn = function()
-				if start_tick and end_tick then
-					return TimingConstants.tick_range_to_time_string(start_tick, end_tick)
-				end
+				if start_tick and end_tick then return TimingConstants.tick_range_to_time_string(start_tick, end_tick) end
 				return 'none'
 			end,
 			disable = true,
@@ -945,9 +943,7 @@ function Default:edit_menu(bufferseq)
 		Registry.menu.make_item('edit_delete', {
 			label_fn = function() return 'DELETE' end,
 			value_fn = function()
-				if start_tick and end_tick then
-					return 'events in range'
-				end
+				if start_tick and end_tick then return 'events in range' end
 				return ''
 			end,
 			can_press = function() return start_tick and end_tick end,
@@ -1013,9 +1009,7 @@ function Default:edit_menu(bufferseq)
 					self.mode:toast('Selection cleared', { timeout = 1.5 })
 				end
 				-- Return to previous menu
-				if self.current and self.current.options and self.current.options.callback then
-					self.current.options.callback()
-				end
+				if self.current and self.current.options and self.current.options.callback then self.current.options.callback() end
 			end,
 			helper_labels = {
 				press_fn_3 = 'clear',
