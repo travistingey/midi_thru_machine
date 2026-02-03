@@ -66,6 +66,12 @@ function ScaleGrid:enable_event()
 	end
 	-- Attach the listener to the Scale component
 	scale:on('scale_changed', self.scale_changed_listener)
+	-- Initial render: set grid immediately when mode enables to show current scale
+	-- This ensures the initial scale is displayed even if it hasn't changed
+	if scale then
+		self:set_grid(scale)
+		App.screen_dirty = true
+	end
 end
 
 function ScaleGrid:disable_event()

@@ -96,5 +96,10 @@ function r()
 end
 
 function cleanup() --------------- cleanup() is automatically called on script close
-	clock.cancel(redraw_clock_id) -- melt our clock vie the id we noted
+	if redraw_clock_id then
+		local ok, err = pcall(clock.cancel, redraw_clock_id)
+		if not ok then
+			-- Coroutine may have already completed, ignore error
+		end
+	end
 end

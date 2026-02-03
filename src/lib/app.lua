@@ -36,6 +36,15 @@ local LATCH_CC = 64
 local App = {}
 App.__index = App
 
+-- Helper function to safely cancel a coroutine
+-- Handles cases where coroutine may have already completed
+local function safe_cancel(coro)
+	if coro then
+		local ok, err = pcall(clock.cancel, coro)
+		if not ok and App.DEBUG_TIMING then print('Warning: Failed to cancel coroutine:', err) end
+	end
+end
+
 --==============================================================================
 -- Constructor & Initialization
 --==============================================================================
@@ -261,7 +270,7 @@ function App:on_external_clock()
 	if #self.scheduled_ticks > 0 then
 		-- Cancel all pending scheduled ticks
 		for _, coro in ipairs(self.scheduled_ticks) do
-			clock.cancel(coro)
+			safe_cancel(coro)
 		end
 		self.scheduled_ticks = {}
 
@@ -421,7 +430,7 @@ function App:on_start(continue)
 	self.pending_subticks = 0
 	-- Clear any scheduled ticks from previous session
 	for _, coro in ipairs(self.scheduled_ticks) do
-		clock.cancel(coro)
+		safe_cancel(coro)
 	end
 	self.scheduled_ticks = {}
 
@@ -448,7 +457,7 @@ function App:on_stop()
 	self:emit('transport_event', { type = 'stop' })
 	if params:get('clock_source') == 1 then
 		if self.clock then
-			clock.cancel(self.clock)
+			safe_cancel(self.clock)
 			self.clock = nil
 		end
 	end
@@ -460,7 +469,7 @@ function App:on_stop()
 
 	-- Cancel any scheduled ticks
 	for _, coro in ipairs(self.scheduled_ticks) do
-		clock.cancel(coro)
+		safe_cancel(coro)
 	end
 	self.scheduled_ticks = {}
 end
@@ -474,7 +483,7 @@ end
 function App:cleanup()
 	-- Clean up any running clocks when script reloads
 	if self.clock then
-		clock.cancel(self.clock)
+		safe_cancel(self.clock)
 		self.clock = nil
 	end
 	self.playing = false

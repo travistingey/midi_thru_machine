@@ -210,9 +210,14 @@ function Scale:register_params()
 end
 
 function Scale:set_scale(bits)
-	-- Store the old bits
 	local old_bits = self.bits or 0
 	local new_bits = bits
+
+	-- Early exit if bits haven't changed and notes are already built
+	-- This prevents unnecessary rebuilding during MIDI following
+	if old_bits == new_bits and self.notes and #self.notes > 0 then
+		return
+	end
 
 	-- Identify changed bits using XOR
 	local changed_bits = old_bits ~ new_bits
@@ -224,17 +229,18 @@ function Scale:set_scale(bits)
 
 	self.bits = bits
 	self.intervals = musicutil.bits_to_intervals(bits)
+	
+	-- Rebuild notes array (only happens when bits actually change or first time)
+	-- Note: root changes don't require rebuilding notes since root is applied in quantize_note()
 	self.notes = {}
 
-	Registry.set('scale_' .. self.id .. '_bits', bits, 'scale_bits_update')
-
-	local i = 0
 	for oct = 1, 10 do
-		-- Create a list of notes that changed in scale change
 		for i = 1, #self.intervals do
 			self.notes[(oct - 1) * #self.intervals + i] = self.intervals[i] + (oct - 1) * 12
 		end
 	end
+
+	Registry.set('scale_' .. self.id .. '_bits', bits, 'scale_bits_update')
 
 	if #self.intervals > 2 then self.chord = self:chord_id() end
 
@@ -268,10 +274,37 @@ for i = 0, 4095 do
 end
 
 function Scale:chord_id(bits)
-	local best = { index = nil, score = -1 }
 	bits = bits or self.bits
-
 	bits = bits & 0xFFF -- Ensure bits are in 12-bit range
+
+	-- Fast path: Check for exact match in interval_lookup first
+	local exact_match = musicutil.interval_lookup[bits]
+	if exact_match then
+		-- Try to find the index in chord_set for this exact match
+		-- This is still O(n) but only happens when we have an exact match
+		for i = 1, #self.chord_set do
+			if (self.chord_set[i].bits & 0xFFF) == bits then
+				local chord = {}
+				for k, v in pairs(exact_match) do
+					chord[k] = v
+				end
+				chord.index = i
+				return chord
+			end
+		end
+		-- If exact match exists but not in current chord_set, return it anyway
+		-- This handles cases where chord_set is a subset (e.g., PLAITS)
+		local chord = {}
+		for k, v in pairs(exact_match) do
+			chord[k] = v
+		end
+		chord.index = 1 -- Default index when not found in chord_set
+		return chord
+	end
+
+	-- Fallback to similarity search if no exact match found
+	-- This is the expensive path that we're trying to avoid
+	local best = { index = nil, score = -1 }
 	local bits_count = bit_counts[bits]
 
 	for i = 1, #self.chord_set do

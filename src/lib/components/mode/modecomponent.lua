@@ -151,7 +151,11 @@ function ModeComponent:start_blink(callback)
                 clock.sleep(0.5)  -- Adjust blink interval as desired
             end
             -- Blinking loop ended
-            clock.cancel(self.blinking_clock)
+            -- Note: Can't cancel coroutine from within itself, but guard to prevent errors
+            local ok, err = pcall(clock.cancel, self.blinking_clock)
+            if not ok then
+				-- Coroutine may have already completed, ignore error
+			end
             self.blinking_clock = nil
             self.blink_state = nil
             
