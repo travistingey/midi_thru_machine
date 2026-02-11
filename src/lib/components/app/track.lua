@@ -111,10 +111,9 @@ function Track:set(o)
 	self:on('midi_trigger', input_event)
 	self:on('mute_input', function(state) self.mute_input = state end)
 	self:on('record_buffer', function(data)
-		-- Don't record events that came from buffer/clip playback (they have buffer_sent set)
-		-- This prevents playback events from being recorded back into the buffer, causing doubling
-		if data.buffer_sent then return end
-
+		-- Buffer always records output, including output from scrubbing, clips, and frozen buffer
+		-- Recording happens at buffer.tick (continuously advancing), while playback uses different
+		-- tick positions (scrub tick, clip tick, etc.), so recording at buffer.tick won't cause feedback
 		-- Always record to buffer when transport is playing
 		if App.playing and self.buffer then self.buffer:record_buffer(data) end
 	end)

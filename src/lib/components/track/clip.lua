@@ -176,7 +176,9 @@ function Clip:queue_scrub_action(start_tick, end_tick, loop_mode, pad_check_fn, 
 		-- Check if pad is still held before executing
 		if action_data.pad_check_fn and action_data.pad_check_fn() then
 			component:start_scrub(action_data.start_tick, action_data.end_tick, action_data.loop_mode, action_data.initial_tick)
-			if flags.debug_scrub then print('Scrub started (synced to ' .. action_data.sync_length .. ' ticks): ' .. action_data.start_tick .. '-' .. action_data.end_tick .. ', initial_tick: ' .. action_data.initial_tick) end
+			if flags.debug_scrub then
+				print('Scrub started (synced to ' .. action_data.sync_length .. ' ticks): ' .. action_data.start_tick .. '-' .. action_data.end_tick .. ', initial_tick: ' .. action_data.initial_tick)
+			end
 			-- Emit event so bufferseq can update its state
 			component:emit('scrub_started', {
 				start_tick = action_data.start_tick,
@@ -547,7 +549,9 @@ function Clip:start_scrub(start_tick, end_tick, loop_mode, initial_tick)
 	-- Use emit to ensure the event system is notified
 	self.track:emit('mute_input', true)
 
-	if flags.debug_scrub then print('Scrub started: ' .. start_tick .. '-' .. end_tick .. ' (loop: ' .. tostring(loop_mode) .. ', initial_tick: ' .. initial_tick .. ', events: ' .. self:count_scrub_events() .. ')') end
+	if flags.debug_scrub then
+		print('Scrub started: ' .. start_tick .. '-' .. end_tick .. ' (loop: ' .. tostring(loop_mode) .. ', initial_tick: ' .. initial_tick .. ', events: ' .. self:count_scrub_events() .. ')')
+	end
 end
 
 -- Helper to count events in scrub buffer (for debugging)
