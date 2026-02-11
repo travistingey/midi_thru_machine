@@ -237,7 +237,26 @@ function BufferSeq:pad_to_tick_range(pad_index)
 	return start_tick, end_tick
 end
 
+-- Calculate relative scrub tick position based on App.tick within scrub range
+-- Quantizes to next sync boundary and wraps back to scrub range
+function BufferSeq:calculate_relative_scrub_tick(start_tick, end_tick, sync_length)
+	local SequenceUtils = require('Foobar/lib/utilities/sequence_utils')
+	local scrub_length = end_tick - start_tick + 1
+	
+	-- Calculate relative position: where App.tick falls within scrub range
+	local relative_tick = ((App.tick - start_tick) % scrub_length) + start_tick
+	
+	-- Quantize to next sync boundary
+	local next_sync = SequenceUtils.get_next_sync_tick(sync_length, relative_tick)
+	
+	-- Wrap back to scrub range
+	local wrapped_tick = start_tick + ((next_sync - start_tick) % scrub_length)
+	
+	return wrapped_tick
+end
+
 -- Start scrub playback from a pad
+-- Note: This method may be legacy - recalculate_scrub_from_held_pads is the primary method
 function BufferSeq:start_scrub(pad_index)
 	local buffer = self:get_component()
 	local start_tick, end_tick = self:pad_to_tick_range(pad_index)
@@ -250,10 +269,23 @@ function BufferSeq:start_scrub(pad_index)
 	self.scrub_end_tick = end_tick
 	self.scrub_active = true
 
+	-- Calculate initial tick based on scrub_start_mode
+	local initial_tick = start_tick -- Default to grid mode
+	local scrub_start_mode = App.scrub_start_mode or 'grid'
+	local scrub_sync_length = App.scrub_sync_length or (App.ppqn / 4)
+	
+	if scrub_start_mode == 'relative' then
+		initial_tick = self:calculate_relative_scrub_tick(start_tick, end_tick, scrub_sync_length)
+	elseif scrub_start_mode == 'absolute' then
+		initial_tick = start_tick
+	else
+		initial_tick = start_tick -- 'grid' mode
+	end
+
 	-- Start scrub playback
 	local track = buffer.track
 	local clip = track and track.clip or nil
-	if clip then clip:start_scrub(start_tick, end_tick, App.buffer_scrub_mode == 'loop') end
+	if clip then clip:start_scrub(start_tick, end_tick, App.buffer_scrub_mode == 'loop', initial_tick) end
 end
 
 -- Recalculate scrub range from all currently held pads
@@ -276,10 +308,9 @@ function BufferSeq:recalculate_scrub_from_held_pads()
 		local clip = track and track.clip or nil
 		if clip then
 			clip:clear_pending_scrub()
-			-- Queue synced scrub stop (minimum 1/16th note sync)
+			-- Queue synced scrub stop (use app-level scrub_sync_length)
 			if self.scrub_active then
-				local min_sync_length = App.ppqn / 4 -- 1/16th note minimum
-				local scrub_sync_length = math.max(self:get_step_length(), min_sync_length)
+				local scrub_sync_length = App.scrub_sync_length or (App.ppqn / 4)
 				clip:queue_scrub_stop(scrub_sync_length)
 				if flags.debug_scrub then
 					local next_sync_tick = clip:get_next_sync_tick(scrub_sync_length)
@@ -321,11 +352,31 @@ function BufferSeq:recalculate_scrub_from_held_pads()
 	local clip = track and track.clip or nil
 
 	-- Calculate sync length for scrub operations
-	-- Use display_step_length as the sync boundary, with minimum of 1/16th note
-	local min_sync_length = App.ppqn / 4 -- 1/16th note minimum (24 ticks at 96 ppqn)
-	local scrub_sync_length = math.max(display_step_length, min_sync_length)
+	-- Base sync comes from app-level scrub_sync parameter.
+	-- In grid mode, preserve legacy behavior: use display length OR scrub sync, whichever is larger.
+	local scrub_sync_base = App.scrub_sync_length or (App.ppqn / 4)
+	local scrub_sync_length = scrub_sync_base
 
-	-- Always use sync for scrub start (minimum 1/16th note)
+	-- Calculate initial tick based on scrub_start_mode
+	local initial_tick = start_tick -- Default to grid mode
+	local scrub_start_mode = App.scrub_start_mode or 'grid'
+	if scrub_start_mode == 'grid' then scrub_sync_length = math.max(display_step_length, scrub_sync_base) end
+	
+	if scrub_start_mode == 'relative' then
+		-- Calculate relative position within scrub range, quantized to sync boundary
+		initial_tick = self:calculate_relative_scrub_tick(start_tick, end_tick, scrub_sync_length)
+		if flags.debug_scrub then
+			print('Relative scrub start: App.tick=' .. App.tick .. ', initial_tick=' .. initial_tick .. ' (range: ' .. start_tick .. '-' .. end_tick .. ')')
+		end
+	elseif scrub_start_mode == 'absolute' then
+		-- Always start at beginning (start_tick), sync happens at boundary
+		initial_tick = start_tick
+	else
+		-- 'grid' mode: current behavior (start at start_tick)
+		initial_tick = start_tick
+	end
+
+	-- Always use sync for scrub start
 	-- This ensures scrubbing is synchronized to the beat
 	if clip then
 		-- If scrub is already active, update it immediately (no sync for updates)
@@ -334,15 +385,13 @@ function BufferSeq:recalculate_scrub_from_held_pads()
 			self.scrub_start_tick = start_tick
 			self.scrub_end_tick = end_tick
 			clip:update_scrub(start_tick, end_tick)
-			if flags.debug_scrub then
-				print('Scrub recalculated: ' .. start_tick .. '-' .. end_tick)
-			end
+			if flags.debug_scrub then print('Scrub recalculated: ' .. start_tick .. '-' .. end_tick) end
 		else
-			-- Queue new scrub action with display_step_length as sync boundary
-			clip:queue_scrub_action(start_tick, end_tick, App.buffer_scrub_mode == 'loop', pad_check_fn, scrub_sync_length)
+			-- Queue new scrub action with initial_tick based on scrub_start_mode
+			clip:queue_scrub_action(start_tick, end_tick, App.buffer_scrub_mode == 'loop', pad_check_fn, scrub_sync_length, initial_tick)
 			if flags.debug_scrub then
 				local next_sync_tick = clip:get_next_sync_tick(scrub_sync_length)
-				print('Scrub queued for sync at tick: ' .. next_sync_tick .. ' (sync_length: ' .. scrub_sync_length .. ')')
+				print('Scrub queued for sync at tick: ' .. next_sync_tick .. ' (sync_length: ' .. scrub_sync_length .. ', initial_tick: ' .. initial_tick .. ')')
 			end
 		end
 	end
@@ -354,17 +403,13 @@ function BufferSeq:jump_to_tick(tick)
 	local track = buffer.track
 	local clip = track and track.clip or nil
 
-	-- If in scrub mode, set scrub_tick; otherwise set clip.tick
-	if clip and clip.scrub_mode then
-		clip.scrub_tick = tick
-		if flags.debug_scrub then
-			print('Scrub playback jumped to tick: ' .. tick)
-		end
+	-- If in scrub mode, set scrub tick; otherwise set clip.tick
+	if clip and clip.active_source == clip.sources.scrub then
+		clip.sources.scrub.tick = tick
+		if flags.debug_scrub then print('Scrub playback jumped to tick: ' .. tick) end
 	elseif clip then
 		clip.tick = tick
-		if flags.debug_clip then
-			print('Clip playback jumped to tick: ' .. tick)
-		end
+		if flags.debug_clip then print('Clip playback jumped to tick: ' .. tick) end
 	end
 end
 
@@ -380,9 +425,7 @@ function BufferSeq:resync_with_app()
 		-- Convert App.tick to position within loop: (App.tick % buffer_length) + buffer_start
 		clip.tick = ((App.tick - buffer.buffer_start) % buffer.buffer_length) + buffer.buffer_start
 
-		if flags.debug_clip then
-			print('Clip playback resynced with app tick: ' .. App.tick .. ' -> clip.tick: ' .. clip.tick)
-		end
+		if flags.debug_clip then print('Clip playback resynced with app tick: ' .. App.tick .. ' -> clip.tick: ' .. clip.tick) end
 	end
 end
 
@@ -407,9 +450,7 @@ function BufferSeq:stop_scrub()
 	self.scrub_end_tick = nil
 	self.scrub_saved_buffer_start = nil
 
-	if flags.debug_scrub then
-		print('Scrub stopped')
-	end
+	if flags.debug_scrub then print('Scrub stopped') end
 end
 
 function BufferSeq:grid_event(component, data)
@@ -458,9 +499,7 @@ function BufferSeq:grid_event(component, data)
 		-- Set playback loop and freeze immediately
 		clip:set_playback_loop(loop_start, loop_length)
 		clip:freeze_buffer()
-		if flags.debug_clip then
-			print('Loop frozen: ' .. loop_start .. '-' .. loop_end)
-		end
+		if flags.debug_clip then print('Loop frozen: ' .. loop_start .. '-' .. loop_end) end
 	end
 
 	-- Handle pad press (start/update scrub)
@@ -502,7 +541,7 @@ function BufferSeq:set_grid(component)
 	-- Check if scrub mode is active
 	local track = buffer.track
 	local clip = track and track.clip or nil
-	local scrub_active = (clip and clip.scrub_mode) or self.scrub_active
+	local scrub_active = (clip and clip.active_source == clip.sources.scrub) or self.scrub_active
 	local scrub_start_step = nil
 	local scrub_end_step = nil
 	local scrub_playhead_step = nil
@@ -512,10 +551,10 @@ function BufferSeq:set_grid(component)
 		-- Convert ticks to 1-based step indices (ticks 1-6 = step 1, ticks 7-12 = step 2, etc.)
 		scrub_start_step = math.floor((self.scrub_start_tick - 1) / step_length) + 1
 		scrub_end_step = math.floor((self.scrub_end_tick - 1) / step_length) + 1
-		if clip and clip.scrub_tick then scrub_playhead_step = math.floor((clip.scrub_tick - 1) / step_length) + 1 end
+		if clip and clip.active_source == clip.sources.scrub and clip.sources.scrub.tick then scrub_playhead_step = math.floor((clip.sources.scrub.tick - 1) / step_length) + 1 end
 	end
 
-	-- Get the current playback source (live buffer, loaded clip, or frozen buffer)
+	-- Get the current playback source using PlaybackSource abstraction
 	local playback_source = nil
 	local playback_tick = nil
 	local playback_start = buffer.buffer_start
@@ -524,29 +563,37 @@ function BufferSeq:set_grid(component)
 	local clip_playback_step = nil -- Step index for clip playback (1-based clip ticks converted to step)
 	local frozen_playback_step = nil -- Step index for frozen buffer playback
 
-	if clip and clip.current_slot and clip.clip_bank[clip.current_slot] then
-		-- Clip is playing - use clip buffer
-		local clip_entry = clip.clip_bank[clip.current_slot]
-		playback_source = clip_entry.buffer
-		-- Clip ticks are 1-based, convert to step index for display
-		-- Clips display starting at step 1, so clip.tick maps directly to step
-		clip_playback_step = math.floor((clip.tick - 1) / step_length) + 1
-		playback_tick = clip.tick
-		-- Clips are stored with ticks starting at 1, so they display starting at step 1
-		playback_start = 1
-		playback_length = clip_entry.length or 0
-	elseif clip and clip.buffer_frozen and clip.frozen_buffer then
-		-- Frozen buffer is playing - use frozen buffer
-		playback_source = clip.frozen_buffer
-		-- Frozen buffer uses absolute ticks, convert to step index
-		frozen_playback_step = math.floor((clip.tick - 1) / step_length) + 1
-		playback_tick = clip.tick
-		-- Use frozen buffer's playback loop boundaries
-		playback_start = clip.playback_start or buffer.buffer_start
-		playback_length = clip.playback_length or buffer.buffer_length
-		frozen_active = true
+	local active_source = clip and clip:get_active_source()
+	if active_source then
+		if active_source == clip.sources.clip_bank then
+			-- Clip is playing - use clip buffer
+			local clip_entry = clip.clip_bank[clip.current_slot]
+			playback_source = clip_entry.buffer
+			-- Clip ticks are 1-based, convert to step index for display
+			clip_playback_step = math.floor((clip.tick - 1) / step_length) + 1
+			playback_tick = clip.tick
+			-- Clips are stored with ticks starting at 1, so they display starting at step 1
+			playback_start = 1
+			playback_length = clip_entry.length or 0
+		elseif active_source == clip.sources.frozen then
+			-- Frozen buffer is playing - use frozen buffer
+			playback_source = clip.sources.frozen.events
+			-- Frozen buffer uses absolute ticks, convert to step index
+			frozen_playback_step = math.floor((clip.tick - 1) / step_length) + 1
+			playback_tick = clip.tick
+			-- Use frozen buffer's playback loop boundaries
+			playback_start = clip.playback_start or buffer.buffer_start
+			playback_length = clip.playback_length or buffer.buffer_length
+			frozen_active = true
+		elseif active_source == clip.sources.scrub then
+			-- Scrub mode is active (handled separately in scrub section)
+			playback_source = clip.sources.scrub.events
+			playback_tick = clip.sources.scrub.tick
+			playback_start = clip.sources.scrub.loop_start
+			playback_length = clip.sources.scrub.loop_length
+		end
 	else
-		-- Live buffer is playing
+		-- No active playback
 		playback_source = buffer.buffer
 		playback_tick = buffer.tick
 	end
@@ -739,21 +786,21 @@ function BufferSeq:set_grid(component)
 		-- Handle out-of-bounds steps (when not blinking and not passed)
 		elseif is_outside then
 			color = 0
-		-- When playback is OFF
-		elseif not playback_active then
-			-- Show playback playhead (scrub/clip/frozen) with rainbow color (if set)
+		-- When not actively playing - show dim white or off instead of rainbow colors
+		elseif not is_actively_playing then
+			-- Show playback playhead (scrub/clip/frozen) with dim white (if set)
 			if pad & STEP > 0 then
-				color = Grid.rainbow_on[color_index]
-			-- Show recording playhead with rainbow color
+				color = { 5, 5, 5 }
+			-- Show recording playhead with dim white
 			elseif pad & RECORD_STEP > 0 then
-				color = Grid.rainbow_on[color_index]
-			-- Highlight range if scrub/frozen/clip is active (even if not playing) with rainbow colors
+				color = { 5, 5, 5 }
+			-- Highlight range if scrub/frozen/clip is active (even if not playing) with dim white
 			elseif pad & SCRUB > 0 then
-				color = Grid.rainbow_off[color_index]
+				color = { 5, 5, 5 }
 			else
 				color = 0
 			end
-		-- When playback is ON
+		-- When actively playing - show rainbow colors
 		else
 			-- Show playhead (playback position) with bright rainbow color
 			if pad & STEP > 0 then
@@ -776,13 +823,22 @@ function BufferSeq:set_grid(component)
 				if self.blink_state ~= nil then
 					-- Blink mode is active - blink the loop end points
 					if self.blink_state then
-						color = { 5, 5, 5 }
+						-- Show rainbow color only when actively playing, otherwise dim white
+						if is_actively_playing then
+							color = Grid.rainbow_on[color_index]
+						else
+							color = { 5, 5, 5 }
+						end
 					else
 						color = 0
 					end
 				else
-					-- Alt mode active but blink not started yet
-					color = { 5, 5, 5 }
+					-- Alt mode active but blink not started yet - show rainbow color only when actively playing
+					if is_actively_playing then
+						color = Grid.rainbow_on[color_index]
+					else
+						color = { 5, 5, 5 }
+					end
 				end
 			end
 			-- If alt mode is not active, don't override - let normal rendering handle it
@@ -826,8 +882,8 @@ function BufferSeq:transport_event(buffer, data)
 		local current_display_step = math.floor((current_tick - 1) / display_step_length) + 1
 
 		-- Prioritize scrub playback position for refresh
-		if clip and clip.scrub_mode and clip.scrub_tick then
-			current_tick = clip.scrub_tick
+		if clip and clip.active_source == clip.sources.scrub and clip.sources.scrub.tick then
+			current_tick = clip.sources.scrub.tick
 			current_display_step = math.floor((current_tick - 1) / display_step_length) + 1
 		-- Then check clip playback position
 		elseif clip and clip.current_slot and clip.clip_bank[clip.current_slot] then
@@ -921,11 +977,9 @@ function BufferSeq:alt_event(data)
 			-- Freeze immediately
 			clip:set_playback_loop(loop_start, loop_length)
 			clip:freeze_buffer()
-			if flags.debug_scrub then
-				print('Scrub frozen to loop: ' .. loop_start .. '-' .. self.scrub_end_tick)
-			end
+			if flags.debug_scrub then print('Scrub frozen to loop: ' .. loop_start .. '-' .. self.scrub_end_tick) end
 
-			-- Stop scrub mode (playback now comes from frozen_buffer)
+			-- Stop scrub mode (playback now comes from frozen buffer)
 			self:stop_scrub()
 			self.held_pads = {}
 		else

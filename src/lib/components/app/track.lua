@@ -36,10 +36,8 @@ function Track:new(o)
 
 	-- Set buffer reference in clip after buffer is loaded
 	-- Uses set_buffer() to also initialize PlaybackSource
-	-- Also sync action_sync_length from buffer to clip
 	if o.clip and o.buffer then
 		o.clip:set_buffer(o.buffer)
-		o.clip.action_sync_length = o.buffer.action_sync_length
 		-- Load clip bank metadata on track initialization
 		o.clip:load_bank_metadata()
 	end
@@ -78,7 +76,7 @@ function Track:set(o)
 
 	local track = 'track_' .. self.id .. '_'
 
-	Registry.add('add_group', 'Track ' .. self.id, 30)
+	Registry.add('add_group', 'Track ' .. self.id, 28)
 
 	Registry.add('add_text', track .. 'name', 'Name', self.name)
 	Registry.set_action(track .. 'name', function(d) self.name = d end)
@@ -581,21 +579,6 @@ function Track:set(o)
 		local buffer_loop = (d > 0)
 		self.clip.buffer_loop = buffer_loop
 		-- Trigger menu redraw to show updated value
-		App.screen_dirty = true
-	end)
-
-	-- Action Sync (shared across all sequences: Auto, Buffer, Clip)
-	-- Used for quantization of loop changes, clip loading, scrub actions, and future auto arm/disarm
-	local action_sync_options = { '1/48', '1/32', '1/32t', '1/16', '1/16t', '1/16d', '1/8', '1/8t', '1/8d', '1/4', '1/4t', '1/4d', '1/2', '1', '2', '4', '8', '16' }
-	local action_sync_default_index = 14 -- Default to 1 bar (index 14 = '1')
-	Registry.add('add_option', track .. 'action_sync', 'Action Sync', action_sync_options, action_sync_default_index)
-	Registry.set_action(track .. 'action_sync', function(d)
-		App.settings[track .. 'action_sync'] = d
-		local buffer_step_values = calculate_step_values(true)
-		local new_sync_length = buffer_step_values[d + 1] -- +1 because we removed 'step' option
-
-		self.clip.action_sync_length = new_sync_length
-
 		App.screen_dirty = true
 	end)
 end

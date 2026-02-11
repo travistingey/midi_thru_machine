@@ -120,6 +120,12 @@ function App:init(o)
 	-- Buffer scrub mode setting (app-level)
 	self.buffer_scrub_mode = 'loop' -- 'loop' = loop scrub range, 'play_through' = play through once
 
+	-- Launch sync and scrub sync settings (app-level)
+	-- Default values will be set by params:default() via set_action callbacks
+	self.launch_sync_length = self.ppqn * 4 -- Default to 1 bar (will be overridden by params)
+	self.scrub_sync_length = math.floor(self.ppqn / 4) -- Default to 1/16th note (will be overridden by params)
+	self.scrub_start_mode = 'grid'
+
 	-- Tick and transport timing (times in beats)
 	self.tick = 0
 	self.start_time = 0
@@ -197,6 +203,73 @@ function App:init(o)
 	params:add_option('buffer_scrub_mode', 'Scrub Mode', { 'loop', 'play_through' }, 1)
 	params:set_action('buffer_scrub_mode', function(d)
 		self.buffer_scrub_mode = d == 1 and 'loop' or 'play_through'
+		App.screen_dirty = true
+	end)
+
+	-- Helper function to calculate step values (shared with track.lua logic)
+	local function calculate_step_values(include_trig)
+		local ppqn = self.ppqn
+		local step_values = {
+			math.floor(ppqn / 12), -- 1/48
+			math.floor(ppqn / 8), -- 1/32
+			math.floor(ppqn * 2 / 24), -- 1/32t (triplet)
+			math.floor(ppqn / 4), -- 1/16
+			math.floor(ppqn * 2 / 12), -- 1/16t (triplet)
+			math.floor(ppqn * 3 / 8), -- 1/16d (dotted)
+			math.floor(ppqn / 2), -- 1/8
+			math.floor(ppqn * 2 / 6), -- 1/8t (triplet)
+			math.floor(ppqn * 3 / 4), -- 1/8d (dotted)
+			ppqn, -- 1/4
+			math.floor(ppqn * 2 / 3), -- 1/4t (triplet)
+			math.floor(ppqn * 3 / 2), -- 1/4d (dotted)
+			ppqn * 2, -- 1/2
+			ppqn * 4, -- 1 (whole note)
+			ppqn * 8, -- 2
+			ppqn * 16, -- 4
+			ppqn * 32, -- 8
+			ppqn * 64, -- 16
+		}
+
+		if include_trig then
+			local options = { 0 }
+			for i = 1, #step_values do
+				table.insert(options, step_values[i])
+			end
+			return options
+		end
+		return step_values
+	end
+
+	-- Launch Sync (app-level, replaces per-track action_sync)
+	local launch_sync_options = { '1/48', '1/32', '1/32t', '1/16', '1/16t', '1/16d', '1/8', '1/8t', '1/8d', '1/4', '1/4t', '1/4d', '1/2', '1', '2', '4', '8', '16' }
+	local launch_sync_default_index = 14 -- Default to 1 bar (index 14 = '1')
+	params:add_option('launch_sync', 'Launch Sync', launch_sync_options, launch_sync_default_index)
+	params:set_action('launch_sync', function(d)
+		self.settings['launch_sync'] = d
+		local step_values = calculate_step_values(true)
+		local new_sync_length = step_values[d + 1] -- +1 because we removed 'step' option
+		self.launch_sync_length = new_sync_length
+		App.screen_dirty = true
+	end)
+
+	-- Scrub Sync (app-level, controls scrub synchronization)
+	local scrub_sync_options = { '1/48', '1/32', '1/32t', '1/16', '1/16t', '1/16d', '1/8', '1/8t', '1/8d', '1/4', '1/4t', '1/4d', '1/2', '1', '2', '4', '8', '16' }
+	local scrub_sync_default_index = 4 -- Default to 1/16th note (index 4 = '1/16')
+	params:add_option('scrub_sync', 'Scrub Sync', scrub_sync_options, scrub_sync_default_index)
+	params:set_action('scrub_sync', function(d)
+		self.settings['scrub_sync'] = d
+		local step_values = calculate_step_values(true)
+		local new_sync_length = step_values[d + 1] -- +1 because we removed 'step' option
+		self.scrub_sync_length = new_sync_length
+		App.screen_dirty = true
+	end)
+
+	-- Scrub Start (app-level, controls where scrub playback starts)
+	params:add_option('scrub_start', 'Scrub Start', { 'grid', 'relative', 'absolute' }, 1)
+	params:set_action('scrub_start', function(d)
+		self.settings['scrub_start'] = d
+		local modes = { 'grid', 'relative', 'absolute' }
+		self.scrub_start_mode = modes[d]
 		App.screen_dirty = true
 	end)
 

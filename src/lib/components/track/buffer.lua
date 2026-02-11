@@ -42,25 +42,14 @@ function Buffer:set(o)
 
 	-- Buffer only records - Clip component handles all playback
 
-	-- Single buffer architecture: Buffer continuously records, Clip handles playback via frozen_buffer
+	-- Single buffer architecture: Buffer continuously records, Clip handles playback via PlaybackSource abstraction
 	-- Buffer loops back over itself at buffer_start + buffer_length
 	-- EventStore provides efficient range queries and maintains sorted tick index
 	self.store = EventStore.new()
 
-	-- Backward compatibility: self.buffer points to store's internal events table
+	-- self.buffer points to store's internal events table
 	-- This allows existing code to access buffer[tick] directly
 	self.buffer = self.store.events
-
-	-- Migrate existing buffer data if present (backward compatibility)
-	-- This handles migration from old double-buffer structure
-	if o.buffer then
-		self.store:from_sparse_table(o.buffer)
-		self.buffer = self.store.events
-	elseif o.buffer_write then
-		-- Migrate from old buffer_write
-		self.store:from_sparse_table(o.buffer_write)
-		self.buffer = self.store.events
-	end
 
 	-- Overwrite mode tracking: tracks which steps have been cleared in current loop iteration
 	-- Key: step_index (step number within loop), Value: true
@@ -75,19 +64,12 @@ function Buffer:wrap_tick(tick)
 	return self.buffer_start + wrapped_relative
 end
 
--- Swap buffer step: Copy buffer_write to buffer_read for a single step
--- Called on step transitions during recording to provide immediate feedback (within one step)
--- Clip component reads from buffer_read for playback
--- Only swaps ticks within both step boundaries and loop boundaries
--- Optimized to only iterate over ticks that contain data (sparse table optimization)
-
 -- Record a MIDI event to the buffer at the current tick
 -- Events wrap around within the buffer boundaries (buffer_start to buffer_start + buffer_length - 1)
 -- Overwrite mode clearing is handled in transport_event when entering new steps
 -- Always records to buffer
 -- @param midi_event table The MIDI event to record
--- @param event_tick number Optional: The tick when the event occurred (App.tick). If not provided, uses self.tick
-function Buffer:record_buffer(midi_event, event_tick)
+function Buffer:record_buffer(midi_event)
 	-- Timing tracking (conditional on flag)
 	local record_start = flags.buffer_timing_stats and util.time() or nil
 

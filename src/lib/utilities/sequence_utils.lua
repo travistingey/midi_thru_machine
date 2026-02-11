@@ -11,17 +11,21 @@ local SequenceUtils = {}
 --==============================================================================
 
 -- Get sync length from various sources (standardized access pattern)
--- @param buffer_component (table|nil) Buffer component with action_sync_length
--- @param component_sync_length (number|nil) Component's own sync_length
+-- @param buffer_component (table|nil) Buffer component with action_sync_length (deprecated, kept for backward compatibility)
+-- @param component_sync_length (number|nil) Component's own sync_length (deprecated, kept for backward compatibility)
 -- @param default (number) Default sync length if none found
 -- @return (number) Sync length in ticks
 function SequenceUtils.get_sync_length(buffer_component, component_sync_length, default)
 	default = default or (App.ppqn * 4) -- Default 1 bar
 
+	-- Priority order: buffer_component.action_sync_length → component_sync_length → App.launch_sync_length → default
+	-- Note: buffer_component.action_sync_length and component_sync_length are deprecated but kept for backward compatibility
 	if buffer_component and buffer_component.action_sync_length then
 		return buffer_component.action_sync_length
 	elseif component_sync_length then
 		return component_sync_length
+	elseif App and App.launch_sync_length then
+		return App.launch_sync_length
 	else
 		return default
 	end

@@ -25,11 +25,14 @@ function SyncManager.new(component, default_sync_length_fn)
 	self.component = component
 	self.default_sync_length_fn = default_sync_length_fn
 		or function(c)
-			-- Default: try to get from buffer, fall back to 1 bar
+			-- Default: try to get from buffer, component, App.launch_sync_length, or fall back to 1 bar
+			-- Note: buffer.action_sync_length and component.action_sync_length are deprecated but kept for backward compatibility
 			if c.buffer and c.buffer.action_sync_length then
 				return c.buffer.action_sync_length
 			elseif c.action_sync_length then
 				return c.action_sync_length
+			elseif App and App.launch_sync_length then
+				return App.launch_sync_length
 			else
 				return (App and App.ppqn or 96) * 4 -- 1 bar default
 			end

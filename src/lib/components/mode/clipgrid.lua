@@ -31,6 +31,7 @@ function ClipGrid:set(o)
 	self.recording_slot = nil -- Which slot is currently being recorded to
 	self.recording_start_tick = nil -- When recording started (absolute tick)
 	self.recording_pending = nil -- Pending recording action (queued for sync)
+	self.next_recording_slot = nil -- Slot to start recording to after stopping current recording
 
 	-- Max recording length (default 4 bars = 4 * 16 beats * 24ppqn = 1536 ticks at 24ppqn, but we use App.ppqn)
 	-- Default to 4 bars: 4 * 16 beats = 64 beats = 64 * App.ppqn ticks
@@ -90,6 +91,8 @@ function ClipGrid:enable_event()
 					if elapsed >= self.max_recording_length then
 						-- Max recording length reached: stop and save
 						if flags.debug_clip then print('ClipGrid: Max recording length reached for slot ' .. self.recording_slot .. ' (elapsed: ' .. elapsed .. ' ticks)') end
+						-- Clear any pending slot switch since we're stopping due to max length
+						self.next_recording_slot = nil
 						self:stop_recording_and_save(clip, self.recording_slot)
 					end
 				end
@@ -164,9 +167,27 @@ function ClipGrid:queue_recording_start(clip, bank_slot)
 		self.recording_pending = nil
 	end
 
-	-- Get sync length from track parameter (respects user's action_sync setting)
-	-- For clip recording, we use the track's action_sync_length parameter for quantization
-	local sync_length = SequenceUtils.get_sync_length(clip.buffer, clip.action_sync_length)
+	-- Get sync length from app-level launch_sync parameter
+	-- For clip recording, we use App.launch_sync_length for quantization
+	local sync_length = App.launch_sync_length or (App.ppqn * 4)
+
+	-- If there's an active recording to a different slot, stop and save it first
+	-- This ensures the previous recording is saved before starting a new one
+	-- Also check if we're already switching to a different slot (next_recording_slot is set)
+	local current_recording_slot = self.recording_slot or self.next_recording_slot
+	if current_recording_slot and current_recording_slot ~= bank_slot then
+		if flags.debug_clip then
+			print('ClipGrid: Stopping current recording to slot ' .. (self.recording_slot or 'pending') .. ' before starting new recording to slot ' .. bank_slot)
+		end
+		-- Store the new slot to start after stopping
+		self.next_recording_slot = bank_slot
+		-- If there's an active recording (not just pending), queue stop for it
+		if self.recording_slot then
+			self:queue_recording_stop(clip, self.recording_slot)
+		end
+		-- Don't queue the start here - it will be queued after the stop completes
+		return
+	end
 
 	if flags.debug_clip then
 		local current_tick = App.tick or 1
@@ -207,8 +228,8 @@ function ClipGrid:start_recording(clip, bank_slot)
 	local recording_start_tick = app_tick
 
 	if flags.debug_clip then
-		-- Verify sync alignment (use track's action_sync_length parameter)
-		local sync_length = SequenceUtils.get_sync_length(clip.buffer, clip.action_sync_length)
+		-- Verify sync alignment (use app-level launch_sync parameter)
+		local sync_length = App.launch_sync_length or (App.ppqn * 4)
 		local boundary = sync_length
 		local relative_tick = recording_start_tick - 1
 		local is_aligned = (relative_tick % boundary == 0)
@@ -246,8 +267,8 @@ function ClipGrid:queue_recording_stop(clip, bank_slot)
 	if not clip or not clip.buffer then return end
 	if self.recording_slot ~= bank_slot then return end
 
-	-- Get sync length from track parameter (respects user's action_sync setting)
-	local sync_length = SequenceUtils.get_sync_length(clip.buffer, clip.action_sync_length)
+	-- Get sync length from app-level launch_sync parameter
+	local sync_length = App.launch_sync_length or (App.ppqn * 4)
 
 	if flags.debug_clip then
 		local current_tick = App.tick or 1
@@ -291,8 +312,8 @@ function ClipGrid:stop_recording_and_save(clip, bank_slot)
 	local last_recorded_tick = buffer_tick - 1
 	local loop_end = last_recorded_tick
 
-	-- Get sync length for alignment
-	local sync_length = SequenceUtils.get_sync_length(clip.buffer, clip.action_sync_length)
+	-- Get sync length for alignment (use app-level launch_sync parameter)
+	local sync_length = App.launch_sync_length or (App.ppqn * 4)
 
 	if flags.debug_clip then
 		local is_aligned = (last_recorded_tick % sync_length == 0)
@@ -344,6 +365,18 @@ function ClipGrid:stop_recording_and_save(clip, bank_slot)
 		self.recording_slot = nil
 		self.recording_start_tick = nil
 
+		-- If there's a next recording slot queued, start recording to it now
+		-- This happens when switching from one recording slot to another
+		local next_slot = self.next_recording_slot
+		if next_slot then
+			self.next_recording_slot = nil
+			if flags.debug_clip then
+				print('ClipGrid: Starting queued recording to slot ' .. next_slot .. ' after stopping slot ' .. bank_slot)
+			end
+			-- Queue the start for the next sync tick
+			self:queue_recording_start(clip, next_slot)
+		end
+
 		-- Update grid
 		self:set_grid(clip)
 	else
@@ -358,8 +391,8 @@ function ClipGrid:queue_clip_playback(clip, bank_slot)
 	-- If same clip is already playing, don't queue playback
 	if clip.current_slot == bank_slot then return end
 
-	-- Get sync length from track parameter
-	local sync_length = SequenceUtils.get_sync_length(clip.buffer, clip.action_sync_length)
+	-- Get sync length from app-level launch_sync parameter
+	local sync_length = App.launch_sync_length or (App.ppqn * 4)
 
 	if flags.debug_clip then
 		local current_tick = App.tick or 1
@@ -386,8 +419,8 @@ end
 function ClipGrid:queue_clip_stop(clip, bank_slot)
 	if not clip or clip.current_slot ~= bank_slot then return end
 
-	-- Get sync length from track parameter
-	local sync_length = SequenceUtils.get_sync_length(clip.buffer, clip.action_sync_length)
+	-- Get sync length from app-level launch_sync parameter
+	local sync_length = App.launch_sync_length or (App.ppqn * 4)
 
 	if flags.debug_clip then
 		local current_tick = App.tick or 1
@@ -418,7 +451,11 @@ function ClipGrid:transport_event(clip, data)
 	if data.type == 'stop' then
 		-- Transport stopped: ensure state is updated immediately
 		-- If recording was active, stop it immediately (no sync quantization needed)
-		if self.recording_slot then self:stop_recording_and_save(clip, self.recording_slot) end
+		if self.recording_slot then
+			-- Clear any pending slot switch since transport stopped
+			self.next_recording_slot = nil
+			self:stop_recording_and_save(clip, self.recording_slot)
+		end
 		-- Update grid display
 		self:set_grid(clip)
 	elseif data.type == 'start' then

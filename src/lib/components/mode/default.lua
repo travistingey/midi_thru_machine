@@ -413,7 +413,7 @@ function Default:track_menu()
 					if track.clip.current_slot then
 						return 'slot ' .. track.clip.current_slot
 					else
-						return 'live buffer'
+						return 'none'
 					end
 				end
 				return 'no clip'
@@ -551,7 +551,7 @@ function Default:clip_menu()
 				if track and track.clip then
 					local clip = track.clip
 					-- Check scrub mode first
-					if clip.scrub_mode then return 'Scrub' end
+					if clip.active_source == clip.sources.scrub then return 'Scrub' end
 					-- Check frozen buffer
 					if clip.buffer_frozen then return 'Frozen' end
 					-- Check if clip is loaded
