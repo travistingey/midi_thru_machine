@@ -173,9 +173,7 @@ function SequenceUtils.create_sync_action_queue(component, get_sync_length_fn)
 
 		-- If we're already at the sync boundary, execute immediately
 		if not SequenceUtils.should_wait_for_sync(sync_length, current_tick) then
-			if flags.debug_sync then
-				print('SequenceUtils: Already on sync boundary, executing immediately')
-			end
+			if flags.debug_sync then print('SequenceUtils: Already on sync boundary, executing immediately') end
 			self:execute_actions()
 		end
 	end
@@ -192,9 +190,7 @@ function SequenceUtils.create_sync_action_queue(component, get_sync_length_fn)
 
 		local current_tick = App.tick or 1 -- 1-based: first clock = tick 1
 		if current_tick >= self.pending_action.sync_tick then
-			if flags.debug_sync then
-				print('SequenceUtils: Execute action at App.tick: ' .. current_tick .. ' (target was: ' .. self.pending_action.sync_tick .. ')')
-			end
+			if flags.debug_sync then print('SequenceUtils: Execute action at App.tick: ' .. current_tick .. ' (target was: ' .. self.pending_action.sync_tick .. ')') end
 			-- Execute the action
 			self.pending_action.action_fn(self.component, self.pending_action.action_data)
 

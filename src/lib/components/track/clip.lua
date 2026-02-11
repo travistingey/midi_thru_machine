@@ -58,9 +58,7 @@ function Clip:set(o)
 
 	-- Unified sync manager replaces multiple sync queues
 	-- Provides named slots: 'scrub', 'clip', 'general', etc.
-	self.sync_manager = SyncManager.new(self, function(component)
-		return SequenceUtils.get_sync_length(component.buffer, component.action_sync_length)
-	end)
+	self.sync_manager = SyncManager.new(self, function(component) return SequenceUtils.get_sync_length(component.buffer, component.action_sync_length) end)
 
 	-- Clip bank management
 	self.clip_bank = {} -- 16 slots: {[1-16] = nil or {filename, name, buffer, playback_settings}}
@@ -189,9 +187,7 @@ function Clip:queue_scrub_action(start_tick, end_tick, loop_mode, pad_check_fn, 
 		-- Check if pad is still held before executing
 		if action_data.pad_check_fn and action_data.pad_check_fn() then
 			component:start_scrub(action_data.start_tick, action_data.end_tick, action_data.loop_mode)
-			if flags.debug_scrub then
-				print('Scrub started (synced to ' .. action_data.sync_length .. ' ticks): ' .. action_data.start_tick .. '-' .. action_data.end_tick)
-			end
+			if flags.debug_scrub then print('Scrub started (synced to ' .. action_data.sync_length .. ' ticks): ' .. action_data.start_tick .. '-' .. action_data.end_tick) end
 			-- Emit event so bufferseq can update its state
 			component:emit('scrub_started', {
 				start_tick = action_data.start_tick,
@@ -200,9 +196,7 @@ function Clip:queue_scrub_action(start_tick, end_tick, loop_mode, pad_check_fn, 
 		else
 			component:stop_scrub()
 			-- Pad was released, cancel the action
-			if flags.debug_scrub then
-				print('Scrub cancelled: pad no longer held')
-			end
+			if flags.debug_scrub then print('Scrub cancelled: pad no longer held') end
 			component:emit('scrub_stopped', {
 				start_tick = action_data.start_tick,
 				end_tick = action_data.end_tick,
@@ -236,9 +230,7 @@ function Clip:queue_scrub_stop(sync_length)
 	sync_length = math.max(sync_length, min_sync_length)
 
 	local action_fn = function(component, action_data)
-		if flags.debug_scrub then
-			print('Scrub stopped (synced to ' .. action_data.sync_length .. ' ticks)')
-		end
+		if flags.debug_scrub then print('Scrub stopped (synced to ' .. action_data.sync_length .. ' ticks)') end
 		component:stop_scrub()
 		component:emit('scrub_stopped', {})
 	end
@@ -312,9 +304,7 @@ function Clip:unfreeze_buffer()
 
 	-- Deactivate FrozenBufferSource
 	self.sources.frozen:deactivate()
-	if self.active_source == self.sources.frozen then
-		self.active_source = nil
-	end
+	if self.active_source == self.sources.frozen then self.active_source = nil end
 
 	self.buffer_frozen = false
 	self.frozen_tick = nil
@@ -357,9 +347,7 @@ function Clip:set_playback_loop(start_tick, length)
 	end
 
 	self.last_frozen_step_index = nil
-	if flags.debug_clip then
-		print('Clip: Playback loop set to ' .. start_tick .. '-' .. new_end)
-	end
+	if flags.debug_clip then print('Clip: Playback loop set to ' .. start_tick .. '-' .. new_end) end
 end
 
 -- Execute pending sync actions (should be called on each clock tick)
@@ -626,9 +614,7 @@ function Clip:start_scrub(start_tick, end_tick, loop_mode)
 	-- Jump to scrub start position (backward compatibility)
 	self.scrub_tick = start_tick
 
-	if flags.debug_scrub then
-		print('Scrub started: ' .. start_tick .. '-' .. end_tick .. ' (loop: ' .. tostring(loop_mode) .. ', events: ' .. self:count_scrub_events() .. ')')
-	end
+	if flags.debug_scrub then print('Scrub started: ' .. start_tick .. '-' .. end_tick .. ' (loop: ' .. tostring(loop_mode) .. ', events: ' .. self:count_scrub_events() .. ')') end
 end
 
 -- Helper to count events in scrub buffer (for debugging)
@@ -654,9 +640,7 @@ function Clip:update_scrub(start_tick, end_tick)
 	self.scrub_length = end_tick - start_tick + 1
 
 	-- Update ScrubSource range
-	if self.buffer then
-		self.sources.scrub:update_range(self.buffer, start_tick, end_tick)
-	end
+	if self.buffer then self.sources.scrub:update_range(self.buffer, start_tick, end_tick) end
 
 	-- Keep backward compatible scrub_buffer synced
 	self.scrub_buffer = self.sources.scrub.events
@@ -674,9 +658,7 @@ function Clip:stop_scrub()
 
 	-- Deactivate ScrubSource
 	self.sources.scrub:deactivate()
-	if self.active_source == self.sources.scrub then
-		self.active_source = nil
-	end
+	if self.active_source == self.sources.scrub then self.active_source = nil end
 
 	-- Clear scrub_buffer (backward compatibility)
 	self.scrub_buffer = {}
@@ -891,12 +873,8 @@ function Clip:unload_clip()
 		local previous_slot = self.current_slot
 
 		-- Deactivate ClipBankSource
-		if self.sources.clip_bank then
-			self.sources.clip_bank:deactivate()
-		end
-		if self.active_source == self.sources.clip_bank then
-			self.active_source = nil
-		end
+		if self.sources.clip_bank then self.sources.clip_bank:deactivate() end
+		if self.active_source == self.sources.clip_bank then self.active_source = nil end
 		self.sources.clip_bank = nil
 
 		self.current_slot = nil

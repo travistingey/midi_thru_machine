@@ -97,6 +97,7 @@ end
 
 function cleanup() --------------- cleanup() is automatically called on script close
 	if redraw_clock_id then
+		print('cancelling redraw_clock_id', type(redraw_clock_id))
 		local ok, err = pcall(clock.cancel, redraw_clock_id)
 		if not ok then
 			-- Coroutine may have already completed, ignore error

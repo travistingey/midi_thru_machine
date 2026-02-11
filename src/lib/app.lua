@@ -262,8 +262,24 @@ end
 function App:on_external_clock()
 	-- Only process external clock if clock source is external
 	if params:get('clock_source') ~= 2 then return end
+	-- Prevent reentrancy: emit('transport_event') in on_tick can trigger MIDI/echo and re-enter
+	if self._in_external_clock then return end
+	self._in_external_clock = true
 	self.external_tick = self.external_tick + 1
 	local now = util.time()
+
+	-- Cap total ticks per invocation: at most 8 (4 to complete previous + 4 for this clock).
+	-- Prevents drift from any path firing too many ticks.
+	local ticks_this_invocation = 0
+	local cap_limit = self.tick_multiplier * 2
+	local function fire_tick_capped()
+		if ticks_this_invocation < cap_limit then
+			ticks_this_invocation = ticks_this_invocation + 1
+			self._tick_authorized = true
+			self:on_tick()
+			self._tick_authorized = false
+		end
+	end
 
 	-- If a new clock tick arrives before scheduled subticks complete,
 	-- cancel remaining scheduled ticks and burst them immediately
@@ -271,13 +287,15 @@ function App:on_external_clock()
 		-- Cancel all pending scheduled ticks
 		for _, coro in ipairs(self.scheduled_ticks) do
 			safe_cancel(coro)
+			goto continue
 		end
+		::continue::
 		self.scheduled_ticks = {}
 
 		-- Burst the remaining subticks immediately (safety check for count)
 		local remaining = math.max(0, self.pending_subticks)
 		for i = 1, remaining do
-			self:on_tick()
+			fire_tick_capped()
 		end
 		self.pending_subticks = 0
 	end
@@ -285,7 +303,7 @@ function App:on_external_clock()
 	-- First tick: no timing data yet, process one tick and schedule the rest
 	if not self.last_clock_time then
 		-- Process first tick immediately
-		self:on_tick()
+		fire_tick_capped()
 
 		-- Schedule remaining subticks to process at start of second clock signal
 		-- Store count of pending subticks (will be processed before next clock handling)
@@ -293,6 +311,7 @@ function App:on_external_clock()
 		self.last_clock_time = now
 
 		if self.DEBUG_TIMING then print(string.format('FIRST CLOCK: Tick: %d, Pending: %d', App.tick, self.pending_subticks)) end
+		self._in_external_clock = false
 		return
 	end
 
@@ -301,7 +320,7 @@ function App:on_external_clock()
 		local remaining = self.pending_subticks
 		if self.DEBUG_TIMING then print(string.format('PROCESSING PENDING: %d subticks, starting at Tick: %d', remaining, App.tick)) end
 		for i = 1, remaining do
-			self:on_tick()
+			fire_tick_capped()
 		end
 		self.pending_subticks = 0
 		if self.DEBUG_TIMING then print(string.format('PENDING COMPLETE: Tick: %d', App.tick)) end
@@ -319,11 +338,21 @@ function App:on_external_clock()
 
 	self.last_clock_time = now
 
-	-- Dispatch internal ticks using hybrid approach
+	-- Cap for THIS external clock only: never fire more than tick_multiplier (4) in the dispatch below.
+	-- Burst/process_pending above complete the *previous* clock; dispatch is for *this* clock only.
+	-- Logs showed all advances authorized but still 383 ext at 1536 app => 4 invocations fire 5; cap at sink.
+	self._current_period_advances = 0
+	local function fire_tick_current()
+		self._in_current_period = true
+		fire_tick_capped()
+		self._in_current_period = false
+	end
+
+	-- Dispatch internal ticks using hybrid approach (fire_tick_capped enforces 8 max per invocation)
 	if spaced_subticks == 0 then
 		-- No spacing possible: burst all subticks immediately
 		for i = 1, self.tick_multiplier do
-			self:on_tick()
+			fire_tick_current()
 		end
 		self.pending_subticks = 0
 
@@ -331,7 +360,7 @@ function App:on_external_clock()
 	elseif burst_count == 0 then
 		-- Full spaced mode: all subticks can be scheduled
 		-- Fire first subtick immediately
-		self:on_tick()
+		fire_tick_current()
 
 		-- Track remaining subticks
 		self.pending_subticks = spaced_subticks - 1
@@ -344,7 +373,7 @@ function App:on_external_clock()
 				clock.sleep(delay_ms / 1000) -- Convert ms to seconds
 				if self.playing then
 					if self.pending_subticks > 0 then self.pending_subticks = self.pending_subticks - 1 end
-					self:on_tick()
+					fire_tick_current()
 				end
 			end)
 			table.insert(self.scheduled_ticks, coro)
@@ -352,7 +381,7 @@ function App:on_external_clock()
 	else
 		-- Hybrid mode: schedule spaced subticks, burst remaining at last scheduled position
 		-- Fire first subtick immediately
-		self:on_tick()
+		fire_tick_current()
 
 		-- Track remaining spaced subticks (excluding the burst)
 		self.pending_subticks = spaced_subticks - 1
@@ -370,13 +399,13 @@ function App:on_external_clock()
 					-- At the last scheduled position, burst remaining subticks
 					if is_last_spaced and burst_count > 0 then
 						-- Fire the scheduled subtick, then burst remaining
-						self:on_tick()
+						fire_tick_current()
 						for j = 1, burst_count do
-							self:on_tick()
+							fire_tick_current()
 						end
 					else
 						-- Normal scheduled subtick
-						self:on_tick()
+						fire_tick_current()
 					end
 				end
 			end)
@@ -409,6 +438,7 @@ function App:on_external_clock()
 			)
 		)
 	end
+	self._in_external_clock = false
 end
 
 --==============================================================================
@@ -496,8 +526,19 @@ end
 -- The on_tick function updates the tick counter,
 -- and dispatches clock events to tracks.
 function App:on_tick()
+	-- When external clock: only advance if we were called from fire_tick_capped (catches stray callers)
+	if params:get('clock_source') == 2 and not self._tick_authorized then return end
 	self.last_time = clock.get_beats()
 	self.tick = self.tick + 1
+	-- When external and in "current period" (dispatch): allow at most 4 advances per period; undo 5th.
+	if params:get('clock_source') == 2 and self._in_current_period then
+		self._current_period_advances = (self._current_period_advances or 0) + 1
+		if self._current_period_advances > self.tick_multiplier then
+			self.tick = self.tick - 1
+			self._current_period_advances = self._current_period_advances - 1
+			return
+		end
+	end
 	self:emit('transport_event', { type = 'clock' })
 end
 
@@ -512,7 +553,6 @@ function App:ui_heartbeat() self.ui_last_redraw = (util and util.time and util.t
 --==============================================================================
 
 function App:register_midi_grid(n)
-	print('Register Grid Device ' .. n)
 	self.midi_grid = self.device_manager:get(n)
 	self.midi_grid:send({ 240, 0, 32, 41, 2, 13, 0, 127, 247 }) -- Set Launchpad to Programmer Mode
 end

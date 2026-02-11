@@ -366,6 +366,7 @@ end
 
 function Mode:cancel_helper_toast()
 	if self.helper_toast_clock then
+		print('cancelling helper_toast_clock', type(self.helper_toast_clock))
 		local ok, err = pcall(clock.cancel, self.helper_toast_clock)
 		if not ok then
 			-- Coroutine may have already completed, ignore error
@@ -397,6 +398,7 @@ function Mode:show_helper_toast(helper_labels, duration)
 	end
 
 	if self.helper_toast_clock then
+		print('cancelling helper_toast_clock', type(self.helper_toast_clock))
 		local ok, err = pcall(clock.cancel, self.helper_toast_clock)
 		if not ok then
 			-- Coroutine may have already completed, ignore error
@@ -572,6 +574,7 @@ function Mode:cancel_context(opts)
 	opts = opts or {}
 	local should_pop = (opts.pop ~= false)
 	if self.context_clock then
+		print('cancelling context_clock', type(self.context_clock))
 		local ok, err = pcall(clock.cancel, self.context_clock)
 		if not ok then
 			-- Coroutine may have already completed, ignore error
@@ -659,6 +662,7 @@ end
 -- cancel_toast
 function Mode:cancel_toast()
 	if self.toast_clock then
+		print('cancelling toast_clock', type(self.toast_clock))
 		local ok, err = pcall(clock.cancel, self.toast_clock)
 		if not ok then
 			-- Coroutine may have already completed, ignore error
@@ -676,6 +680,7 @@ end
 
 function Mode:context_timeout(timeout, callback)
 	if self.context_clock then
+		print('cancelling context_clock', type(self.context_clock))
 		local ok, err = pcall(clock.cancel, self.context_clock)
 		if not ok then
 			-- Coroutine may have already completed, ignore error

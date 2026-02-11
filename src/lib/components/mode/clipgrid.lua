@@ -89,9 +89,7 @@ function ClipGrid:enable_event()
 
 					if elapsed >= self.max_recording_length then
 						-- Max recording length reached: stop and save
-						if flags.debug_clip then
-							print('ClipGrid: Max recording length reached for slot ' .. self.recording_slot .. ' (elapsed: ' .. elapsed .. ' ticks)')
-						end
+						if flags.debug_clip then print('ClipGrid: Max recording length reached for slot ' .. self.recording_slot .. ' (elapsed: ' .. elapsed .. ' ticks)') end
 						self:stop_recording_and_save(clip, self.recording_slot)
 					end
 				end
@@ -322,9 +320,7 @@ function ClipGrid:stop_recording_and_save(clip, bank_slot)
 
 	if remainder ~= 0 then
 		loop_end = recording_start_tick + (sync_units * sync_length) - 1
-		if flags.debug_clip then
-			print('ClipGrid: Adjusted loop_end to ' .. loop_end .. ' for sync alignment')
-		end
+		if flags.debug_clip then print('ClipGrid: Adjusted loop_end to ' .. loop_end .. ' for sync alignment') end
 	end
 
 	-- Save clip to bank
@@ -374,9 +370,7 @@ function ClipGrid:queue_clip_playback(clip, bank_slot)
 
 	-- Create action to load and play clip
 	local action_fn = function(component, action_data)
-		if flags.debug_clip then
-			print('ClipGrid: Executing clip playback for slot ' .. action_data.bank_slot .. ' at App.tick: ' .. (App.tick or 1))
-		end
+		if flags.debug_clip then print('ClipGrid: Executing clip playback for slot ' .. action_data.bank_slot .. ' at App.tick: ' .. (App.tick or 1)) end
 		component:load_clip_from_bank(action_data.bank_slot)
 	end
 
@@ -404,9 +398,7 @@ function ClipGrid:queue_clip_stop(clip, bank_slot)
 
 	-- Create action to unload clip (stops playback)
 	local action_fn = function(component, action_data)
-		if flags.debug_clip then
-			print('ClipGrid: Executing clip stop for slot ' .. action_data.bank_slot .. ' at App.tick: ' .. (App.tick or 1))
-		end
+		if flags.debug_clip then print('ClipGrid: Executing clip stop for slot ' .. action_data.bank_slot .. ' at App.tick: ' .. (App.tick or 1)) end
 		component:unload_clip()
 		-- Update grid display
 		if self.set_grid then self:set_grid(component) end

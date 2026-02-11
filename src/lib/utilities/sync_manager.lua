@@ -23,16 +23,17 @@ SyncManager.__index = SyncManager
 function SyncManager.new(component, default_sync_length_fn)
 	local self = setmetatable({}, SyncManager)
 	self.component = component
-	self.default_sync_length_fn = default_sync_length_fn or function(c)
-		-- Default: try to get from buffer, fall back to 1 bar
-		if c.buffer and c.buffer.action_sync_length then
-			return c.buffer.action_sync_length
-		elseif c.action_sync_length then
-			return c.action_sync_length
-		else
-			return (App and App.ppqn or 96) * 4 -- 1 bar default
+	self.default_sync_length_fn = default_sync_length_fn
+		or function(c)
+			-- Default: try to get from buffer, fall back to 1 bar
+			if c.buffer and c.buffer.action_sync_length then
+				return c.buffer.action_sync_length
+			elseif c.action_sync_length then
+				return c.action_sync_length
+			else
+				return (App and App.ppqn or 96) * 4 -- 1 bar default
+			end
 		end
-	end
 	self.slots = {} -- Named action slots
 	return self
 end
@@ -54,9 +55,7 @@ end
 -- @param sync_length number Sync length in ticks (0 = disabled)
 -- @param current_tick number Current tick (defaults to App.tick)
 -- @return boolean True if we should wait
-function SyncManager:should_wait_for_sync(sync_length, current_tick)
-	return SequenceUtils.should_wait_for_sync(sync_length, current_tick)
-end
+function SyncManager:should_wait_for_sync(sync_length, current_tick) return SequenceUtils.should_wait_for_sync(sync_length, current_tick) end
 
 -- ============================================================================
 -- ACTION QUEUE MANAGEMENT
@@ -89,9 +88,7 @@ function SyncManager:queue(slot_name, action_fn, action_data, sync_length)
 
 	-- If already at sync boundary, execute immediately
 	if not self:should_wait_for_sync(sync_length, current_tick) then
-		if flags.debug_sync then
-			print('SyncManager: Already on sync boundary, executing "' .. slot_name .. '" immediately')
-		end
+		if flags.debug_sync then print('SyncManager: Already on sync boundary, executing "' .. slot_name .. '" immediately') end
 		self:execute_slot(slot_name)
 	end
 end
@@ -140,9 +137,7 @@ function SyncManager:execute_slot(slot_name)
 
 	local current_tick = (App and App.tick) or 1
 	if current_tick >= slot.sync_tick then
-		if flags.debug_sync then
-			print('SyncManager: Execute "' .. slot_name .. '" at App.tick: ' .. current_tick .. ' (target was: ' .. slot.sync_tick .. ')')
-		end
+		if flags.debug_sync then print('SyncManager: Execute "' .. slot_name .. '" at App.tick: ' .. current_tick .. ' (target was: ' .. slot.sync_tick .. ')') end
 
 		-- Execute the action
 		slot.action_fn(self.component, slot.action_data)
@@ -172,9 +167,7 @@ function SyncManager:execute_all()
 	for _, slot_name in ipairs(to_execute) do
 		local slot = self.slots[slot_name]
 		if slot then
-			if flags.debug_sync then
-				print('SyncManager: Execute "' .. slot_name .. '" at App.tick: ' .. current_tick .. ' (target was: ' .. slot.sync_tick .. ')')
-			end
+			if flags.debug_sync then print('SyncManager: Execute "' .. slot_name .. '" at App.tick: ' .. current_tick .. ' (target was: ' .. slot.sync_tick .. ')') end
 
 			slot.action_fn(self.component, slot.action_data)
 			self.slots[slot_name] = nil
