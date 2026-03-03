@@ -65,6 +65,29 @@ function ClipGrid:enable_event()
 	table.insert(self.cleanup_functions, clip:on('clip_playback_stopped', function() self:set_grid(clip) end))
 	table.insert(self.cleanup_functions, clip:on('clip_loop_boundary', function() self:set_grid(clip) end))
 
+	-- Listen for buffer freeze/unfreeze events from all tracks to update row pad visualization
+	for track_id = 1, 8 do
+		local track = App.track[track_id]
+		if track and track.clip then
+			-- Listen for buffer frozen event
+			table.insert(
+				self.cleanup_functions,
+				track.clip:on('buffer_frozen', function(data)
+					-- Update row pads to show frozen state
+					self:update_row_pads()
+				end)
+			)
+			-- Listen for buffer unfrozen event
+			table.insert(
+				self.cleanup_functions,
+				track.clip:on('buffer_unfrozen', function(data)
+					-- Update row pads to clear frozen state
+					self:update_row_pads()
+				end)
+			)
+		end
+	end
+
 	-- Listen for transport clock to check recording timeout
 	table.insert(
 		self.cleanup_functions,
@@ -111,6 +134,40 @@ function ClipGrid:grid_event(clip, data)
 		local bank_slot = grid:grid_to_index(data)
 
 		if bank_slot < 1 then return end -- Invalid slot
+
+		-- When buffer is frozen and slot is empty: swap behavior
+		-- Tap (no alt) = save frozen buffer to clip; Alt + tap = start recording (synced)
+		if clip.buffer_frozen and not clip.clip_bank[bank_slot] then
+			if self.mode.alt then
+				-- Alt + empty pad: start recording to this slot (synced as usual)
+				self:queue_recording_start(clip, bank_slot)
+				self:set_grid(clip)
+				return
+			else
+				-- Empty pad (no alt): save frozen buffer to clip, then launch clip at same playback position
+				local saved_tick = clip.tick
+				local saved_playback_start = clip.playback_start
+				local saved_playback_length = clip.playback_length
+				local loop_end = saved_playback_start + saved_playback_length - 1
+				local clip_name = string.format('Clip %03d', bank_slot)
+				local success = clip:save_clip_to_bank(bank_slot, saved_playback_start, loop_end, clip_name)
+				if success then
+					if flags.debug_clip then print('ClipGrid: Saved frozen buffer to slot ' .. bank_slot) end
+					-- Launch the new clip and restore playback position (clip ticks are 1-based)
+					clip:load_clip_from_bank(bank_slot)
+					local clip_length = clip.clip_bank[bank_slot] and clip.clip_bank[bank_slot].length or saved_playback_length
+					local offset = (saved_tick - saved_playback_start) % saved_playback_length
+					if offset < 0 then offset = offset + saved_playback_length end
+					clip.tick = offset + 1
+					if clip.sources.clip_bank then
+						clip.sources.clip_bank.tick = clip.tick
+					end
+					self:set_grid(clip)
+					self:update_row_pads()
+				end
+				return
+			end
+		end
 
 		-- Check if transport is playing
 		if not App.playing then
@@ -507,6 +564,23 @@ end
 -- Handle row pad events for track selection
 function ClipGrid:row_event(data)
 	if data.state then
+		-- If alt mode is active, unfreeze buffer for that track
+		if self.mode.alt then
+			local track = App.track[data.row]
+			if track and track.clip and track.clip.buffer_frozen then
+				track.clip:unfreeze_buffer()
+				if flags.debug_clip then print('Buffer unfrozen for track ' .. data.row) end
+				-- Update row pads to reflect unfrozen state
+				self:update_row_pads()
+				-- Refresh grid if this is the current track
+				if data.row == App.current_track then
+					local clip = self:get_component()
+					if clip then self:set_grid(clip) end
+				end
+				return -- Don't proceed with track switching
+			end
+		end
+
 		-- Update track selection
 		self.track = data.row
 		App.current_track = data.row
@@ -521,6 +595,7 @@ function ClipGrid:row_event(data)
 end
 
 -- Update row pads to show current track
+-- Frozen tracks: rainbow_off[10] when not selected, rainbow_on[10] when selected
 function ClipGrid:update_row_pads()
 	if not self.mode or not self.mode.row_pads then return end
 
@@ -535,8 +610,20 @@ function ClipGrid:update_row_pads()
 		local track = App.track[track_id]
 		if track then
 			local row_y = 9 - track_id
-			if track_id == current_track then
-				-- Current track: white (brightness 1)
+			local is_frozen = track.clip and track.clip.buffer_frozen or false
+			local is_selected = (track_id == current_track)
+
+			if is_frozen then
+				-- Frozen track: use rainbow color index 10
+				if is_selected then
+					-- Selected frozen track: bright color
+					self.mode.row_pads.led[9][row_y] = Grid.rainbow_on[10]
+				else
+					-- Unselected frozen track: dim color
+					self.mode.row_pads.led[9][row_y] = Grid.rainbow_off[10]
+				end
+			elseif is_selected then
+				-- Current track (not frozen): white (brightness 1)
 				self.mode.row_pads.led[9][row_y] = 1
 			end
 		end

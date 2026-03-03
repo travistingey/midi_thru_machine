@@ -15,6 +15,7 @@
 -- ============================================================================
 
 local flags = require('Foobar/lib/utilities/flags')
+local EventStore = require('Foobar/lib/utilities/event_store')
 
 -- ============================================================================
 -- BASE PLAYBACK SOURCE
@@ -26,7 +27,19 @@ PlaybackSource.__index = PlaybackSource
 function PlaybackSource.new(config)
 	local self = setmetatable({}, PlaybackSource)
 	self.type = config.type or 'base'
-	self.events = config.events or {} -- sparse table: tick -> {event1, event2, ...}
+	
+	-- Create EventStore for event storage
+	self.store = EventStore.new()
+	
+	-- If config.events is provided, import into store
+	if config.events then
+		self.store:from_sparse_table(config.events)
+	end
+	
+	-- Backward compatibility: self.events points to store's events table
+	-- This allows existing code that reads source.events to continue working
+	self.events = self.store.events
+	
 	self.loop_start = config.loop_start or 1
 	self.loop_length = config.loop_length or 0
 	self.tick = config.tick or self.loop_start
@@ -51,10 +64,10 @@ function PlaybackSource:wrap_tick(tick)
 end
 
 -- Get events at specific tick
-function PlaybackSource:get_events(tick) return self.events[tick] end
+function PlaybackSource:get_events(tick) return self.store:get(tick) end
 
 -- Get events at current tick
-function PlaybackSource:get_current_events() return self.events[self.tick] end
+function PlaybackSource:get_current_events() return self.store:get(self.tick) end
 
 -- Advance tick and return events at the current position (before advancing)
 -- Returns: events, loop_boundary_reached
@@ -62,7 +75,7 @@ function PlaybackSource:advance()
 	if not self.active then return nil, false end
 
 	local current_tick = self.tick
-	local events = self.events[current_tick]
+	local events = self.store:get(current_tick)
 	local next_tick = current_tick + 1
 	local loop_boundary = false
 
@@ -116,15 +129,15 @@ function PlaybackSource:set_loop(start_tick, length)
 end
 
 -- Update events (for sources that need to refresh their data)
-function PlaybackSource:set_events(events) self.events = events end
+function PlaybackSource:set_events(events)
+	self.store:from_sparse_table(events)
+	-- Keep backward compatibility alias
+	self.events = self.store.events
+end
 
 -- Count events in source (for debugging)
 function PlaybackSource:event_count()
-	local count = 0
-	for _, events in pairs(self.events) do
-		count = count + #events
-	end
-	return count
+	return self.store:event_count()
 end
 
 -- ============================================================================
@@ -155,14 +168,20 @@ function FrozenBufferSource:freeze_from_buffer(buffer_component, start_tick, len
 	self.loop_length = length
 	self.tick = start_tick
 
-	-- Create shallow copy of events in range
+	-- Create shallow copy of events in range as sparse table
 	local loop_end = start_tick + length - 1
-	self.events = {}
+	local sparse_events = {}
 	for tick, events in pairs(buffer_component.buffer) do
 		if tick >= start_tick and tick <= loop_end then
-			self.events[tick] = events -- shallow copy
+			sparse_events[tick] = events -- shallow copy
 		end
 	end
+	sparse_events = EventStore.fix_note_pairs_in_sparse(sparse_events, start_tick, loop_end)
+
+	-- Import into EventStore
+	self.store:from_sparse_table(sparse_events)
+	-- Keep backward compatibility alias
+	self.events = self.store.events
 
 	if flags.debug_clip then print('FrozenBufferSource: frozen range ' .. start_tick .. '-' .. loop_end .. ' (' .. self:event_count() .. ' events)') end
 end
@@ -175,14 +194,16 @@ function FrozenBufferSource:update_step(buffer_component, step_start, step_end)
 	step_start = math.max(step_start, self.loop_start)
 	step_end = math.min(step_end, loop_end)
 
-	-- Update events from buffer
+	-- Update events from buffer using EventStore API
 	for tick = step_start, step_end do
 		if buffer_component.buffer[tick] then
-			self.events[tick] = buffer_component.buffer[tick]
+			self.store:set(tick, buffer_component.buffer[tick])
 		else
-			self.events[tick] = nil
+			self.store:delete(tick)
 		end
 	end
+	-- Keep backward compatibility alias (store.events is updated by set/delete)
+	self.events = self.store.events
 end
 
 -- ============================================================================
@@ -220,11 +241,17 @@ function ScrubSource:create_from_buffer(buffer_component, start_tick, end_tick, 
 	end
 	self.loop_enabled = loop_mode
 
-	-- Create shallow copy of events in range
-	self.events = {}
+	-- Create shallow copy of events in range as sparse table
+	local sparse_events = {}
 	for tick = start_tick, end_tick do
-		if buffer_component.buffer[tick] then self.events[tick] = buffer_component.buffer[tick] end
+		if buffer_component.buffer[tick] then sparse_events[tick] = buffer_component.buffer[tick] end
 	end
+	sparse_events = EventStore.fix_note_pairs_in_sparse(sparse_events, start_tick, end_tick)
+
+	-- Import into EventStore
+	self.store:from_sparse_table(sparse_events)
+	-- Keep backward compatibility alias
+	self.events = self.store.events
 
 	if flags.debug_scrub then print('ScrubSource: created range ' .. start_tick .. '-' .. end_tick .. ' (loop: ' .. tostring(loop_mode) .. ', initial_tick: ' .. self.tick .. ', events: ' .. self:event_count() .. ')') end
 end
@@ -237,15 +264,30 @@ function ScrubSource:update_range(buffer_component, start_tick, end_tick)
 	self.loop_start = start_tick
 	self.loop_length = end_tick - start_tick + 1
 
-	-- Clear events outside new range
-	for tick, _ in pairs(self.events) do
-		if tick < start_tick or tick > end_tick then self.events[tick] = nil end
+	-- Clear events outside new range using EventStore
+	-- Delete range before start_tick (if any)
+	if old_start < start_tick then
+		self.store:delete_range(old_start, start_tick)
+	end
+	-- Delete range after end_tick (if any)
+	if old_end > end_tick then
+		self.store:delete_range(end_tick + 1, old_end + 1)
 	end
 
-	-- Add new events from buffer
+	-- Build sparse from buffer for new range, fix note pairs, then set into store
+	local sparse_events = {}
 	for tick = start_tick, end_tick do
-		if buffer_component.buffer[tick] and not self.events[tick] then self.events[tick] = buffer_component.buffer[tick] end
+		if buffer_component.buffer[tick] then
+			sparse_events[tick] = buffer_component.buffer[tick]
+		end
 	end
+	sparse_events = EventStore.fix_note_pairs_in_sparse(sparse_events, start_tick, end_tick)
+	for tick, events in pairs(sparse_events) do
+		self.store:set(tick, events)
+	end
+
+	-- Keep backward compatibility alias
+	self.events = self.store.events
 
 	-- Ensure tick is within new range
 	if self.tick < start_tick or self.tick > end_tick then self.tick = start_tick end
@@ -280,7 +322,12 @@ end
 function ClipBankSource:load_from_bank_entry(bank_entry, slot)
 	self.slot = slot
 	self.name = bank_entry.name
-	self.events = bank_entry.buffer
+	
+	-- Import clip buffer into EventStore
+	self.store:from_sparse_table(bank_entry.buffer)
+	-- Keep backward compatibility alias
+	self.events = self.store.events
+	
 	self.loop_length = bank_entry.length or 0
 	self.original_loop_start = bank_entry.loop_start
 	self.loop_start = 1 -- clips are always 1-based

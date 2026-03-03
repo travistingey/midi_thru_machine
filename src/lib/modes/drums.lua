@@ -44,7 +44,7 @@ local DrumsMode = Mode:new({
 	end,
 	row_event = function(self, data)
 		if data.state then
-			-- Let bufferseq handle row events (including alt mode arming)
+			-- Let bufferseq handle row events (including alt mode unfreezing)
 			-- It will update row pads internally
 			bufferseq:row_event(data)
 			

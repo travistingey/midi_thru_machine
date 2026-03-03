@@ -119,7 +119,7 @@ function BufferSeq:enable_event()
 			end)
 		)
 
-		-- Listen for scrub stopped event from clip (for sync)
+			-- Listen for scrub stopped event from clip (for sync)
 		table.insert(
 			self.cleanup_functions,
 			clip:on('scrub_stopped', function(data)
@@ -132,6 +132,29 @@ function BufferSeq:enable_event()
 				self:set_grid(buffer)
 			end)
 		)
+	end
+
+	-- Listen for buffer freeze/unfreeze events from all tracks to update row pad visualization
+	for track_id = 1, 8 do
+		local track = App.track[track_id]
+		if track and track.clip then
+			-- Listen for buffer frozen event
+			table.insert(
+				self.cleanup_functions,
+				track.clip:on('buffer_frozen', function(data)
+					-- Update row pads to show frozen state
+					self:update_row_pads()
+				end)
+			)
+			-- Listen for buffer unfrozen event
+			table.insert(
+				self.cleanup_functions,
+				track.clip:on('buffer_unfrozen', function(data)
+					-- Update row pads to clear frozen state
+					self:update_row_pads()
+				end)
+			)
+		end
 	end
 
 	-- Initialize display calculations now that we can access the component
@@ -566,15 +589,21 @@ function BufferSeq:set_grid(component)
 	local active_source = clip and clip:get_active_source()
 	if active_source then
 		if active_source == clip.sources.clip_bank then
-			-- Clip is playing - use clip buffer
-			local clip_entry = clip.clip_bank[clip.current_slot]
-			playback_source = clip_entry.buffer
-			-- Clip ticks are 1-based, convert to step index for display
-			clip_playback_step = math.floor((clip.tick - 1) / step_length) + 1
-			playback_tick = clip.tick
-			-- Clips are stored with ticks starting at 1, so they display starting at step 1
-			playback_start = 1
-			playback_length = clip_entry.length or 0
+			-- Clip is playing - use clip buffer (guard: slot may be cleared or not yet loaded)
+			local clip_entry = clip.current_slot and clip.clip_bank[clip.current_slot]
+			if clip_entry then
+				playback_source = clip_entry.buffer
+				-- Clip ticks are 1-based, convert to step index for display
+				clip_playback_step = math.floor((clip.tick - 1) / step_length) + 1
+				playback_tick = clip.tick
+				-- Clips are stored with ticks starting at 1, so they display starting at step 1
+				playback_start = 1
+				playback_length = clip_entry.length or 0
+			else
+				-- Slot missing: treat as no active playback
+				playback_source = buffer.buffer
+				playback_tick = buffer.tick
+			end
 		elseif active_source == clip.sources.frozen then
 			-- Frozen buffer is playing - use frozen buffer
 			playback_source = clip.sources.frozen.events
@@ -668,22 +697,24 @@ function BufferSeq:set_grid(component)
 			-- The issue: when clip loops, clip_playback_step wraps to 1, but global_step continues
 			-- from buffer's position, so they only match when buffer also cycles back to step 1
 			-- Solution: Wrap global_step to the clip's range for comparison
-			local clip_entry = clip.clip_bank[clip.current_slot]
-			local clip_length = clip_entry.length or 0
-			local clip_end_step = math.floor((clip_length - 1) / step_length) + 1
+			local clip_entry = clip.current_slot and clip.clip_bank[clip.current_slot]
+			if clip_entry then
+				local clip_length = clip_entry.length or 0
+				local clip_end_step = math.floor((clip_length - 1) / step_length) + 1
 
-			-- Wrap global_step to clip's range (1 to clip_end_step) for comparison
-			-- This ensures the playhead shows correctly on every loop, not just when buffer cycles back
-			-- Formula: ((global_step - 1) % clip_end_step) + 1
-			-- Example: if clip_end_step = 48 and global_step = 49, relative_step = 1
-			--          if clip_end_step = 48 and global_step = 97, relative_step = 1
-			local relative_step = ((global_step - 1) % clip_end_step) + 1
+				-- Wrap global_step to clip's range (1 to clip_end_step) for comparison
+				-- This ensures the playhead shows correctly on every loop, not just when buffer cycles back
+				-- Formula: ((global_step - 1) % clip_end_step) + 1
+				-- Example: if clip_end_step = 48 and global_step = 49, relative_step = 1
+				--          if clip_end_step = 48 and global_step = 97, relative_step = 1
+				local relative_step = clip_end_step > 0 and ((global_step - 1) % clip_end_step) + 1 or 1
 
-			-- Show playhead when clip_playback_step matches the wrapped relative position
-			-- BUT only show it on pads within the clip's visible range (1 to clip_end_step)
-			-- This prevents showing the playhead on multiple pads when the clip loops
-			-- (e.g., if clip_end_step=2, only show on pads 1-2, not on pads 3-4 which wrap to 1-2)
-			if clip_playback_step == relative_step and i <= clip_end_step then pad = pad | STEP end
+				-- Show playhead when clip_playback_step matches the wrapped relative position
+				-- BUT only show it on pads within the clip's visible range (1 to clip_end_step)
+				-- This prevents showing the playhead on multiple pads when the clip loops
+				-- (e.g., if clip_end_step=2, only show on pads 1-2, not on pads 3-4 which wrap to 1-2)
+				if clip_playback_step == relative_step and i <= clip_end_step then pad = pad | STEP end
+			end
 		elseif frozen_playback_step then
 			-- Frozen buffer is playing: show frozen buffer playback position
 			if frozen_playback_step == global_step then pad = pad | STEP end
@@ -741,15 +772,15 @@ function BufferSeq:set_grid(component)
 			elseif clip_playback_step then
 				-- Clip playback: need to handle coordinate system differences
 				-- Clips use relative coordinates (starting at step 1), global_step is absolute
-				if global_step >= loop_start_index and global_step <= loop_end_index then
+				local clip_entry = clip.current_slot and clip.clip_bank[clip.current_slot]
+				if clip_entry and global_step >= loop_start_index and global_step <= loop_end_index then
 					-- Within clip range: compare relative positions
-					local clip_entry = clip.clip_bank[clip.current_slot]
 					local clip_length = clip_entry.length or 0
 					local clip_end_step = math.floor((clip_length - 1) / step_length) + 1
-					local relative_global_step = ((global_step - 1) % clip_end_step) + 1
+					local relative_global_step = clip_end_step > 0 and ((global_step - 1) % clip_end_step) + 1 or 1
 					step_has_passed = relative_global_step < clip_playback_step
 				else
-					-- Outside clip range: can't determine if passed (clip doesn't extend here)
+					-- Outside clip range or no entry: can't determine if passed
 					step_has_passed = false
 				end
 			elseif frozen_playback_step then
@@ -963,35 +994,57 @@ function BufferSeq:arrow_event(data)
 end
 
 function BufferSeq:alt_event(data)
+	-- Special handling: if in scrub mode and alt is being toggled ON, freeze buffer and exit scrub
+	-- without entering alt mode
+	if data.toggled and self.scrub_active then
+		local buffer = self:get_component()
+		local track = buffer and buffer.track or nil
+		local clip = track and track.clip or nil
+
+		if clip and self.scrub_start_tick and self.scrub_end_tick then
+			-- Freeze from scrub source (generalized freeze)
+			if clip.active_source == clip.sources.scrub then
+				clip:freeze_from_source()
+				if flags.debug_scrub then print('Scrub frozen to loop: ' .. self.scrub_start_tick .. '-' .. self.scrub_end_tick) end
+			else
+				-- Fallback: freeze from buffer range (if scrub not active for some reason)
+				local loop_start = self.scrub_start_tick
+				local loop_length = self.scrub_end_tick - self.scrub_start_tick + 1
+				clip:set_playback_loop(loop_start, loop_length)
+				clip:freeze_buffer()
+				if flags.debug_scrub then print('Scrub frozen to loop: ' .. loop_start .. '-' .. self.scrub_end_tick) end
+			end
+
+			-- Stop scrub mode (playback now comes from frozen buffer)
+			self:stop_scrub()
+			self.held_pads = {}
+
+			-- Reset alt mode immediately to prevent entering alt mode
+			self.mode:reset_alt()
+
+			-- Update grid display
+			if self.track then App.current_track = self.track end
+			local buffer = self:get_component()
+			self:set_grid(buffer)
+			self:update_row_pads()
+		end
+		return -- Exit early, don't process normal alt mode activation
+	end
+
 	if data.state and self.mode.alt then
 		-- Alt mode activated
 		local buffer = self:get_component()
 		local track = buffer and buffer.track or nil
 		local clip = track and track.clip or nil
 
-		-- If we're already in scrub mode, freeze the current scrub boundaries seamlessly
-		if self.scrub_active and clip and self.scrub_start_tick and self.scrub_end_tick then
-			local loop_start = self.scrub_start_tick
-			local loop_length = self.scrub_end_tick - self.scrub_start_tick + 1
-
-			-- Freeze immediately
-			clip:set_playback_loop(loop_start, loop_length)
-			clip:freeze_buffer()
-			if flags.debug_scrub then print('Scrub frozen to loop: ' .. loop_start .. '-' .. self.scrub_end_tick) end
-
-			-- Stop scrub mode (playback now comes from frozen buffer)
+		-- Normal alt mode activation - start blinking to show loop end points
+		self.index = nil
+		self.mode:cancel_context()
+		self:start_blink()
+		-- Clear any held pads and stop scrub when entering alt mode
+		if self.scrub_active then
 			self:stop_scrub()
 			self.held_pads = {}
-		else
-			-- Normal alt mode activation - start blinking to show loop end points
-			self.index = nil
-			self.mode:cancel_context()
-			self:start_blink()
-			-- Clear any held pads and stop scrub when entering alt mode
-			if self.scrub_active then
-				self:stop_scrub()
-				self.held_pads = {}
-			end
 		end
 
 		-- Ensure we're showing the current track, not defaulting to first track
@@ -1024,7 +1077,22 @@ end
 
 function BufferSeq:row_event(data)
 	if data.state then
-		-- If alt mode is active, arm/disarm the track instead of switching tracks
+		-- If alt mode is active, unfreeze buffer for that track
+		if self.mode.alt then
+			local track = App.track[data.row]
+			if track and track.clip and track.clip.buffer_frozen then
+				track.clip:unfreeze_buffer()
+				if flags.debug_clip then print('Buffer unfrozen for track ' .. data.row) end
+				-- Update row pads to reflect unfrozen state
+				self:update_row_pads()
+				-- Refresh grid if this is the current track
+				if data.row == App.current_track then
+					local buffer = self:get_component()
+					if buffer then self:set_grid(buffer) end
+				end
+				return -- Don't proceed with track switching
+			end
+		end
 
 		-- Stop any active scrub when changing tracks
 		if self.scrub_active then
@@ -1059,6 +1127,7 @@ end
 -- Update row pads to show current track
 -- Armed tracks: rainbow_off[1] when not selected, rainbow_on[1] when selected
 -- Current track: always shows with brightness 1 (white)
+-- Frozen tracks: rainbow_off[10] when not selected, rainbow_on[10] when selected
 function BufferSeq:update_row_pads()
 	if not self.mode or not self.mode.row_pads then return end
 
@@ -1073,8 +1142,20 @@ function BufferSeq:update_row_pads()
 		local track = App.track[track_id]
 		if track then
 			local row_y = 9 - track_id
-			if track_id == current_track then
-				-- Current track: white (brightness 1)
+			local is_frozen = track.clip and track.clip.buffer_frozen or false
+			local is_selected = (track_id == current_track)
+
+			if is_frozen then
+				-- Frozen track: use rainbow color index 10
+				if is_selected then
+					-- Selected frozen track: bright color
+					self.mode.row_pads.led[9][row_y] = Grid.rainbow_on[10]
+				else
+					-- Unselected frozen track: dim color
+					self.mode.row_pads.led[9][row_y] = Grid.rainbow_off[10]
+				end
+			elseif is_selected then
+				-- Current track (not frozen): white (brightness 1)
 				self.mode.row_pads.led[9][row_y] = 1
 			end
 		end

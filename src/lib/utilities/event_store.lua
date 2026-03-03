@@ -391,6 +391,113 @@ function EventStore:copy_range(start_tick, end_tick, tick_offset)
 end
 
 -- ============================================================================
+-- NOTE PAIR FIXING (synthetic note injection for segments)
+-- Module-level: operates on any sparse table, returns new sparse with synthetics
+-- ============================================================================
+
+-- Fix orphan note_on/note_off in a sparse table for segment [start_tick, end_tick] (inclusive).
+-- Orphan note_off -> synthetic note_on at first tick. Open note_on at end -> synthetic note_off at last tick.
+-- Preserves new_note for quantization/scale. Returns new sparse table; does not mutate input.
+-- @param sparse_table table Sparse table tick -> array of events
+-- @param start_tick number Segment start (inclusive)
+-- @param end_tick number Segment end (inclusive)
+-- @return table New sparse table with synthetic events merged in
+function EventStore.fix_note_pairs_in_sparse(sparse_table, start_tick, end_tick)
+	local ticks_in_range = {}
+	for tick, _ in pairs(sparse_table) do
+		if tick >= start_tick and tick <= end_tick then
+			table.insert(ticks_in_range, tick)
+		end
+	end
+	table.sort(ticks_in_range)
+
+	local function key(ch, note)
+		return tostring(ch or 1) .. '_' .. tostring(note)
+	end
+
+	local open_notes = {} -- key -> { ch, note, vel, new_note }
+	local synthetic_first = {}
+
+	for _, tick in ipairs(ticks_in_range) do
+		local events = sparse_table[tick]
+		if not events then goto continue end
+		for _, event in ipairs(events) do
+			if not event or not event.note or (event.type ~= 'note_on' and event.type ~= 'note_off') then goto next_event end
+			local ch = event.ch or 1
+			local k = key(ch, event.note)
+			if event.type == 'note_on' then
+				open_notes[k] = {
+					ch = ch,
+					note = event.note,
+					vel = event.vel,
+					new_note = event.new_note,
+				}
+			else
+				if open_notes[k] then
+					open_notes[k] = nil
+				else
+					local syn = {
+						type = 'note_on',
+						note = event.note,
+						vel = event.vel or 64,
+						ch = ch,
+					}
+					if event.new_note ~= nil then syn.new_note = event.new_note end
+					table.insert(synthetic_first, syn)
+				end
+			end
+			::next_event::
+		end
+		::continue::
+	end
+
+	local synthetic_last = {}
+	for _, entry in pairs(open_notes) do
+		local off = {
+			type = 'note_off',
+			note = entry.note,
+			vel = 0,
+			ch = entry.ch,
+		}
+		if entry.new_note ~= nil then off.new_note = entry.new_note end
+		table.insert(synthetic_last, off)
+	end
+
+	local result = {}
+	for _, tick in ipairs(ticks_in_range) do
+		result[tick] = sparse_table[tick]
+	end
+
+	local function copy_events(events)
+		local out = {}
+		for i = 1, #events do out[i] = events[i] end
+		return out
+	end
+
+	if #synthetic_first > 0 or #synthetic_last > 0 then
+		if start_tick == end_tick then
+			local arr = result[start_tick]
+			result[start_tick] = arr and copy_events(arr) or {}
+			for _, e in ipairs(synthetic_first) do table.insert(result[start_tick], e) end
+			for _, e in ipairs(synthetic_last) do table.insert(result[start_tick], e) end
+		else
+			if #synthetic_first > 0 then
+				local arr = result[start_tick]
+				result[start_tick] = arr and copy_events(arr) or {}
+				for _, e in ipairs(synthetic_first) do table.insert(result[start_tick], e) end
+			end
+			if #synthetic_last > 0 then
+				local arr = result[end_tick]
+				result[end_tick] = arr and copy_events(arr) or {}
+				for _, e in ipairs(synthetic_last) do table.insert(result[end_tick], e) end
+			end
+		end
+	end
+
+	return result
+end
+
+-- ============================================================================
 -- SPARSE TABLE COMPATIBILITY
 -- For backward compatibility with existing buffer[tick] = events usage
 -- ============================================================================

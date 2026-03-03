@@ -719,6 +719,134 @@ function Default:clip_menu()
 		})
 	)
 
+	-- Edit submenu (shown when frozen or clip loaded)
+	if track and track.clip and (track.clip.buffer_frozen or track.clip.current_slot) then
+		table.insert(
+			items,
+			Registry.menu.make_item('clip_edit', {
+				label_fn = function() return 'EDIT' end,
+				value_fn = function()
+					if track and track.clip then
+						if track.clip.buffer_frozen and track.clip.current_slot then
+							return 'editing'
+						elseif track.clip.buffer_frozen then
+							return 'frozen'
+						elseif track.clip.current_slot then
+							return 'clip'
+						end
+					end
+					return ''
+				end,
+				has_submenu = true,
+				on_press = function()
+					if track and track.clip then
+						self:sub_menu(self:clip_edit_menu(), {
+							status = { icon = '\u{270e}', label = 'EDIT' },
+							screen = self:submenu_screen(),
+						})
+					end
+				end,
+			})
+		)
+	end
+
+	-- Revert edits (only when dirty: frozen from clip)
+	if track and track.clip and track.clip.buffer_frozen and track.clip.current_slot then
+		table.insert(
+			items,
+			Registry.menu.make_item('clip_revert', {
+				label_fn = function() return 'REVERT' end,
+				value_fn = function()
+					if track and track.clip and track.clip.current_slot then
+						return 'to slot ' .. track.clip.current_slot
+					end
+					return ''
+				end,
+				can_press = function() return track and track.clip and track.clip.buffer_frozen and track.clip.current_slot ~= nil end,
+				on_press = function()
+					if track and track.clip then
+						local success = track.clip:revert_edits()
+						if success then
+							print('Reverted edits, resuming from clip')
+						else
+							print('Failed to revert edits')
+						end
+						App.screen_dirty = true
+					end
+				end,
+				helper_labels = {
+					press_fn_3 = 'revert',
+				},
+			})
+		)
+	end
+
+	-- Save edits to current slot (only when dirty)
+	if track and track.clip and track.clip.buffer_frozen and track.clip.current_slot then
+		table.insert(
+			items,
+			Registry.menu.make_item('clip_save_edits', {
+				label_fn = function() return 'SAVE' end,
+				value_fn = function()
+					if track and track.clip and track.clip.current_slot then
+						return 'slot ' .. track.clip.current_slot
+					end
+					return ''
+				end,
+				can_press = function() return track and track.clip and track.clip.buffer_frozen and track.clip.current_slot ~= nil end,
+				on_press = function()
+					if track and track.clip then
+						local success = track.clip:save_edits_to_current_slot()
+						if success then
+							print('Saved edits to slot ' .. track.clip.current_slot)
+						else
+							print('Failed to save edits')
+						end
+						App.screen_dirty = true
+					end
+				end,
+				helper_labels = {
+					press_fn_3 = 'save',
+				},
+			})
+		)
+	end
+
+	-- Save edits as new slot (only when dirty)
+	if track and track.clip and track.clip.buffer_frozen and track.clip.current_slot then
+		table.insert(
+			items,
+			Registry.menu.make_item('clip_save_as', {
+				label_fn = function() return 'SAVE AS' end,
+				value_fn = function()
+					local slot = App.current_clip or 1
+					return tostring(slot)
+				end,
+				enc3 = function(d)
+					App.current_clip = util.clamp((App.current_clip or 1) + d, 1, max_clip_slot_select)
+					App.screen_dirty = true
+				end,
+				can_press = function() return track and track.clip and track.clip.buffer_frozen and track.clip.current_slot ~= nil end,
+				on_press = function()
+					if track and track.clip then
+						local slot = App.current_clip or 1
+						local success = track.clip:save_edits_as(slot)
+						if success then
+							print('Saved edits as slot ' .. slot)
+						else
+							print('Failed to save edits as slot ' .. slot)
+						end
+						App.screen_dirty = true
+					end
+				end,
+				helper_labels = {
+					enc3 = 'select slot',
+					press_fn_3 = 'save as',
+				},
+			})
+		)
+	end
+
 	-- Unload clip and return to live buffer (also unfreezes frozen buffer)
 	table.insert(
 		items,
@@ -756,6 +884,124 @@ function Default:clip_menu()
 		})
 	)
 
+	return items
+end
+
+-- Edit submenu for clip editing operations
+function Default:clip_edit_menu()
+	local tid = App.current_track
+	local track = App.track[tid]
+	local items = {}
+	
+	if not track or not track.clip then return items end
+	
+	local clip = track.clip
+	
+	-- Quantize
+	table.insert(
+		items,
+		Registry.menu.make_item('clip_edit_quantize', {
+			label_fn = function() return 'QUANTIZE' end,
+			value_fn = function()
+				local grid = App.clip_edit_grid or (App.ppqn / 4) -- default 1/16 note
+				local note_name = ''
+				if grid == App.ppqn * 4 then note_name = ' (1/1)'
+				elseif grid == App.ppqn * 2 then note_name = ' (1/2)'
+				elseif grid == App.ppqn then note_name = ' (1/4)'
+				elseif grid == App.ppqn / 2 then note_name = ' (1/8)'
+				elseif grid == App.ppqn / 4 then note_name = ' (1/16)'
+				elseif grid == App.ppqn / 8 then note_name = ' (1/32)'
+				end
+				return tostring(grid) .. ' ticks' .. note_name
+			end,
+			enc3 = function(d)
+				-- Grid sizes: 1/32, 1/16, 1/8, 1/4, 1/2, 1/1
+				local grids = { App.ppqn / 8, App.ppqn / 4, App.ppqn / 2, App.ppqn, App.ppqn * 2, App.ppqn * 4 }
+				local current = App.clip_edit_grid or (App.ppqn / 4)
+				local idx = 1
+				for i, g in ipairs(grids) do
+					if math.abs(g - current) < 1 then idx = i break end
+				end
+				idx = util.clamp(idx + d, 1, #grids)
+				App.clip_edit_grid = grids[idx]
+				App.screen_dirty = true
+			end,
+			on_press = function()
+				if clip then
+					local grid = App.clip_edit_grid or (App.ppqn / 4)
+					local count = clip:quantize_frozen(grid)
+					print('Quantized ' .. count .. ' events')
+					App.screen_dirty = true
+				end
+			end,
+			helper_labels = {
+				enc3 = 'grid size',
+				press_fn_3 = 'quantize',
+			},
+		})
+	)
+	
+	-- Transpose
+	table.insert(
+		items,
+		Registry.menu.make_item('clip_edit_transpose', {
+			label_fn = function() return 'TRANSPOSE' end,
+			value_fn = function()
+				local semitones = App.clip_edit_transpose or 0
+				if semitones == 0 then return '0'
+				elseif semitones > 0 then return '+' .. semitones
+				else return tostring(semitones)
+				end
+			end,
+			enc3 = function(d)
+				App.clip_edit_transpose = util.clamp((App.clip_edit_transpose or 0) + d, -12, 12)
+				App.screen_dirty = true
+			end,
+			on_press = function()
+				if clip then
+					local semitones = App.clip_edit_transpose or 0
+					local count = clip:transpose_frozen(semitones)
+					print('Transposed ' .. count .. ' events by ' .. semitones .. ' semitones')
+					App.screen_dirty = true
+				end
+			end,
+			helper_labels = {
+				enc3 = 'semitones',
+				press_fn_3 = 'transpose',
+			},
+		})
+	)
+	
+	-- Velocity scale
+	table.insert(
+		items,
+		Registry.menu.make_item('clip_edit_velocity', {
+			label_fn = function() return 'VELOCITY' end,
+			value_fn = function()
+				local factor = App.clip_edit_velocity_factor or 1.0
+				return string.format('%.2fx', factor)
+			end,
+			enc3 = function(d)
+				local factor = App.clip_edit_velocity_factor or 1.0
+				factor = util.clamp(factor + (d * 0.1), 0.1, 2.0)
+				App.clip_edit_velocity_factor = factor
+				App.screen_dirty = true
+			end,
+			on_press = function()
+				if clip then
+					local factor = App.clip_edit_velocity_factor or 1.0
+					local count = clip:scale_velocity_frozen(factor)
+					print('Scaled velocity for ' .. count .. ' events by ' .. string.format('%.2fx', factor))
+					App.screen_dirty = true
+				end
+			end,
+			helper_labels = {
+				enc3 = 'factor',
+				press_fn_3 = 'scale',
+			},
+		})
+	)
+	
 	return items
 end
 

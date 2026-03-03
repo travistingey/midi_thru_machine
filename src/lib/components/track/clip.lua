@@ -3,6 +3,7 @@ local utilities = require(path_name .. 'utilities')
 local TrackComponent = require('Foobar/lib/components/track/trackcomponent')
 local Registry = require(path_name .. 'utilities/registry')
 local flags = require(path_name .. 'utilities/flags')
+local EventStore = require(path_name .. 'utilities/event_store')
 local Persistence = require(path_name .. 'utilities/persistence')
 local SequenceUtils = require(path_name .. 'utilities/sequence_utils')
 local TimingConstants = require(path_name .. 'utilities/timing_constants')
@@ -255,6 +256,9 @@ function Clip:freeze_buffer()
 
 	-- Update monitor state to respect monitoring settings (AUTO mutes)
 	self.track:update_monitor_state()
+
+	-- Emit event for UI updates (e.g., row pad visualization)
+	self:emit('buffer_frozen', { track_id = self.track.id })
 end
 
 -- Unfreeze the buffer (clear frozen snapshot)
@@ -275,6 +279,85 @@ function Clip:unfreeze_buffer()
 
 	-- Update monitor state to restore input monitoring
 	self.track:update_monitor_state()
+
+	-- Emit event for UI updates (e.g., row pad visualization)
+	if was_frozen then
+		self:emit('buffer_unfrozen', { track_id = self.track.id })
+	end
+end
+
+-- Freeze from active source (scrub or clip_bank)
+-- Generalizes freeze to work from any playback source
+function Clip:freeze_from_source()
+	if not self.active_source then return false end
+	
+	-- If already frozen, no-op
+	if self.active_source == self.sources.frozen then return true end
+	
+	local source = self.active_source
+	local frozen = self.sources.frozen
+	
+	-- Copy source's store content to frozen store
+	local source_sparse = source.store:to_sparse_table()
+	frozen.store:from_sparse_table(source_sparse)
+	frozen.events = frozen.store.events -- keep alias
+	
+	-- Copy loop boundaries and tick position
+	frozen.loop_start = source.loop_start
+	frozen.loop_length = source.loop_length
+	frozen.tick = source.tick
+	
+	-- Update playback_start/playback_length for compatibility
+	self.playback_start = source.loop_start
+	self.playback_length = source.loop_length
+	
+	-- If freezing from scrub, stop scrub
+	if source == self.sources.scrub then
+		self:stop_scrub()
+	end
+	
+	-- Activate frozen source
+	frozen:activate()
+	self.active_source = frozen
+	self.buffer_frozen = true
+	
+	-- Preserve clip.tick position
+	self.tick = frozen.tick
+	
+	-- Kill notes when switching sources
+	if App.playing then self:kill_notes() end
+	
+	-- Update monitor state
+	self.track:update_monitor_state()
+	
+	-- Emit event
+	self:emit('buffer_frozen', { track_id = self.track.id })
+	
+	if flags.debug_clip then
+		print('Clip: Frozen from source ' .. source.type .. ' at tick ' .. frozen.tick)
+	end
+	
+	return true
+end
+
+-- Get the editable EventStore (frozen source)
+-- If clip is loaded but not frozen, implicitly freeze it first
+-- Returns nil if no editable source is available
+function Clip:get_edit_store()
+	-- If already frozen, return frozen store
+	if self.buffer_frozen then
+		return self.sources.frozen.store
+	end
+	
+	-- If clip is loaded, freeze it first (implicit freeze for editing)
+	if self.current_slot and self.sources.clip_bank then
+		if self:freeze_from_source() then
+			return self.sources.frozen.store
+		end
+	end
+	
+	-- No editable source available
+	return nil
 end
 
 -- Set playback loop boundaries (for frozen buffer playback)
@@ -284,16 +367,31 @@ function Clip:set_playback_loop(start_tick, length)
 	self.playback_start = start_tick
 	self.playback_length = length
 
-	-- If buffer is frozen and loop boundaries changed, update FrozenBufferSource
+	-- If buffer is frozen and loop boundaries changed, update FrozenBufferSource using EventStore
 	if self.buffer_frozen and self.buffer and self.buffer.buffer then
+		local store = self.sources.frozen.store
+		
+		-- Get current loop boundaries
+		local old_start = self.sources.frozen.loop_start
+		local old_end = self.sources.frozen:get_loop_end()
+		
 		-- Clear entries that are now outside the new range
-		for tick, _ in pairs(self.sources.frozen.events) do
-			if tick < start_tick or tick > new_end then self.sources.frozen.events[tick] = nil end
+		if old_start < start_tick then
+			store:delete_range(old_start, start_tick)
 		end
+		if old_end > new_end then
+			store:delete_range(new_end + 1, old_end + 1)
+		end
+		
 		-- Add new entries from buffer for the new range
 		for tick = start_tick, new_end do
-			if self.buffer.buffer[tick] and not self.sources.frozen.events[tick] then self.sources.frozen.events[tick] = self.buffer.buffer[tick] end
+			if self.buffer.buffer[tick] then
+				store:set(tick, self.buffer.buffer[tick])
+			end
 		end
+		
+		-- Update frozen source loop boundaries
+		self.sources.frozen:set_loop(start_tick, length)
 	end
 
 	if flags.debug_clip then print('Clip: Playback loop set to ' .. start_tick .. '-' .. new_end) end
@@ -631,19 +729,20 @@ function Clip:save_clip_to_bank(bank_slot, loop_start, loop_end, name)
 		source_buffer = self.buffer.buffer
 	end
 
-	-- Extract clip data from buffer or frozen buffer
-	local clip_buffer = {}
-	local clip_length = loop_end - loop_start + 1
-
-	-- Copy events from source buffer, remapping ticks to start at 1
+	-- Build range sparse from source, fix note pairs, then build clip_buffer with remapped ticks
+	local range_sparse = {}
 	for tick, events in pairs(source_buffer) do
 		if tick >= loop_start and tick <= loop_end then
-			-- Remap tick: tick - loop_start + 1 (so clip starts at tick 1)
-			local remapped_tick = tick - loop_start + 1
-			-- Attempting shallow copy to improve performance
-			-- Assumption is that the buffer is only written to once per cycle
-			clip_buffer[remapped_tick] = events
+			range_sparse[tick] = events
 		end
+	end
+	range_sparse = EventStore.fix_note_pairs_in_sparse(range_sparse, loop_start, loop_end)
+
+	local clip_buffer = {}
+	local clip_length = loop_end - loop_start + 1
+	for tick, events in pairs(range_sparse) do
+		local remapped_tick = tick - loop_start + 1
+		clip_buffer[remapped_tick] = events
 	end
 
 	-- Create clip data structure
@@ -675,9 +774,10 @@ function Clip:save_clip_to_bank(bank_slot, loop_start, loop_end, name)
 		-- Emit event for mode components
 		self:emit('clip_saved', { bank_slot = bank_slot, name = clip_data.name })
 
-		-- Unfreeze buffer after saving (if it was frozen)
-		-- This restores normal monitoring behavior (input can be heard when no clip is playing)
-		if self.buffer_frozen then
+		-- Unfreeze buffer after saving (if it was frozen) UNLESS we're in dirty state
+		-- Dirty state = frozen from clip (current_slot set) - we want to keep editing
+		-- Non-dirty frozen = frozen from buffer - unfreeze to restore normal monitoring
+		if self.buffer_frozen and not self.current_slot then
 			self:unfreeze_buffer()
 			-- Update monitor state to restore input monitoring
 			self.track:update_monitor_state()
@@ -895,6 +995,282 @@ function Clip:load_bank_metadata()
 				}
 			end
 		end
+	end
+end
+
+--==============================================================================
+-- Editing Operations (only on frozen source)
+--==============================================================================
+
+-- Quantize events in frozen source
+-- @param grid_size number Grid size in ticks (e.g., 24 for 1/16 note at 96 ppqn)
+-- @param start_tick number Optional start of range (default: loop start)
+-- @param end_tick number Optional end of range (default: loop end)
+-- @return number Count of events moved
+function Clip:quantize_frozen(grid_size, start_tick, end_tick)
+	local store = self:get_edit_store()
+	if not store then return 0 end
+	
+	-- Use loop boundaries as default range
+	if not start_tick then start_tick = self:get_playback_start() end
+	if not end_tick then end_tick = self:get_playback_start() + self:get_playback_length() end
+	
+	return store:quantize(grid_size, start_tick, end_tick)
+end
+
+-- Transpose MIDI note events in frozen source
+-- @param semitones number Number of semitones to transpose (positive = up, negative = down)
+-- @param start_tick number Optional start of range (default: loop start)
+-- @param end_tick number Optional end of range (default: loop end)
+-- @return number Count of events transposed
+function Clip:transpose_frozen(semitones, start_tick, end_tick)
+	local store = self:get_edit_store()
+	if not store then return 0 end
+	
+	-- Use loop boundaries as default range
+	if not start_tick then start_tick = self:get_playback_start() end
+	if not end_tick then end_tick = self:get_playback_start() + self:get_playback_length() end
+	
+	return store:transpose(semitones, start_tick, end_tick)
+end
+
+-- Scale event velocities in frozen source
+-- @param factor number Velocity multiplier (e.g., 0.5 = half, 2.0 = double)
+-- @param start_tick number Optional start of range (default: loop start)
+-- @param end_tick number Optional end of range (default: loop end)
+-- @return number Count of events scaled
+function Clip:scale_velocity_frozen(factor, start_tick, end_tick)
+	local store = self:get_edit_store()
+	if not store then return 0 end
+	
+	-- Use loop boundaries as default range
+	if not start_tick then start_tick = self:get_playback_start() end
+	if not end_tick then end_tick = self:get_playback_start() + self:get_playback_length() end
+	
+	return store:scale_velocity(factor, start_tick, end_tick)
+end
+
+-- Shift events in frozen source
+-- @param from_tick number Shift events at or after this tick
+-- @param offset number Amount to shift (positive = forward, negative = backward)
+-- @return number Count of events shifted
+function Clip:shift_events_frozen(from_tick, offset)
+	local store = self:get_edit_store()
+	if not store then return 0 end
+	
+	return store:shift_events(from_tick, offset)
+end
+
+-- Insert empty time in frozen source
+-- @param insert_tick number Position to insert time
+-- @param duration number Amount of time to insert (in ticks)
+-- @return number Count of events shifted
+function Clip:insert_time_frozen(insert_tick, duration)
+	local store = self:get_edit_store()
+	if not store then return 0 end
+	
+	return store:insert_time(insert_tick, duration)
+end
+
+-- Delete time range in frozen source
+-- @param start_tick number Start of range to delete (inclusive)
+-- @param end_tick number End of range to delete (exclusive)
+-- @return number Count of events deleted
+function Clip:delete_time_frozen(start_tick, end_tick)
+	local store = self:get_edit_store()
+	if not store then return 0 end
+	
+	return store:delete_time(start_tick, end_tick)
+end
+
+-- Revert edits: drop frozen and resume from clip bank
+-- Only valid when dirty (frozen from clip)
+-- @return boolean True if reverted
+function Clip:revert_edits()
+	-- Only valid when dirty (frozen from clip)
+	if not self.buffer_frozen or not self.current_slot or not self.sources.clip_bank then
+		return false
+	end
+	
+	-- Deactivate frozen
+	self.sources.frozen:deactivate()
+	
+	-- Switch back to clip_bank source
+	self.active_source = self.sources.clip_bank
+	self.sources.clip_bank:activate()
+	
+	-- Restore tick position from clip_bank
+	self.tick = self.sources.clip_bank.tick
+	
+	-- Clear frozen flag (but keep current_slot - clip stays loaded)
+	self.buffer_frozen = false
+	self.playback_start = nil
+	self.playback_length = nil
+	
+	-- Update monitor state
+	self.track:update_monitor_state()
+	
+	-- Emit event
+	self:emit('buffer_unfrozen', { track_id = self.track.id })
+	
+	if flags.debug_clip then
+		print('Clip: Reverted edits, resuming from clip slot ' .. self.current_slot)
+	end
+	
+	return true
+end
+
+-- Save edits to current slot (overwrite)
+-- Only valid when dirty (frozen from clip)
+-- @return boolean True if saved
+function Clip:save_edits_to_current_slot()
+	-- Only valid when dirty
+	if not self.buffer_frozen or not self.current_slot then
+		return false
+	end
+	
+	local frozen = self.sources.frozen
+	local store = frozen.store
+	
+	-- Get frozen content as sparse table
+	local frozen_sparse = store:to_sparse_table()
+	
+	-- Remap ticks to 1-based (clips are always 1-based)
+	local clip_buffer = {}
+	local loop_start = frozen.loop_start
+	local loop_end = frozen:get_loop_end()
+	local clip_length = frozen.loop_length
+	
+	for tick, events in pairs(frozen_sparse) do
+		if tick >= loop_start and tick <= loop_end then
+			-- Remap tick: tick - loop_start + 1 (so clip starts at tick 1)
+			local remapped_tick = tick - loop_start + 1
+			clip_buffer[remapped_tick] = events
+		end
+	end
+	
+	-- Create clip data structure
+	local clip_data = {
+		name = self.clip_bank[self.current_slot].name or string.format('Clip %03d', self.current_slot),
+		length = clip_length,
+		loop_start = loop_start, -- Store original loop start
+		buffer = clip_buffer,
+	}
+	
+	-- Save to file
+	local filename = string.format('track_%d_clip_%03d.lua', self.track.id, self.current_slot)
+	local success = Persistence.save_clip_file(self.track.id, self.current_slot, clip_data)
+	
+	if success then
+		-- Update clip bank entry
+		self.clip_bank[self.current_slot] = {
+			filename = filename,
+			name = clip_data.name,
+			length = clip_length,
+			loop_start = loop_start,
+			buffer = clip_buffer,
+			playback_settings = self.clip_bank[self.current_slot].playback_settings or {},
+		}
+		
+		-- Update clip_bank source if it exists
+		if self.sources.clip_bank then
+			self.sources.clip_bank:load_from_bank_entry(self.clip_bank[self.current_slot], self.current_slot)
+		end
+		
+		-- Save bank metadata
+		self:save_bank_metadata()
+		
+		-- Emit event
+		self:emit('clip_saved', { bank_slot = self.current_slot, name = clip_data.name })
+		
+		-- Do NOT unfreeze - keep playing from frozen to maintain playback position
+		-- User can continue editing or revert later
+		
+		if flags.debug_clip then
+			print('Clip: Saved edits to slot ' .. self.current_slot .. ' (frozen playback continues)')
+		end
+		
+		return true
+	else
+		print('Clip: Failed to save edits to slot ' .. self.current_slot)
+		return false
+	end
+end
+
+-- Save edits to a new slot (Save As)
+-- @param bank_slot number The bank slot to save to
+-- @return boolean True if saved
+function Clip:save_edits_as(bank_slot)
+	if bank_slot < 1 then
+		print('Clip: Invalid bank slot ' .. bank_slot .. ' (must be positive)')
+		return false
+	end
+	
+	if not self.buffer_frozen then
+		print('Clip: No frozen content to save')
+		return false
+	end
+	
+	local frozen = self.sources.frozen
+	local store = frozen.store
+	
+	-- Get frozen content as sparse table
+	local frozen_sparse = store:to_sparse_table()
+	
+	-- Remap ticks to 1-based (clips are always 1-based)
+	local clip_buffer = {}
+	local loop_start = frozen.loop_start
+	local loop_end = frozen:get_loop_end()
+	local clip_length = frozen.loop_length
+	
+	for tick, events in pairs(frozen_sparse) do
+		if tick >= loop_start and tick <= loop_end then
+			-- Remap tick: tick - loop_start + 1 (so clip starts at tick 1)
+			local remapped_tick = tick - loop_start + 1
+			clip_buffer[remapped_tick] = events
+		end
+	end
+	
+	-- Create clip data structure
+	local clip_data = {
+		name = string.format('Clip %03d', bank_slot),
+		length = clip_length,
+		loop_start = loop_start,
+		buffer = clip_buffer,
+	}
+	
+	-- Save to file
+	local filename = string.format('track_%d_clip_%03d.lua', self.track.id, bank_slot)
+	local success = Persistence.save_clip_file(self.track.id, bank_slot, clip_data)
+	
+	if success then
+		-- Update clip bank entry
+		self.clip_bank[bank_slot] = {
+			filename = filename,
+			name = clip_data.name,
+			length = clip_length,
+			loop_start = loop_start,
+			buffer = clip_buffer,
+			playback_settings = {},
+		}
+		
+		-- Save bank metadata
+		self:save_bank_metadata()
+		
+		-- Emit event
+		self:emit('clip_saved', { bank_slot = bank_slot, name = clip_data.name })
+		
+		-- Do NOT change current_slot or unfreeze - keep playing from frozen
+		-- User can continue editing or load the new slot later
+		
+		if flags.debug_clip then
+			print('Clip: Saved edits as slot ' .. bank_slot .. ' (frozen playback continues)')
+		end
+		
+		return true
+	else
+		print('Clip: Failed to save edits as slot ' .. bank_slot)
+		return false
 	end
 end
 
