@@ -76,7 +76,8 @@ function App:init(o)
 	self.preset = {}
 	self.preset_props = {
 		track = {
-			'program_change',
+			'program_change_in',
+			'program_change_out',
 			'scale_select',
 			'arp',
 			'slew',
@@ -97,7 +98,8 @@ function App:init(o)
 	}
 	for i = 1, 16 do
 		self.preset[i] = {}
-		self.preset[i]['track_1_program_change'] = i
+		self.preset[i]['track_1_program_change_in'] = i
+		self.preset[i]['track_1_program_change_out'] = i
 	end
 
 	-- Timing parameters:

@@ -3,7 +3,7 @@ local utilities = require('Foobar/lib/utilities')
 local path_name = 'Foobar/lib/components/mode/'
 
 local BufferSeq = require('Foobar/lib/components/mode/bufferseq')
-local Default = require('Foobar/lib/components/mode/default')
+local DrumsDefault = require('Foobar/lib/components/mode/drumsdefault')
 
 local Mode = require('Foobar/lib/components/app/mode')
 
@@ -17,7 +17,7 @@ local bufferseq = BufferSeq:new({
 	offset = { x = 0, y = 0 },
 })
 
-local default = Default:new({})
+local default = DrumsDefault:new({})
 
 local DrumsMode = Mode:new({
 	id = 2,

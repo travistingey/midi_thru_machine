@@ -396,8 +396,12 @@ function Default:track_menu()
 	)
 
 	-- step/reset_step_count are shown in Input menus for applicable types, not here
-	add('program_change', {
-		label_fn = function() return 'PROGRAM CHANGE' end,
+	add('program_change_in', {
+		label_fn = function() return 'PROGRAM CHANGE IN' end,
+		requires_confirmation = true,
+	})
+	add('program_change_out', {
+		label_fn = function() return 'PROGRAM CHANGE OUT' end,
 		requires_confirmation = true,
 	})
 	-- VOICE moved under MIDI input type menu
@@ -739,12 +743,10 @@ function Default:clip_menu()
 				end,
 				has_submenu = true,
 				on_press = function()
-					if track and track.clip then
-						self:sub_menu(self:clip_edit_menu(), {
-							status = { icon = '\u{270e}', label = 'EDIT' },
-							screen = self:submenu_screen(),
-						})
-					end
+					if track and track.clip then self:sub_menu(self:clip_edit_menu(), {
+						status = { icon = '\u{270e}', label = 'EDIT' },
+						screen = self:submenu_screen(),
+					}) end
 				end,
 			})
 		)
@@ -757,9 +759,7 @@ function Default:clip_menu()
 			Registry.menu.make_item('clip_revert', {
 				label_fn = function() return 'REVERT' end,
 				value_fn = function()
-					if track and track.clip and track.clip.current_slot then
-						return 'to slot ' .. track.clip.current_slot
-					end
+					if track and track.clip and track.clip.current_slot then return 'to slot ' .. track.clip.current_slot end
 					return ''
 				end,
 				can_press = function() return track and track.clip and track.clip.buffer_frozen and track.clip.current_slot ~= nil end,
@@ -788,9 +788,7 @@ function Default:clip_menu()
 			Registry.menu.make_item('clip_save_edits', {
 				label_fn = function() return 'SAVE' end,
 				value_fn = function()
-					if track and track.clip and track.clip.current_slot then
-						return 'slot ' .. track.clip.current_slot
-					end
+					if track and track.clip and track.clip.current_slot then return 'slot ' .. track.clip.current_slot end
 					return ''
 				end,
 				can_press = function() return track and track.clip and track.clip.buffer_frozen and track.clip.current_slot ~= nil end,
@@ -892,11 +890,11 @@ function Default:clip_edit_menu()
 	local tid = App.current_track
 	local track = App.track[tid]
 	local items = {}
-	
+
 	if not track or not track.clip then return items end
-	
+
 	local clip = track.clip
-	
+
 	-- Quantize
 	table.insert(
 		items,
@@ -905,12 +903,18 @@ function Default:clip_edit_menu()
 			value_fn = function()
 				local grid = App.clip_edit_grid or (App.ppqn / 4) -- default 1/16 note
 				local note_name = ''
-				if grid == App.ppqn * 4 then note_name = ' (1/1)'
-				elseif grid == App.ppqn * 2 then note_name = ' (1/2)'
-				elseif grid == App.ppqn then note_name = ' (1/4)'
-				elseif grid == App.ppqn / 2 then note_name = ' (1/8)'
-				elseif grid == App.ppqn / 4 then note_name = ' (1/16)'
-				elseif grid == App.ppqn / 8 then note_name = ' (1/32)'
+				if grid == App.ppqn * 4 then
+					note_name = ' (1/1)'
+				elseif grid == App.ppqn * 2 then
+					note_name = ' (1/2)'
+				elseif grid == App.ppqn then
+					note_name = ' (1/4)'
+				elseif grid == App.ppqn / 2 then
+					note_name = ' (1/8)'
+				elseif grid == App.ppqn / 4 then
+					note_name = ' (1/16)'
+				elseif grid == App.ppqn / 8 then
+					note_name = ' (1/32)'
 				end
 				return tostring(grid) .. ' ticks' .. note_name
 			end,
@@ -920,7 +924,10 @@ function Default:clip_edit_menu()
 				local current = App.clip_edit_grid or (App.ppqn / 4)
 				local idx = 1
 				for i, g in ipairs(grids) do
-					if math.abs(g - current) < 1 then idx = i break end
+					if math.abs(g - current) < 1 then
+						idx = i
+						break
+					end
 				end
 				idx = util.clamp(idx + d, 1, #grids)
 				App.clip_edit_grid = grids[idx]
@@ -940,7 +947,7 @@ function Default:clip_edit_menu()
 			},
 		})
 	)
-	
+
 	-- Transpose
 	table.insert(
 		items,
@@ -948,9 +955,12 @@ function Default:clip_edit_menu()
 			label_fn = function() return 'TRANSPOSE' end,
 			value_fn = function()
 				local semitones = App.clip_edit_transpose or 0
-				if semitones == 0 then return '0'
-				elseif semitones > 0 then return '+' .. semitones
-				else return tostring(semitones)
+				if semitones == 0 then
+					return '0'
+				elseif semitones > 0 then
+					return '+' .. semitones
+				else
+					return tostring(semitones)
 				end
 			end,
 			enc3 = function(d)
@@ -971,7 +981,7 @@ function Default:clip_edit_menu()
 			},
 		})
 	)
-	
+
 	-- Velocity scale
 	table.insert(
 		items,
@@ -1001,7 +1011,7 @@ function Default:clip_edit_menu()
 			},
 		})
 	)
-	
+
 	return items
 end
 

@@ -517,11 +517,18 @@ function Track:set(o)
 		self:enable()
 	end)
 
-	-- Shoot program change events
-	Registry.add('add_number', track .. 'program_change', 'Program Change', 0, 16, 0)
-	Registry.set_action(track .. 'program_change', function(d)
-		App.settings[track .. 'program_change'] = d
+	-- Shoot program change events to input device
+	Registry.add('add_number', track .. 'program_change_in', 'Program Change In', 0, 128, 0)
+	Registry.set_action(track .. 'program_change_in', function(d)
+		App.settings[track .. 'program_change_in'] = d
 		if d > 0 then self.input_device:program_change(d - 1, self.midi_in) end
+	end)
+
+	-- Shoot program change events to output device
+	Registry.add('add_number', track .. 'program_change_out', 'Program Change Out', 0, 128, 0)
+	Registry.set_action(track .. 'program_change_out', function(d)
+		App.settings[track .. 'program_change_out'] = d
+		if d > 0 and self.output_type == 'midi' and self.output_device then self.output_device:program_change(d - 1, self.midi_out) end
 	end)
 
 	-- Voice
