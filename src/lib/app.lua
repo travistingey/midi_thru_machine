@@ -122,6 +122,10 @@ function App:init(o)
 	-- Buffer scrub mode setting (app-level)
 	self.buffer_scrub_mode = 'loop' -- 'loop' = loop scrub range, 'play_through' = play through once
 
+	-- Global recording quantization (app-level)
+	-- 0 or nil = off; >0 = grid size in ticks (e.g., ppqn/4 for 1/16 note)
+	self.record_quantize_grid = 0
+
 	-- Launch sync and scrub sync settings (app-level)
 	-- Default values will be set by params:default() via set_action callbacks
 	self.launch_sync_length = self.ppqn * 4 -- Default to 1 bar (will be overridden by params)
@@ -198,13 +202,44 @@ function App:init(o)
 	params:add_group('Devices', 4)
 	self.device_manager:register_params()
 
-	params:add_group('Recording', 3)
+	params:add_group('Recording', 4)
 	params:add_binary('recording', 'Recording', 'momentary', 0)
 	params:set_action('recording', function(state) self:set_recording(state == 1) end)
 
 	params:add_option('buffer_scrub_mode', 'Scrub Mode', { 'loop', 'play_through' }, 1)
 	params:set_action('buffer_scrub_mode', function(d)
 		self.buffer_scrub_mode = d == 1 and 'loop' or 'play_through'
+		App.screen_dirty = true
+	end)
+
+	-- Global Record Quantize (app-level)
+	-- Index 1 = off, others map to musical divisions based on ppqn
+	local record_quantize_options = { 'off', '1/32', '1/16', '1/8', '1/4', '1/2', '1' }
+	params:add_option('record_quantize', 'Record Quantize', record_quantize_options, 1)
+	params:set_action('record_quantize', function(d)
+		self.settings['record_quantize'] = d
+		-- Default: off
+		local grid = 0
+		if d == 2 then
+			-- 1/32
+			grid = math.floor(self.ppqn / 8)
+		elseif d == 3 then
+			-- 1/16
+			grid = math.floor(self.ppqn / 4)
+		elseif d == 4 then
+			-- 1/8
+			grid = math.floor(self.ppqn / 2)
+		elseif d == 5 then
+			-- 1/4
+			grid = self.ppqn
+		elseif d == 6 then
+			-- 1/2
+			grid = self.ppqn * 2
+		elseif d == 7 then
+			-- 1/1
+			grid = self.ppqn * 4
+		end
+		self.record_quantize_grid = grid
 		App.screen_dirty = true
 	end)
 

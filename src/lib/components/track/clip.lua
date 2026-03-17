@@ -1014,8 +1014,23 @@ function Clip:quantize_frozen(grid_size, start_tick, end_tick)
 	-- Use loop boundaries as default range
 	if not start_tick then start_tick = self:get_playback_start() end
 	if not end_tick then end_tick = self:get_playback_start() + self:get_playback_length() end
-	
+
 	return store:quantize(grid_size, start_tick, end_tick)
+end
+
+-- Unquantize events in frozen source using raw_tick
+-- @param start_tick number Optional start of range (default: loop start)
+-- @param end_tick number Optional end of range (default: loop end)
+-- @return number Count of events moved
+function Clip:unquantize_frozen(start_tick, end_tick)
+	local store = self:get_edit_store()
+	if not store then return 0 end
+
+	-- Use loop boundaries as default range
+	if not start_tick then start_tick = self:get_playback_start() end
+	if not end_tick then end_tick = self:get_playback_start() + self:get_playback_length() end
+
+	return store:unquantize_from_raw(start_tick, end_tick)
 end
 
 -- Transpose MIDI note events in frozen source

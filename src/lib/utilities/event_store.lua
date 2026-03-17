@@ -662,9 +662,19 @@ function EventStore:quantize(grid_size, start_tick, end_tick)
 		local tick = self.ticks[i]
 		if tick >= end_tick then break end
 
-		-- Quantize to nearest grid position
-		local relative = tick - 1 -- 0-based for math
-		local quantized = math.floor((relative + grid_size / 2) / grid_size) * grid_size + 1
+		-- Quantize to nearest grid position.
+		--
+		-- Anchor gridlines to musical "zero" (tick 0) rather than tick 1.
+		-- With 1-based ticks, anchoring to 0 makes the snapping window symmetric:
+		-- each gridline owns half a grid behind and half ahead (tie breaks upward).
+		local anchor = 0
+		local quantized = math.floor(((tick - anchor) + grid_size / 2) / grid_size) * grid_size + anchor
+		-- Keep quantized ticks within the provided range.
+		-- (end_tick is exclusive; clamp to end_tick-1)
+		if quantized < start_tick then quantized = start_tick end
+		if quantized >= end_tick then quantized = end_tick - 1 end
+		-- 1-based safety clamp (anchor=0 can produce 0 near the start)
+		if quantized < 1 then quantized = 1 end
 
 		if quantized ~= tick then
 			table.insert(moves, { old_tick = tick, new_tick = quantized, events = self.events[tick] })
@@ -706,6 +716,93 @@ function EventStore:quantize(grid_size, start_tick, end_tick)
 	end
 
 	table.sort(new_ticks)
+	self.ticks = new_ticks
+
+	return count
+end
+
+-- Unquantize events based on their raw_tick field (if present)
+-- This attempts to restore original timing by moving events back to raw_tick.
+-- @param start_tick number Optional start of range (default: all events)
+-- @param end_tick number Optional end of range (exclusive)
+-- @return number Count of events moved
+function EventStore:unquantize_from_raw(start_tick, end_tick)
+	start_tick = start_tick or 1
+	end_tick = end_tick or (self:last_tick() and self:last_tick() + 1) or 1
+
+	local start_idx = self:_binary_search_ge(start_tick)
+	if not start_idx then return 0 end
+
+	local moves = {} -- {old_tick, new_tick, event}
+	local count = 0
+
+	-- Collect events that have a raw_tick different from their current tick
+	for i = start_idx, #self.ticks do
+		local tick = self.ticks[i]
+		if tick >= end_tick then break end
+
+		local events = self.events[tick]
+		if events then
+			for _, event in ipairs(events) do
+				if event and type(event.raw_tick) == 'number' and event.raw_tick > 0 and event.raw_tick ~= tick then
+					table.insert(moves, { old_tick = tick, new_tick = event.raw_tick, event = event })
+					count = count + 1
+				end
+			end
+		end
+	end
+
+	if count == 0 then return 0 end
+
+	-- Apply moves:
+	-- 1) Remove moved events from their old ticks (clean up empty ticks)
+	-- 2) Insert them at their raw_tick positions.
+	local new_events = {}
+	local new_ticks_map = {}
+
+	-- Start by copying existing structure
+	for tick, evs in pairs(self.events) do
+		new_events[tick] = {}
+		for i = 1, #evs do
+			new_events[tick][i] = evs[i]
+		end
+		new_ticks_map[tick] = true
+	end
+
+	-- Remove moved events from their old positions
+	for _, move in ipairs(moves) do
+		local old_events = new_events[move.old_tick]
+		if old_events then
+			for i = #old_events, 1, -1 do
+				if old_events[i] == move.event then
+					table.remove(old_events, i)
+					break
+				end
+			end
+			if #old_events == 0 then
+				new_events[move.old_tick] = nil
+				new_ticks_map[move.old_tick] = nil
+			end
+		end
+	end
+
+	-- Insert moved events at their raw_tick positions
+	for _, move in ipairs(moves) do
+		if not new_events[move.new_tick] then
+			new_events[move.new_tick] = {}
+			new_ticks_map[move.new_tick] = true
+		end
+		table.insert(new_events[move.new_tick], move.event)
+	end
+
+	-- Rebuild sorted ticks array
+	local new_ticks = {}
+	for tick, _ in pairs(new_ticks_map) do
+		table.insert(new_ticks, tick)
+	end
+	table.sort(new_ticks)
+
+	self.events = new_events
 	self.ticks = new_ticks
 
 	return count

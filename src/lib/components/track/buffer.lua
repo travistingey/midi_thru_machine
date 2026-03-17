@@ -54,6 +54,10 @@ function Buffer:set(o)
 	-- Overwrite mode tracking: tracks which steps have been cleared in current loop iteration
 	-- Key: step_index (step number within loop), Value: true
 	self.overwrite_cleared_steps = {}
+
+	-- Track open notes for record-time quantization (per channel+note)
+	-- Key: "<ch>_<note>", Value: { raw_on = tick, quantized_on = tick }
+	self.open_notes = {}
 end
 
 -- Helper: Wrap tick within buffer boundaries
@@ -76,11 +80,64 @@ function Buffer:record_buffer(midi_event)
 	-- Determine the recording tick
 	local recording_tick = self.tick
 
-	-- Wrap tick within the buffer boundaries
-	local tick = self:wrap_tick(recording_tick)
+	-- Always preserve the raw, unquantized tick (read-only reference)
+	midi_event.raw_tick = recording_tick
+
+	-- Compute the storage tick, optionally applying global record quantize.
+	-- For note events, we quantize the NOTE ON and preserve the played duration
+	-- by deriving NOTE OFF from raw_tick + (quantized_on - raw_on).
+	local tick
+	local grid = App.record_quantize_grid or 0
+
+	if grid > 0 and midi_event.type and (midi_event.type == 'note_on' or midi_event.type == 'note_off') and midi_event.note then
+		local ch = midi_event.ch or 1
+		local key = tostring(ch) .. '_' .. tostring(midi_event.note)
+
+		if midi_event.type == 'note_on' then
+			-- Quantize note_on to nearest gridline anchored at tick 0
+			local anchor = 0
+			local quantized_on = math.floor(((recording_tick - anchor) + grid / 2) / grid) * grid + anchor
+			if quantized_on < 1 then quantized_on = 1 end
+
+			-- Remember mapping so note_off can preserve duration relative to the quantized start
+			self.open_notes[key] = {
+				raw_on = recording_tick,
+				quantized_on = quantized_on,
+			}
+
+			tick = self:wrap_tick(quantized_on)
+		else
+			-- NOTE OFF: try to preserve the original duration where possible
+			local open = self.open_notes[key]
+			if open and type(open.raw_on) == 'number' and type(open.quantized_on) == 'number' then
+				-- Duration in raw ticks
+				local duration = recording_tick - open.raw_on
+				if duration < 0 then duration = 0 end
+
+				-- Place note_off at quantized_on + duration (not necessarily on grid)
+				local off_tick = open.quantized_on + duration
+				if off_tick < open.quantized_on then off_tick = open.quantized_on end
+
+				tick = self:wrap_tick(off_tick)
+			else
+				-- Fallback: quantize note_off independently
+				local anchor = 0
+				local quantized_off = math.floor(((recording_tick - anchor) + grid / 2) / grid) * grid + anchor
+				if quantized_off < 1 then quantized_off = 1 end
+				tick = self:wrap_tick(quantized_off)
+			end
+
+			-- Close the note entry regardless
+			self.open_notes[key] = nil
+		end
+	else
+		-- Non-note events or record quantize disabled: use the raw recording tick (wrapped)
+		tick = self:wrap_tick(recording_tick)
+	end
 
 	midi_event.buffer_sent = nil
-	midi_event.tick = recording_tick
+	-- Store the (possibly quantized) tick on the event for editing
+	midi_event.tick = tick
 	midi_event.external_tick = App.external_tick
 
 	-- Store the event using EventStore (maintains sorted tick index)
@@ -140,6 +197,8 @@ function Buffer:transport_event(data)
 	elseif data.type == 'stop' then
 		self.playing = false -- Track transport state for recording timing
 		-- Don't reset tick - buffer is continuously running
+		-- Clear any open notes used for record-time quantization
+		self.open_notes = {}
 	elseif data.type == 'clock' and self.playing then
 		-- Ensure tick is within buffer bounds (safety check)
 		-- This handles cases where buffer start changed during recording or tick got out of sync

@@ -948,6 +948,25 @@ function Default:clip_edit_menu()
 		})
 	)
 
+	-- Unquantize (revert to raw_tick timing where available)
+	table.insert(
+		items,
+		Registry.menu.make_item('clip_edit_unquantize', {
+			label_fn = function() return 'UNQUANTIZE' end,
+			value_fn = function() return 'from raw' end,
+			on_press = function()
+				if clip then
+					local count = clip:unquantize_frozen()
+					print('Unquantized ' .. count .. ' events from raw_tick')
+					App.screen_dirty = true
+				end
+			end,
+			helper_labels = {
+				press_fn_3 = 'unquantize',
+			},
+		})
+	)
+
 	-- Transpose
 	table.insert(
 		items,
