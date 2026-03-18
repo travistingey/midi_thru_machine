@@ -79,6 +79,7 @@ function App:init(o)
 			'program_change_in',
 			'program_change_out',
 			'scale_select',
+			'clip_slot',
 			'arp',
 			'slew',
 			'note_range_upper',

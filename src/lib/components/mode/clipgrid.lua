@@ -135,6 +135,18 @@ function ClipGrid:grid_event(clip, data)
 
 		if bank_slot < 1 then return end -- Invalid slot
 
+		-- If we're editing a loaded clip (frozen snapshot) and the user presses the pad
+		-- for the currently-loaded slot, discard edits and revert back to the saved clip.
+		-- This keeps "reverting" intuitive: the original pad means "restore original".
+		if clip.buffer_frozen and clip.current_slot and bank_slot == clip.current_slot then
+			local reverted = clip:revert_edits()
+			if reverted then
+				self:set_grid(clip)
+				self:update_row_pads()
+			end
+			return
+		end
+
 		-- When buffer is frozen and slot is empty: swap behavior
 		-- Tap (no alt) = save frozen buffer to clip; Alt + tap = start recording (synced)
 		if clip.buffer_frozen and not clip.clip_bank[bank_slot] then
@@ -167,6 +179,20 @@ function ClipGrid:grid_event(clip, data)
 				end
 				return
 			end
+		end
+
+		-- Not frozen + Alt + pad: save full buffer loop to bank slot (quick save without freezing)
+		if not clip.buffer_frozen and self.mode.alt then
+			local loop_start = clip.buffer.buffer_start
+			local loop_end = clip.buffer.buffer_start + clip.buffer.buffer_length - 1
+			local clip_name = string.format('Clip %03d', bank_slot)
+			local success = clip:save_clip_to_bank(bank_slot, loop_start, loop_end, clip_name)
+			if success then
+				if flags.debug_clip then print('ClipGrid: Saved live buffer to slot ' .. bank_slot) end
+				self:set_grid(clip)
+				self:update_row_pads()
+			end
+			return
 		end
 
 		-- Check if transport is playing
@@ -548,8 +574,17 @@ function ClipGrid:set_grid(clip)
 			s.led[x][y] = { 3, 3, 3 } -- Dim red
 		elseif clip_entry then
 			-- Slot has clip: show color based on slot number
-			if clip.current_slot == bank_slot then
-				-- Currently playing: bright color
+			-- Only highlight the grid "active clip" when the clip bank is the active playback source.
+			-- When the buffer is frozen for editing, `current_slot` may still be set, but playback
+			-- is coming from `sources.frozen` (or scrub). In that case, we should not show
+			-- the saved clip as "currently playing" on the clip grid.
+			local playing_slot = nil
+			if clip.active_source == clip.sources.clip_bank then
+				playing_slot = clip.current_slot
+			end
+
+			if playing_slot == bank_slot then
+				-- Active playback from clip bank: bright color
 				s.led[x][y] = Grid.rainbow_on[(bank_slot - 1) % #Grid.rainbow_on + 1]
 			else
 				-- Loaded but not playing: dim color

@@ -76,7 +76,7 @@ function Track:set(o)
 
 	local track = 'track_' .. self.id .. '_'
 
-	Registry.add('add_group', 'Track ' .. self.id, 28)
+	Registry.add('add_group', 'Track ' .. self.id, 29)
 
 	Registry.add('add_text', track .. 'name', 'Name', self.name)
 	Registry.set_action(track .. 'name', function(d) self.name = d end)
@@ -440,6 +440,18 @@ function Track:set(o)
 		self:build_chain()
 	end)
 
+	-- Clip slot: 0 = live buffer, 1–16 = bank slot (preset + launch on transport start)
+	Registry.add('add_number', track .. 'clip_slot', 'Clip Slot', 0, 16, 0, function(param)
+		local v = param:get()
+		if v == 0 then return 'live' end
+		return tostring(v)
+	end)
+	Registry.set_action(track .. 'clip_slot', function(d)
+		App.settings[track .. 'clip_slot'] = d
+		if App.flags.state.initializing then return end
+		self:clip_slot_request(d)
+	end)
+
 	-- Trigger
 	self.trigger = o.trigger or 36
 	Registry.add('add_number', track .. 'trigger', 'Trigger', 0, 127, 36)
@@ -518,14 +530,14 @@ function Track:set(o)
 	end)
 
 	-- Shoot program change events to input device
-	Registry.add('add_number', track .. 'program_change_in', 'Program Change In', 0, 128, 0)
+	Registry.add('add_number', track .. 'program_change_in', 'PC In', 0, 128, 0)
 	Registry.set_action(track .. 'program_change_in', function(d)
 		App.settings[track .. 'program_change_in'] = d
 		if d > 0 then self.input_device:program_change(d - 1, self.midi_in) end
 	end)
 
 	-- Shoot program change events to output device
-	Registry.add('add_number', track .. 'program_change_out', 'Program Change Out', 0, 128, 0)
+	Registry.add('add_number', track .. 'program_change_out', 'PC Out', 0, 128, 0)
 	Registry.set_action(track .. 'program_change_out', function(d)
 		App.settings[track .. 'program_change_out'] = d
 		if d > 0 and self.output_type == 'midi' and self.output_device then self.output_device:program_change(d - 1, self.midi_out) end
@@ -649,6 +661,47 @@ function Track:emit(event_name, ...)
 		for _, listener in ipairs(self.event_listeners[event_name]) do
 			listener(...)
 		end
+	end
+end
+
+-- Sync clip_slot param from clip state (silent — does not re-trigger launch)
+function Track:sync_clip_slot_param()
+	local pid = 'track_' .. self.id .. '_clip_slot'
+	local slot = 0
+	if self.clip and self.clip.current_slot then slot = self.clip.current_slot end
+	if params:get(pid) == slot then return end
+	Registry.set(pid, slot, 'clip_state_sync', nil, true)
+	App.settings[pid] = slot
+end
+
+-- Apply clip_slot param: queue synced load/unload when playing, immediate when stopped
+function Track:clip_slot_request(slot)
+	local clip = self.clip
+	if not clip then return end
+	local pid = 'track_' .. self.id .. '_clip_slot'
+	if slot > 0 and not clip.clip_bank[slot] then
+		print('Track ' .. self.id .. ': no clip in bank slot ' .. slot)
+		local revert = clip.current_slot or 0
+		Registry.set(pid, revert, 'clip_slot_invalid', nil, true)
+		App.settings[pid] = revert
+		return
+	end
+	if slot > 0 and clip.current_slot == slot then return end
+	if slot == 0 and not clip.current_slot and not clip.buffer_frozen then return end
+
+	if App.playing then
+		if slot == 0 then
+			clip:queue_clip_slot_unload()
+		else
+			clip:queue_clip_slot_load(slot)
+		end
+	else
+		if slot == 0 then
+			clip:unload_clip()
+		else
+			clip:load_clip_from_bank(slot)
+		end
+		self:sync_clip_slot_param()
 	end
 end
 

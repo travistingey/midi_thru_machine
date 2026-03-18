@@ -355,7 +355,15 @@ function Default:track_menu()
 		end,
 	})
 
-	local items = { in_row, out_row, type_row, scale_row }
+	local clip_slot_row = Registry.menu.make_item('track_' .. id .. '_clip_slot', {
+		label_fn = function() return 'CLIP SLOT' end,
+		requires_confirmation = true,
+		helper_labels = {
+			enc3 = '0 live · 1-16 bank',
+		},
+	})
+
+	local items = { in_row, out_row, type_row, scale_row, clip_slot_row }
 
 	-- Additional track parameters (excluding note_range_upper)
 	local function add(id_suffix, opts)
@@ -1027,6 +1035,39 @@ function Default:clip_edit_menu()
 			helper_labels = {
 				enc3 = 'factor',
 				press_fn_3 = 'scale',
+			},
+		})
+	)
+
+	-- Velocity set (absolute)
+	table.insert(
+		items,
+		Registry.menu.make_item('clip_edit_velocity_set', {
+			label_fn = function() return 'SET VELOCITY' end,
+			value_fn = function()
+				local v = App.clip_edit_velocity_value
+				if v == nil then v = 100 end
+				return tostring(v)
+			end,
+			enc3 = function(d)
+				local v = App.clip_edit_velocity_value
+				if v == nil then v = 100 end
+				v = util.clamp(v + d, 0, 127)
+				App.clip_edit_velocity_value = v
+				App.screen_dirty = true
+			end,
+			on_press = function()
+				if clip then
+					local v = App.clip_edit_velocity_value
+					if v == nil then v = 100 end
+					local count = clip:set_velocity_frozen(v)
+					print('Set velocity for ' .. count .. ' events to ' .. v)
+					App.screen_dirty = true
+				end
+			end,
+			helper_labels = {
+				enc3 = 'value',
+				press_fn_3 = 'set',
 			},
 		})
 	)

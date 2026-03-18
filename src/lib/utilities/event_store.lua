@@ -866,4 +866,30 @@ function EventStore:scale_velocity(factor, start_tick, end_tick)
 	return count
 end
 
+-- Set event velocities to an absolute value
+-- @param value number Velocity value (0-127)
+-- @param start_tick number Optional start of range (default: all events)
+-- @param end_tick number Optional end of range (exclusive)
+-- @return number Count of events updated
+function EventStore:set_velocity(value, start_tick, end_tick)
+	if value == nil then return 0 end
+	value = math.floor(value)
+	value = math.max(0, math.min(127, value))
+
+	start_tick = start_tick or 1
+	end_tick = end_tick or (self:last_tick() and self:last_tick() + 1) or 1
+
+	local count = 0
+	for tick, events in self:iter_range(start_tick, end_tick) do
+		for _, event in ipairs(events) do
+			if event and event.vel ~= nil then
+				event.vel = value
+				count = count + 1
+			end
+		end
+	end
+
+	return count
+end
+
 return EventStore

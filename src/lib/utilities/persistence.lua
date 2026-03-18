@@ -461,24 +461,45 @@ end
 --- Delete table data file for a given PSET number
 -- @param pset_number number The preset slot number
 function Persistence.delete(pset_number)
-	local filepath = Persistence.get_data_path(pset_number)
 	local pset_folder = Persistence.get_pset_folder_path(pset_number)
 
 	-- Delete the data file if it exists
-	if util.file_exists(filepath) then
-		local success, err = pcall(function() os.remove(filepath) end)
+	local data_filepath = Persistence.get_data_path(pset_number)
+	if util.file_exists(data_filepath) then
+		local success, err = pcall(function() os.remove(data_filepath) end)
 
 		if success then
-			print('Persistence: Deleted table data at ' .. filepath)
+			print('Persistence: Deleted table data at ' .. data_filepath)
 		else
-			print('Persistence: Error deleting ' .. filepath .. ' - ' .. tostring(err))
+			print('Persistence: Error deleting ' .. data_filepath .. ' - ' .. tostring(err))
 		end
 	end
 
-	-- Note: We don't delete the entire PSET folder here because:
-	-- 1. The PSET file itself is managed by norns
-	-- 2. Users might want to keep clips even if they delete the PSET
-	-- 3. The folder can be manually cleaned up if needed
+	-- Delete per-track bank metadata files for this PSET
+	for track_id = 1, 8 do
+		local bank_filepath = Persistence.get_bank_filepath(track_id)
+		if util.file_exists(bank_filepath) then
+			local success, err = pcall(function() os.remove(bank_filepath) end)
+
+			if success then
+				print('Persistence: Deleted bank data at ' .. bank_filepath)
+			else
+				print('Persistence: Error deleting bank file ' .. bank_filepath .. ' - ' .. tostring(err))
+			end
+		end
+	end
+
+	-- Delete all clip files under the clips directory for this PSET
+	local clips_dir = pset_folder .. 'clips/'
+	if util.file_exists(clips_dir) then
+		local success, err = pcall(function() os.execute('rm -rf ' .. clips_dir) end)
+
+		if success then
+			print('Persistence: Deleted clips directory at ' .. clips_dir)
+		else
+			print('Persistence: Error deleting clips directory ' .. clips_dir .. ' - ' .. tostring(err))
+		end
+	end
 end
 
 return Persistence

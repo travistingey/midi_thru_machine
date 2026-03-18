@@ -262,12 +262,13 @@ end
 
 -- Calculate relative scrub tick position based on App.tick within scrub range
 -- Quantizes to next sync boundary and wraps back to scrub range
-function BufferSeq:calculate_relative_scrub_tick(start_tick, end_tick, sync_length)
+function BufferSeq:calculate_relative_scrub_tick(start_tick, end_tick, sync_length, base_tick)
 	local SequenceUtils = require('Foobar/lib/utilities/sequence_utils')
 	local scrub_length = end_tick - start_tick + 1
+	base_tick = base_tick or App.tick
 	
 	-- Calculate relative position: where App.tick falls within scrub range
-	local relative_tick = ((App.tick - start_tick) % scrub_length) + start_tick
+	local relative_tick = ((base_tick - start_tick) % scrub_length) + start_tick
 	
 	-- Quantize to next sync boundary
 	local next_sync = SequenceUtils.get_next_sync_tick(sync_length, relative_tick)
@@ -298,7 +299,12 @@ function BufferSeq:start_scrub(pad_index)
 	local scrub_sync_length = App.scrub_sync_length or (App.ppqn / 4)
 	
 	if scrub_start_mode == 'relative' then
-		initial_tick = self:calculate_relative_scrub_tick(start_tick, end_tick, scrub_sync_length)
+		-- Legacy path: when scrubbing on frozen surface, use clip.tick space.
+		local base_tick = App.tick
+		local track = buffer.track
+		local clip = track and track.clip or nil
+		if clip and clip.buffer_frozen then base_tick = clip.tick end
+		initial_tick = self:calculate_relative_scrub_tick(start_tick, end_tick, scrub_sync_length, base_tick)
 	elseif scrub_start_mode == 'absolute' then
 		initial_tick = start_tick
 	else
@@ -387,7 +393,11 @@ function BufferSeq:recalculate_scrub_from_held_pads()
 	
 	if scrub_start_mode == 'relative' then
 		-- Calculate relative position within scrub range, quantized to sync boundary
-		initial_tick = self:calculate_relative_scrub_tick(start_tick, end_tick, scrub_sync_length)
+		local base_tick = App.tick
+		-- When we're editing a frozen clip, scrub coordinates are in frozen tick space
+		-- (driven by clip.tick), not in live buffer/App.tick space.
+		if clip and clip.buffer_frozen then base_tick = clip.tick end
+		initial_tick = self:calculate_relative_scrub_tick(start_tick, end_tick, scrub_sync_length, base_tick)
 		if flags.debug_scrub then
 			print('Relative scrub start: App.tick=' .. App.tick .. ', initial_tick=' .. initial_tick .. ' (range: ' .. start_tick .. '-' .. end_tick .. ')')
 		end
@@ -519,9 +529,23 @@ function BufferSeq:grid_event(component, data)
 
 		local loop_length = loop_end - loop_start + 1
 
-		-- Set playback loop and freeze immediately
-		clip:set_playback_loop(loop_start, loop_length)
-		clip:freeze_buffer()
+		-- Editing surface is always the frozen snapshot.
+		-- If a clip is loaded, we must freeze a copy of the clip source
+		-- so loop endpoints and quantization apply to the clip content,
+		-- not the live buffer coordinate space.
+		if clip.current_slot then
+			-- Copy currently active clip into frozen editing surface (only if not already frozen).
+			-- This preserves clip-local tick coordinates (clips are 1-based).
+			if not clip.buffer_frozen then clip:freeze_from_source() end
+			-- Now apply the edited loop endpoints to the frozen snapshot.
+			clip:set_playback_loop(loop_start, loop_length)
+		else
+			-- Live/unloaded buffer editing: freeze from the live buffer.
+			-- Apply endpoints first, since freeze_buffer slices from the live buffer
+			-- using clip.playback_start/playback_length.
+			clip:set_playback_loop(loop_start, loop_length)
+			clip:freeze_buffer()
+		end
 		if flags.debug_clip then print('Loop frozen: ' .. loop_start .. '-' .. loop_end) end
 	end
 
@@ -653,20 +677,22 @@ function BufferSeq:set_grid(component)
 		-- For live buffer: show buffer's loop boundaries
 		-- Use (tick - 1) formula to match step calculation: step = floor((tick - 1) / step_length) + 1
 		local loop_start_index, loop_end_index
-		if clip and clip.current_slot and clip.clip_bank[clip.current_slot] then
-			-- Clip is playing: clips start at step 1, end at step (length/step_length)
-			local clip_entry = clip.clip_bank[clip.current_slot]
-			local clip_length = clip_entry.length or 0
-			loop_start_index = 1
-			-- Convert clip length (in ticks) to step index
-			-- clip_length is the last tick, so use (clip_length - 1) to get the correct step
-			loop_end_index = math.floor((clip_length - 1) / step_length) + 1
-		elseif frozen_active and clip and clip.playback_start and clip.playback_length then
+		-- When frozen, loop endpoints should come from the frozen snapshot, even if a clip is loaded.
+		-- Otherwise the grid can highlight the full clip range while audio loops over the edited frozen range.
+		if frozen_active and clip and clip.playback_start and clip.playback_length then
 			-- Frozen buffer: use frozen buffer's playback loop boundaries (convert ticks to steps)
 			local loop_start = clip.playback_start
 			local loop_end = clip.playback_start + clip.playback_length - 1
 			loop_start_index = math.floor((loop_start - 1) / step_length) + 1
 			loop_end_index = math.floor((loop_end - 1) / step_length) + 1
+		elseif clip and clip.current_slot and clip.clip_bank[clip.current_slot] then
+			-- Clip is playing (unfrozen): clips start at step 1, end at step (length/step_length)
+			local clip_entry = clip.clip_bank[clip.current_slot]
+			local clip_length = clip_entry.length or 0
+			loop_start_index = 1
+			-- Convert clip length (in ticks) to step index.
+			-- clip_length is the last tick, so use (clip_length - 1) to get the correct step.
+			loop_end_index = math.floor((clip_length - 1) / step_length) + 1
 		else
 			-- Live buffer: use buffer's loop boundaries (convert ticks to steps)
 			local loop_start = buffer.buffer_start
