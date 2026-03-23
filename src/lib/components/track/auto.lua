@@ -168,17 +168,21 @@ function Auto:run_events(actions)
 end
 
 function Auto:run_preset(action)
+	-- Global preset blocks: let App decide which keys exist and apply sparsely.
+	if App.activate_preset_global then
+		App:activate_preset_global(action.value)
+		return
+	end
+
+	-- Fallback to legacy per-track behavior if global API isn't available.
 	local component_props = App.preset_props.track
 	local id = self.track.id
-
 	self.track.current_preset = action.value
-
 	if component_props then
 		local props = {}
 		for i, v in ipairs(component_props) do
 			props[i] = 'track_' .. id .. '_' .. v
 		end
-
 		App:load_preset(action.value, props)
 	end
 end

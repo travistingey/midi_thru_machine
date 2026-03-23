@@ -19,7 +19,20 @@ local clipgrid = ClipGrid:new({
 	offset = { x = 0, y = 4 },
 })
 local mutegrid = MuteGrid:new({ track = 1 })
-local presetgrid = PresetGrid:new({ track = 1, param_type = 'track' })
+local presetgrid = PresetGrid:new({
+	track = 1,
+	param_type = 'track',
+	-- New global preset behavior:
+	-- - Load applies globally to all tracks + scales (sparse keys)
+	-- - Save overwrites only active track + its selected scale
+	load_mode = 'global',
+	save_mode = 'scoped_overwrite',
+	save_track_fn = function(self) return App.current_track end,
+	save_scale_fn = function(self, tid)
+		local pid = 'track_' .. tid .. '_scale_select'
+		return params:get(pid) or 0
+	end,
+})
 local default = Default:new({})
 
 local SessionMode = Mode:new({

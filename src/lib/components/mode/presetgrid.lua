@@ -14,6 +14,14 @@ function PresetGrid:set(o)
 	self.param_ids = o.param_ids -- e.g., {1,2,3} or function returning ids
 	self.param_list = o.param_list -- Predefined list of parameter names
 	self.id = o.id
+	-- Behavior overrides
+	-- load_mode: 'local' (default) or 'global'
+	-- save_mode: 'local' (default) or 'scoped_overwrite'
+	self.load_mode = o.load_mode or 'local'
+	self.save_mode = o.save_mode or 'local'
+	-- When saving scoped_overwrite, which track/scale to use
+	self.save_track_fn = o.save_track_fn
+	self.save_scale_fn = o.save_scale_fn
 
 	-- If param_type is set, we assume it's bound to a component
 	self.component = 'auto'
@@ -75,23 +83,38 @@ function PresetGrid:get_param_list()
 end
 
 function PresetGrid:save_preset(number)
+	if self.save_mode == 'scoped_overwrite' and App.save_preset_overwrite_scoped then
+		local tid = self.track
+		if self.save_track_fn and type(self.save_track_fn) == 'function' then tid = self.save_track_fn(self) end
+		local sid = 0
+		if self.save_scale_fn and type(self.save_scale_fn) == 'function' then sid = self.save_scale_fn(self, tid) end
+		App:save_preset_overwrite_scoped(number, { track_id = tid, scale_id = sid })
+		self.mode:toast('Saved preset ' .. number)
+		return
+	end
 	local param_list = self:get_param_list()
 	App:save_preset(number, param_list)
 	self.mode:toast('Saved preset ' .. number)
 end
 
 function PresetGrid:load_preset(number)
-	if self.component then
-		local component = self:get_component()
-		if component then component.track.current_preset = number end
+	local has_armed = (App and App.preset_armed and next(App.preset_armed) ~= nil) or false
+	local toast_label = 'Preset ' .. number .. (has_armed and '*' or '')
+	if self.load_mode == 'global' and App.activate_preset_global then
+		App:activate_preset_global(number)
+	else
+		if self.component then
+			local component = self:get_component()
+			if component then component.track.current_preset = number end
+		end
+		local param_list = self:get_param_list()
+		App:load_preset(number, param_list)
 	end
-	local param_list = self:get_param_list()
-	App:load_preset(number, param_list)
 
 	if self.mode:has_active_menu() then
-		self.mode:toast('Preset ' .. number, { completion = completion })
+		self.mode:toast(toast_label, { completion = completion })
 	else
-		self.mode:toast('Preset ' .. number, { completion = completion })
+		self.mode:toast(toast_label, { completion = completion })
 	end
 end
 

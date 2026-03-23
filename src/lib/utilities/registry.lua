@@ -275,6 +275,9 @@ end
 
 function Registry.set(param_id, value, source, callback, silent)
 	Registry.log_value_change(param_id, value, source or 'traced_set')
+	-- Hook: allow App to track armed params for sparse preset saves.
+	-- (Guarding against preset application is handled within App.)
+	if App and App._preset_arm then pcall(function() App:_preset_arm(param_id, source) end) end
 
 	-- Support calling forms where callback is omitted and silent is passed as 4th arg
 	if silent == nil and type(callback) == 'boolean' then

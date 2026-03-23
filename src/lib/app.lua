@@ -74,6 +74,18 @@ function App:init(o)
 
 	-- Presets (for tracks and scales)
 	self.preset = {}
+	-- Tracks parameter IDs that changed since last preset activation/save.
+	-- Used for sparse overwrite preset saves.
+	self.preset_armed = {}
+	-- Guard to prevent arming during preset application.
+	self.preset_applying = false
+	-- Namespaces/properties that should only be saved when armed.
+	-- Default: everything is constant unless listed here.
+	self.preset_nonconstant_props = {
+		track = { clip_slot = true },
+		-- All scale props are treated as non-constant for global preset blocks.
+		scale = { bits = true, root = true, follow_method = true, chord_set = true, follow = true },
+	}
 	self.preset_props = {
 		track = {
 			'program_change_in',
@@ -790,6 +802,29 @@ end
 -- Parameter Registration and Song Settings
 --==============================================================================
 
+function App:_preset_arm(param_id, source)
+	-- Arm only when not applying a preset.
+	if self.preset_applying then return end
+	-- Avoid arming changes that we know are not user/creative edits.
+	if source and type(source) == 'string' then
+		if string.match(source, '^preset_load') then return end
+		if source == 'clip_state_sync' then return end
+	end
+	self.preset_armed[param_id] = true
+end
+
+function App:clear_preset_armed() self.preset_armed = {} end
+
+-- Current value for preset serialization: prefer App.settings, then params (some UIs use params:set directly).
+function App:_preset_param_value(param_id)
+	if self.settings[param_id] ~= nil then return self.settings[param_id] end
+	if params and params.lookup_param then
+		local p = params:lookup_param(param_id)
+		if p then return params:get(param_id) end
+	end
+	return nil
+end
+
 function App:save_preset(d, param)
 	if self.preset[d] == nil then self.preset[d] = {} end
 	local preset = self.preset[d]
@@ -817,18 +852,114 @@ function App:load_preset(d, param, force)
 	end
 
 	if type(param) == 'string' then
-		local value = preset[param]
-		if force or (self.settings[param] ~= value) then Registry.set(param, value, 'preset_load_single') end
+		-- Apply only when explicitly present in preset table (nil means no-op).
+		if preset[param] ~= nil then
+			local value = preset[param]
+			if force or (self.settings[param] ~= value) then Registry.set(param, value, 'preset_load_single') end
+		end
 	elseif type(param) == 'table' then
 		for index, name in ipairs(param) do
-			local value = preset[name]
-			if force or (value and self.settings[name] ~= value) then Registry.set(name, value, 'preset_load_table') end
+			-- Apply only when explicitly present in preset table (nil means no-op).
+			if preset[name] ~= nil then
+				local value = preset[name]
+				if force or (self.settings[name] ~= value) then Registry.set(name, value, 'preset_load_table') end
+			end
 		end
 	else
 		for name, value in pairs(preset) do
 			if self.settings[name] ~= value then Registry.set(name, value, 'preset_load_all') end
 		end
 	end
+end
+
+-- Overwrite save for a scoped subset of a preset slot, using sparse keys.
+-- - Constant props: always saved.
+-- - Non-constant props: saved only if armed; otherwise removed (nil => no-op).
+-- Scope:
+--   track_id: active track to save
+--   scale_id: selected scale to save (0 => skip scale keys)
+function App:save_preset_overwrite_scoped(slot, scope)
+	if self.preset[slot] == nil then self.preset[slot] = {} end
+	local preset = self.preset[slot]
+	scope = scope or {}
+	local track_id = scope.track_id
+	local scale_id = scope.scale_id
+
+	-- Track params
+	if track_id and self.preset_props and self.preset_props.track then
+		for _, prop in ipairs(self.preset_props.track) do
+			local pid = 'track_' .. track_id .. '_' .. prop
+			local is_nonconstant = self.preset_nonconstant_props
+				and self.preset_nonconstant_props.track
+				and self.preset_nonconstant_props.track[prop] == true
+			if is_nonconstant then
+				if self.preset_armed[pid] then
+					preset[pid] = self:_preset_param_value(pid)
+				else
+					preset[pid] = nil
+				end
+			else
+				preset[pid] = self:_preset_param_value(pid)
+			end
+		end
+	end
+
+	-- Scale params (only for selected scale; skip entirely when scale_select==0)
+	if scale_id and scale_id > 0 and self.preset_props and self.preset_props.scale then
+		local scale = self.scale and self.scale[scale_id] or nil
+		local track_following = false
+		if scale and scale.follow_method and scale.follow then
+			-- Track-following modes: follow_method > 4 implies MIDI modes in Scale component.
+			track_following = (scale.follow_method > 4 and scale.follow > 0)
+		end
+
+		for _, prop in ipairs(self.preset_props.scale) do
+			local pid = 'scale_' .. scale_id .. '_' .. prop
+			-- Harmony is edited via many paths (some use params:set without Registry.set), so arming alone misses changes.
+			-- Snapshot full current scale state when not track-following; omit keys when following (no-op on load).
+			if track_following then
+				preset[pid] = nil
+			else
+				preset[pid] = self:_preset_param_value(pid)
+			end
+		end
+	end
+
+	-- Saving commits the armed set as the new baseline.
+	self:clear_preset_armed()
+end
+
+-- Activate a preset slot as a global musical block:
+-- applies any saved track/scale keys across the whole system using sparse key existence.
+function App:activate_preset_global(slot)
+	self.preset_applying = true
+	self:clear_preset_armed()
+
+	-- Keep per-track UI state consistent
+	for tid = 1, 8 do
+		if self.track[tid] then self.track[tid].current_preset = slot end
+	end
+
+	-- Build a global parameter list for tracks + scales.
+	local params_to_apply = {}
+	if self.preset_props and self.preset_props.track then
+		for tid = 1, 8 do
+			for _, prop in ipairs(self.preset_props.track) do
+				table.insert(params_to_apply, 'track_' .. tid .. '_' .. prop)
+			end
+		end
+	end
+	if self.preset_props and self.preset_props.scale then
+		-- Scales are instantiated for ids 0..3 in App:init
+		for sid = 0, 3 do
+			for _, prop in ipairs(self.preset_props.scale) do
+				table.insert(params_to_apply, 'scale_' .. sid .. '_' .. prop)
+			end
+		end
+	end
+
+	self:load_preset(slot, params_to_apply)
+	self.preset_applying = false
 end
 
 --==============================================================================
