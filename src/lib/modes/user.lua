@@ -1,15 +1,11 @@
 local path_name = 'Foobar/lib/'
 
-local Grid = require(path_name .. 'grid')
-local utilities = require(path_name .. 'utilities')
-local Registry = require(path_name .. 'utilities/registry')
-local BufferSeq = require(path_name .. 'components/mode/bufferseq')
+local BitwiseGrid = require(path_name .. 'components/mode/bitwisegrid')
 local Mode = require(path_name .. 'components/app/mode')
-local UI = require(path_name .. 'ui')
-local BufferDefault = require(path_name .. 'components/mode/bufferdefault')
+local Default = require(path_name .. 'components/mode/default')
+local Registry = require(path_name .. 'utilities/registry')
 
--- Buffer-specific component with full 8x8 grid and scrub playback
-local bufferseq = BufferSeq:new({
+local bitwisegrid = BitwiseGrid:new({
 	track = 1,
 	grid_start = { x = 1, y = 8 },
 	grid_end = { x = 8, y = 1 },
@@ -18,81 +14,94 @@ local bufferseq = BufferSeq:new({
 	offset = { x = 0, y = 0 },
 })
 
-local default = BufferDefault:new({})
+local default = Default:new({})
 
 local UserMode = Mode:new({
 	id = 4,
 	track = 1,
 	components = {
 		default,
-		bufferseq,
+		bitwisegrid,
 	},
 	load_event = function(self, data)
-		bufferseq.track = App.current_track
+		local function legacy_screen()
+			screen.clear()
+			bitwisegrid:draw()
+		end
 
-		-- Recalculate display for current track's buffer_step_length
-		bufferseq:recalculate_display()
-		local auto = bufferseq:get_component()
-		if auto then bufferseq:set_grid(auto) end
+		local function open_bitwise_menu()
+			default:sub_menu(default:bitwise_menu(), {
+				status = { icon = App.current_track, label = 'Bitwise' },
+				screen = default:submenu_screen(),
+			})
+		end
 
-		-- Use bufferseq's unified row pad update function
-		bufferseq:update_row_pads()
+		local legacy_context = {
+			press_fn_2 = open_bitwise_menu,
+			enc1 = function(d)
+				local tid = App.current_track
+				local pid = 'track_' .. tid .. '_chance'
+				local chance = util.clamp((params:get(pid) or 0.5) + (d * 0.01), 0, 1)
+				Registry.set(pid, chance, 'user_mode_bitwise_chance')
+				App.screen_dirty = true
+			end,
+			enc2 = function(d)
+				bitwisegrid:move_selection(d)
+			end,
+			enc3 = function(d)
+				bitwisegrid:adjust_selected(-d)
+			end,
+			enc3_alt = function(d)
+				bitwisegrid:set_lane('vel')
+				bitwisegrid:adjust_selected(-d)
+			end,
+			default_helper_labels = {
+				enc1 = 'chance',
+				enc2 = 'step',
+				enc3 = 'note value',
+				enc3_alt = 'velocity',
+				press_fn_2 = 'menu',
+			},
+		}
+
+		default.current = {
+			context = legacy_context,
+			screen = legacy_screen,
+			options = { timeout = false, menu_override = true, cursor = 1 },
+			status = { icon = App.current_track, label = 'Bitwise' },
+		}
+
+		self:use_context(default.current.context, default.current.screen, default.current.options)
+		bitwisegrid.track = App.current_track
+		local input = bitwisegrid:get_component()
+		bitwisegrid:set_grid(input)
 
 		App.screen_dirty = true
 	end,
 	arrow_event = function(self, data)
 		if data.state then
-			-- Check for alt mode first - bufferseq handles alt mode arrow events
-			if self.alt and bufferseq.arrow_event then
-				bufferseq:arrow_event(data)
-				return
-			end
-
-			if App.recording then
-				print('Cannot change zoom during recording')
-				return
-			end
-
-			-- Left/Right: zoom in/out (step length)
-			-- Up/Down: scroll through buffer
 			if data.type == 'left' then
-				bufferseq:increase_step_length()
-				-- step_length is now stored in track's auto component
+				bitwisegrid:set_lane('note')
 			elseif data.type == 'right' then
-				bufferseq:decrease_step_length()
-				-- step_length is now stored in track's auto component
+				bitwisegrid:set_lane('vel')
 			elseif data.type == 'up' then
-				bufferseq:decrease_display_offset()
-				if bufferseq.display_offset == 0 then print('At buffer start') end
+				bitwisegrid:cycle('right')
 			elseif data.type == 'down' then
-				bufferseq:increase_display_offset()
-				print('Buffer offset: ' .. bufferseq.display_offset)
+				bitwisegrid:cycle('left')
 			end
 		end
 	end,
 	row_event = function(self, data)
 		if data.state then
-			-- Let bufferseq handle row events (including alt mode unfreezing)
-			-- It will update row pads internally
-			bufferseq:row_event(data)
-			
-			-- Only proceed with track switching if bufferseq didn't handle it (not alt mode)
-			if not self.alt then
-				if data.row ~= App.current_track then
-					self.track = data.row
-					App.current_track = data.row
+			if data.row ~= App.current_track then
+				self.track = data.row
+				App.current_track = data.row
 
-					-- Rebuild context/menu for new track (same logic as encoder 1 handler)
-					-- This ensures encoder bindings are updated to the new track
-					if default and default.default_context and default.mode then
-						local screen_fn = (default.current and default.current.screen) or default:default_screen()
-						local options = { timeout = false, menu_override = true, cursor = 1 }
-						local next_context = default:default_context()
-						default.current = { context = next_context, screen = screen_fn, options = options }
-						self:use_context(next_context, screen_fn, options)
-						App.screen_dirty = true
-					end
-				end
+				self:load_event()
+
+				bitwisegrid.track = data.row
+				bitwisegrid:set_grid(bitwisegrid:get_component())
+				App.screen_dirty = true
 			end
 		end
 	end,

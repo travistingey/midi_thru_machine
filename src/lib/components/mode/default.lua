@@ -267,6 +267,164 @@ function Default:default_menu()
 	return items
 end
 
+local function get_user_bitwise_component()
+	local user_mode = App.mode and App.mode[4]
+	if not user_mode or not user_mode.components then return nil end
+	for _, component in ipairs(user_mode.components) do
+		if component and component.name == 'Bitwise Grid' then return component end
+	end
+	return nil
+end
+
+function Default:bitwise_menu()
+	local tid = App.current_track
+	local items = {}
+
+	table.insert(items, Registry.menu.make_item('track_' .. tid .. '_bitwise_length', {
+		label_fn = function() return 'LENGTH' end,
+		helper_labels = {
+			enc3 = 'steps',
+		},
+	}))
+
+	table.insert(items, Registry.menu.make_item('track_' .. tid .. '_chance', {
+		label_fn = function() return 'CHANCE' end,
+		helper_labels = {
+			enc3 = 'mutation',
+		},
+	}))
+
+	table.insert(items, Registry.menu.make_item('track_' .. tid .. '_step_length', {
+		label_fn = function() return 'STEP LENGTH' end,
+		helper_labels = {
+			enc3 = 'clocked step',
+		},
+	}))
+
+	table.insert(items, Registry.menu.make_item('track_' .. tid .. '_reset_step_length', {
+		label_fn = function() return 'RESET' end,
+		helper_labels = {
+			enc3 = 'reset length',
+		},
+	}))
+
+	table.insert(items, Registry.menu.make_item('track_' .. tid .. '_reset_step_count', {
+		label_fn = function() return 'RESET STEP' end,
+		helper_labels = {
+			enc3 = 'reset count',
+		},
+	}))
+
+	table.insert(items, Registry.menu.make_item('bitwise_lane', {
+		label_fn = function() return 'LANE' end,
+		value_fn = function()
+			local component = get_user_bitwise_component()
+			if not component then return 'note' end
+			return component.lane or 'note'
+		end,
+		enc3 = function(d)
+			local component = get_user_bitwise_component()
+			if not component then return end
+			local lanes = { 'note', 'vel' }
+			local ix = 1
+			for i, lane in ipairs(lanes) do
+				if lane == component.lane then
+					ix = i
+					break
+				end
+			end
+			ix = util.clamp(ix + d, 1, #lanes)
+			component:set_lane(lanes[ix])
+			App.screen_dirty = true
+		end,
+		helper_labels = {
+			enc3 = 'note/vel',
+		},
+	}))
+
+	table.insert(items, Registry.menu.make_item('bitwise_shift', {
+		label_fn = function() return 'SHIFT' end,
+		value_fn = function()
+			local component = get_user_bitwise_component()
+			if not component then return 'left' end
+			return component.shift_direction or 'left'
+		end,
+		enc3 = function(d)
+			local component = get_user_bitwise_component()
+			if not component then return end
+			component.shift_direction = (d >= 0) and 'right' or 'left'
+			App.screen_dirty = true
+		end,
+		on_press = function()
+			local component = get_user_bitwise_component()
+			if not component then return end
+			component:cycle(component.shift_direction or 'left')
+		end,
+		helper_labels = {
+			enc3 = 'direction',
+			press_fn_3 = 'shift',
+		},
+	}))
+
+	table.insert(items, Registry.menu.make_item('bitwise_reseed', {
+		label_fn = function() return 'RESEED' end,
+		value_fn = function() return 'note+vel+dur' end,
+		on_press = function()
+			local component = get_user_bitwise_component()
+			if component then component:reseed() end
+		end,
+		helper_labels = {
+			press_fn_3 = 'reseed',
+		},
+	}))
+
+	table.insert(items, Registry.menu.make_item('bitwise_clear', {
+		label_fn = function() return 'CLEAR' end,
+		value_fn = function() return 'all lanes' end,
+		on_press = function()
+			local component = get_user_bitwise_component()
+			if component then component:clear() end
+		end,
+		helper_labels = {
+			press_fn_3 = 'clear',
+		},
+	}))
+
+	table.insert(items, Registry.menu.make_item('bitwise_lock', {
+		label_fn = function() return 'LOCK TOOLS' end,
+		value_fn = function()
+			local component = get_user_bitwise_component()
+			if not component then return 'toggle_selected' end
+			return component.lock_tool or 'toggle_selected'
+		end,
+		enc3 = function(d)
+			local component = get_user_bitwise_component()
+			if not component then return end
+			local modes = { 'toggle_selected', 'lock_all', 'unlock_all' }
+			local ix = 1
+			for i, mode in ipairs(modes) do
+				if component.lock_tool == mode then
+					ix = i
+					break
+				end
+			end
+			ix = util.clamp(ix + d, 1, #modes)
+			component.lock_tool = modes[ix]
+			App.screen_dirty = true
+		end,
+		on_press = function()
+			local component = get_user_bitwise_component()
+			if component then component:apply_lock_tool() end
+		end,
+		helper_labels = {
+			enc3 = 'tool',
+			press_fn_3 = 'apply',
+		},
+	}))
+
+	return items
+end
+
 --[[
   Function: track_menu
   Purpose: Constructs the menu for the current track, including MIDI input/output, type, and scale selection.
@@ -363,7 +521,23 @@ function Default:track_menu()
 		},
 	})
 
-	local items = { in_row, out_row, type_row, scale_row, clip_slot_row }
+	local bitwise_row = Registry.menu.make_item('bitwise_tools', {
+		label_fn = function() return 'BITWISE' end,
+		value_fn = function() return 'tools' end,
+		can_show = function() return App.track[id].input_type == 'bitwise' end,
+		has_submenu = function() return App.track[id].input_type == 'bitwise' end,
+		on_press = function()
+			if App.track[id].input_type == 'bitwise' then self:sub_menu(self:bitwise_menu(), {
+				status = { icon = id, label = 'Bitwise' },
+				screen = self:submenu_screen(),
+			}) end
+		end,
+		helper_labels = {
+			press_fn_3 = 'open',
+		},
+	})
+
+	local items = { in_row, out_row, type_row, scale_row, clip_slot_row, bitwise_row }
 
 	-- Additional track parameters (excluding note_range_upper)
 	local function add(id_suffix, opts)

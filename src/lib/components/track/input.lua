@@ -92,8 +92,8 @@ function Input:clock_trigger(data, process)
 				self.track:send_input(event)
 
 				local off = { type = 'note_off', note = event.note, vel = event.vel }
-
-				clock.sync(math.ceil(self.track.step_length / 2) / App.ppqn)
+				local gate_ticks = math.max(1, self.track.step_length)
+				clock.sync(gate_ticks / App.ppqn)
 				self.track:send_output(off)
 			end)
 		end
@@ -260,6 +260,7 @@ Input.types['bitwise'] = {
 		s.vel = Bitwise:new({
 			format = function(value) return math.floor(value * 127) end,
 		})
+
 	end,
 	process = function(s, data)
 		s.note.chance = s.track.chance
@@ -273,7 +274,13 @@ Input.types['bitwise'] = {
 		s.note:mutate(s.index)
 		s.vel:mutate(s.index)
 
-		if s.note:get(s.index).state then return { type = 'note_on', note = s.note:get(s.index).value, vel = s.vel:get(s.index).value } end
+		if s.note:get(s.index).state then
+			return {
+				type = 'note_on',
+				note = s.note:get(s.index).value,
+				vel = s.vel:get(s.index).value,
+			}
+		end
 	end,
 }
 
