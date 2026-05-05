@@ -127,6 +127,8 @@ function ScaleGrid:grid_event (scale, data)
     end
 end 
 
+local SCALEGRID_LED_DIM = {5,5,5}
+
 function ScaleGrid:set_grid(scale)
 	if scale == nil then return end
 	local grid = self.grid
@@ -135,7 +137,7 @@ function ScaleGrid:set_grid(scale)
 	
 	for i, v in pairs(self.note_map) do
 		local l = grid:index_to_grid(v.index)
-		grid.led[l.x][l.y] = {5,5,5}
+		grid.led[l.x][l.y] = SCALEGRID_LED_DIM
 	end
 
 	if #intervals > 0 then

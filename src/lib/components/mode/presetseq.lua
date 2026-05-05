@@ -134,8 +134,6 @@ end
 
 function PresetSeq:increase_display_offset()
 	local new_offset = self.step_offset * self.step_length + self.display_ticks
-	print('new_offset', new_offset)
-	print('max_ticks', max_ticks)
 	if new_offset < max_ticks then
 		self.display_offset = self.display_offset + 1
 		self.step_offset = self.display_offset * self.row_length

@@ -52,8 +52,17 @@ function BufferSeq:set(o)
 	self.scrub_saved_buffer_start = nil
 	self.held_pads = {} -- Track currently held pads for multi-pad selection
 
-	-- Grid refresh optimization: track last rendered step to avoid refreshing every tick
+	-- Grid refresh optimization: track last rendered step boundaries to avoid
+	-- refreshing every tick. last_record_step tracks buffer.tick step crossings
+	-- (always advancing during recording); last_playback_step tracks clip.tick
+	-- or scrub.tick (only advances during playback). Refresh fires when EITHER
+	-- crosses a step boundary, ensuring the recording playhead never appears
+	-- frozen even when playback is paused or one-shot completed.
+	-- last_rendered_step is the legacy alias kept for compatibility with the
+	-- existing force-refresh paths (clear_buffer, etc.).
 	self.last_rendered_step = nil
+	self.last_record_step = nil
+	self.last_playback_step = nil
 
 	-- Initialize display calculations (will be recalculated when component is available)
 	self.row_ticks = 0
@@ -95,7 +104,11 @@ function BufferSeq:enable_event()
 	table.insert(
 		self.cleanup_functions,
 		buffer:on('clear_buffer', function(data)
-			self.last_rendered_step = nil -- Force refresh on buffer clear
+			-- Force refresh on buffer clear: clear all step trackers so the
+			-- next transport tick (or this set_grid call) reseeds them.
+			self.last_rendered_step = nil
+			self.last_record_step = nil
+			self.last_playback_step = nil
 			self:set_grid(buffer)
 		end)
 	)
@@ -529,20 +542,23 @@ function BufferSeq:grid_event(component, data)
 
 		local loop_length = loop_end - loop_start + 1
 
-		-- Editing surface is always the frozen snapshot.
-		-- If a clip is loaded, we must freeze a copy of the clip source
-		-- so loop endpoints and quantization apply to the clip content,
-		-- not the live buffer coordinate space.
-		if clip.current_slot then
-			-- Copy currently active clip into frozen editing surface (only if not already frozen).
-			-- This preserves clip-local tick coordinates (clips are 1-based).
-			if not clip.buffer_frozen then clip:freeze_from_source() end
-			-- Now apply the edited loop endpoints to the frozen snapshot.
+		-- Editing surface is always the frozen snapshot. The decision tree below
+		-- is intentionally ordered: ALREADY-frozen wins first because we must NOT
+		-- re-freeze on top of an existing snapshot — that would discard any user
+		-- edits (quantize, transpose, etc.) made on the frozen surface.
+		if clip.buffer_frozen then
+			-- Already frozen: just adjust loop endpoints on the existing snapshot.
+			-- set_playback_loop preserves intersected ticks (their edits) and only
+			-- reslices regions that are newly-exposed by the adjustment.
+			clip:set_playback_loop(loop_start, loop_length)
+		elseif clip.current_slot then
+			-- Loaded clip but not yet frozen. Freeze a copy of the clip source
+			-- so loop endpoints/edits target the clip content, then apply the loop.
+			clip:freeze_from_source()
 			clip:set_playback_loop(loop_start, loop_length)
 		else
-			-- Live/unloaded buffer editing: freeze from the live buffer.
-			-- Apply endpoints first, since freeze_buffer slices from the live buffer
-			-- using clip.playback_start/playback_length.
+			-- Live buffer, no clip loaded, not yet frozen. Set endpoints then
+			-- slice from the live buffer.
 			clip:set_playback_loop(loop_start, loop_length)
 			clip:freeze_buffer()
 		end
@@ -654,6 +670,11 @@ function BufferSeq:set_grid(component)
 	-- OPTIMIZATION: Zero event scanning - just show playhead and range highlighting
 	-- No buffer scanning means maximum performance regardless of buffer size
 	local is_actively_playing = clip and clip:is_actively_playing() or false
+	-- Recording is active whenever the live buffer is consuming clock ticks.
+	-- This is independent of clip/scrub/frozen state and is what drives the
+	-- record-playhead brightness so a "live recording, nothing else loaded"
+	-- session still shows a clearly-visible playhead instead of a dim pixel.
+	local is_recording = buffer and buffer.playing or false
 
 	grid:for_each(function(s, x, y, i)
 		local pad = 0
@@ -848,9 +869,16 @@ function BufferSeq:set_grid(component)
 			-- Show playback playhead (scrub/clip/frozen) with dim white (if set)
 			if pad & STEP > 0 then
 				color = { 5, 5, 5 }
-			-- Show recording playhead with dim white
+			-- Show recording playhead. If the buffer is actively recording,
+			-- use the bright rainbow color so it's clearly visible (this is
+			-- the most-active thing happening on screen). If the buffer
+			-- isn't recording, fall back to dim white.
 			elseif pad & RECORD_STEP > 0 then
-				color = { 5, 5, 5 }
+				if is_recording then
+					color = Grid.rainbow_on[color_index]
+				else
+					color = { 5, 5, 5 }
+				end
 			-- Highlight range if scrub/frozen/clip is active (even if not playing) with dim white
 			elseif pad & SCRUB > 0 then
 				color = { 5, 5, 5 }
@@ -905,56 +933,87 @@ function BufferSeq:set_grid(component)
 	end)
 	grid:refresh('BufferSeq:set_grid')
 
-	-- Update last rendered step for optimization (so transport_event knows we just refreshed)
+	-- Update last-rendered tracking so the throttle in transport_event knows
+	-- we just refreshed and doesn't fire again on this same step.
 	if buffer and buffer.playing then
 		local step_length = self:get_step_length()
-		self.last_rendered_step = math.floor((buffer.tick - 1) / step_length) + 1
+		local record_step = math.floor((buffer.tick - 1) / step_length) + 1
+		self.last_rendered_step = record_step -- legacy alias
+		self.last_record_step = record_step
+
+		local track = buffer.track
+		local clip = track and track.clip or nil
+		local playback_step = nil
+		if clip then
+			if clip.active_source == clip.sources.scrub and clip.sources.scrub.tick then
+				playback_step = math.floor((clip.sources.scrub.tick - 1) / step_length) + 1
+			elseif clip.current_slot and clip.clip_bank[clip.current_slot] then
+				playback_step = math.floor((clip.tick - 1) / step_length) + 1
+			elseif clip.buffer_frozen and clip.tick then
+				playback_step = math.floor((clip.tick - 1) / step_length) + 1
+			end
+		end
+		self.last_playback_step = playback_step
 	else
 		-- Not playing, so reset tracking
 		self.last_rendered_step = nil
+		self.last_record_step = nil
+		self.last_playback_step = nil
 	end
 end
 
 function BufferSeq:transport_event(buffer, data)
-	-- Optimized grid refresh: only refresh on DISPLAY step boundaries, not every tick
-	-- Uses display_step_length (for grid visualization) NOT buffer_step_length (for buffer swapping)
-	-- This dramatically reduces grid refresh frequency (e.g., from 120/sec to ~15/sec at 300 BPM with display_step_length=8)
+	-- Optimized grid refresh: only refresh on DISPLAY step boundaries, not every tick.
+	-- Uses display_step_length (for grid visualization) NOT buffer_step_length (for buffer swapping).
+	-- Tracks BOTH the recording playhead (buffer.tick) and the playback playhead
+	-- (clip.tick / scrub.tick) independently. A refresh fires whenever EITHER
+	-- crosses a step boundary. This guarantees the recording playhead stays
+	-- visible even when playback is paused, one-shot-completed, or otherwise
+	-- not advancing — which previously made the grid look like recording had
+	-- stopped.
 
-	-- Always refresh on start/stop events
 	if data.type == 'start' or data.type == 'stop' then
-		self.last_rendered_step = nil -- Force refresh
+		self.last_record_step = nil
+		self.last_playback_step = nil
+		self.last_rendered_step = nil -- legacy alias, used by other call sites
 		self:set_grid(buffer)
 		return
 	end
 
-	-- For clock events, only refresh when DISPLAY step changes (based on display_step_length)
 	if data.type == 'clock' and buffer.playing then
-		-- Use display_step_length for grid refresh boundaries (independent of buffer_step_length)
 		local display_step_length = self:get_step_length()
-		-- Calculate current display step index (1-based for display)
-		-- Check all playback sources: clip.tick, scrub_tick, frozen buffer, or buffer.tick
 		local track = buffer.track
 		local clip = track and track.clip or nil
-		local current_tick = buffer.tick
-		local current_display_step = math.floor((current_tick - 1) / display_step_length) + 1
 
-		-- Prioritize scrub playback position for refresh
-		if clip and clip.active_source == clip.sources.scrub and clip.sources.scrub.tick then
-			current_tick = clip.sources.scrub.tick
-			current_display_step = math.floor((current_tick - 1) / display_step_length) + 1
-		-- Then check clip playback position
-		elseif clip and clip.current_slot and clip.clip_bank[clip.current_slot] then
-			-- Clip ticks are 1-based, convert to step for comparison
-			current_display_step = math.floor((clip.tick - 1) / display_step_length) + 1
-		-- Then check frozen buffer playback position
-		elseif clip and clip.buffer_frozen and clip.tick then
-			current_tick = clip.tick
-			current_display_step = math.floor((current_tick - 1) / display_step_length) + 1
+		-- Recording playhead — always advancing while buffer.playing.
+		local record_step = math.floor((buffer.tick - 1) / display_step_length) + 1
+
+		-- Playback playhead — only meaningful when something is actively playing.
+		-- Each branch uses the source's coordinate space. nil means "no playback
+		-- source", in which case only record_step drives refresh.
+		local playback_step = nil
+		if clip then
+			if clip.active_source == clip.sources.scrub and clip.sources.scrub.tick then
+				playback_step = math.floor((clip.sources.scrub.tick - 1) / display_step_length) + 1
+			elseif clip.current_slot and clip.clip_bank[clip.current_slot] then
+				playback_step = math.floor((clip.tick - 1) / display_step_length) + 1
+			elseif clip.buffer_frozen and clip.tick then
+				playback_step = math.floor((clip.tick - 1) / display_step_length) + 1
+			end
 		end
 
-		-- Only refresh if display step changed
-		if self.last_rendered_step ~= current_display_step then
-			self.last_rendered_step = current_display_step
+		local needs_refresh = false
+		if self.last_record_step ~= record_step then
+			self.last_record_step = record_step
+			needs_refresh = true
+		end
+		if playback_step ~= self.last_playback_step then
+			self.last_playback_step = playback_step
+			needs_refresh = true
+		end
+
+		if needs_refresh then
+			self.last_rendered_step = record_step -- legacy alias, kept in sync
 			self:set_grid(buffer)
 		end
 	end
@@ -1028,17 +1087,23 @@ function BufferSeq:alt_event(data)
 		local clip = track and track.clip or nil
 
 		if clip and self.scrub_start_tick and self.scrub_end_tick then
-			-- Freeze from scrub source (generalized freeze)
+			local loop_start = self.scrub_start_tick
+			local loop_length = self.scrub_end_tick - self.scrub_start_tick + 1
+			-- Decision tree, in order: prefer freezing from the scrub source (most
+			-- accurate); else honor an already-frozen surface (don't wipe edits);
+			-- else freeze fresh from the live buffer.
 			if clip.active_source == clip.sources.scrub then
 				clip:freeze_from_source()
-				if flags.debug_scrub then print('Scrub frozen to loop: ' .. self.scrub_start_tick .. '-' .. self.scrub_end_tick) end
+				if flags.debug_scrub then print('Scrub frozen from source: ' .. self.scrub_start_tick .. '-' .. self.scrub_end_tick) end
+			elseif clip.buffer_frozen then
+				-- Already frozen (state diverged from scrub_active) — just adjust
+				-- the loop on the existing snapshot to keep user edits intact.
+				clip:set_playback_loop(loop_start, loop_length)
+				if flags.debug_scrub then print('Scrub adjusted existing frozen loop: ' .. loop_start .. '-' .. self.scrub_end_tick) end
 			else
-				-- Fallback: freeze from buffer range (if scrub not active for some reason)
-				local loop_start = self.scrub_start_tick
-				local loop_length = self.scrub_end_tick - self.scrub_start_tick + 1
 				clip:set_playback_loop(loop_start, loop_length)
 				clip:freeze_buffer()
-				if flags.debug_scrub then print('Scrub frozen to loop: ' .. loop_start .. '-' .. self.scrub_end_tick) end
+				if flags.debug_scrub then print('Scrub frozen from buffer: ' .. loop_start .. '-' .. self.scrub_end_tick) end
 			end
 
 			-- Stop scrub mode (playback now comes from frozen buffer)

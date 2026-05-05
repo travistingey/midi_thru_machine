@@ -74,6 +74,32 @@ function Clip:set(o)
 		clip_bank = nil, -- ClipBankSource - created when clip is loaded
 	}
 	self.active_source = nil -- Reference to currently active PlaybackSource
+
+	-- Notes this clip has dispatched but not yet closed. Populated in run_events
+	-- and drained at loop boundaries via close_active_notes(). Lets us emit
+	-- precise note_off pairs for the notes WE played without nuking unrelated
+	-- output (e.g. notes the user is improvising on the same MIDI device).
+	-- Key: ch * 128 + effective_note (post-reharmonization). Value: { ch, note }.
+	self._active_notes = {}
+end
+
+-- Close only the notes this clip dispatched (vs. kill_notes which is a global
+-- panic via output_device:kill that affects user-played notes too).
+-- Used at loop boundaries to keep musicality intact: the next tick will
+-- typically re-trigger the looping notes, and the device manager's
+-- last_note_on closure coalesces the pair so we don't get audible gaps.
+function Clip:close_active_notes()
+	if not self.track.output_device then return end
+	if not next(self._active_notes) then return end
+	for k, info in pairs(self._active_notes) do
+		self.track.output_device:send({
+			type = 'note_off',
+			note = info.note,
+			vel = 0,
+			ch = info.ch,
+		})
+		self._active_notes[k] = nil
+	end
 end
 
 -- Set buffer reference
@@ -261,9 +287,25 @@ function Clip:queue_scrub_stop(sync_length)
 	self.sync_manager:queue('scrub_stop', action_fn, action_data, sync_length)
 end
 
--- Freeze the buffer (create snapshot of current playback range)
+-- Freeze the buffer (create snapshot of current playback range).
+--
+-- Defensive guard: this re-slices a fresh snapshot from the live buffer and
+-- DISCARDS any existing frozen content. When the buffer is already frozen
+-- with the same range and the same source ('buffer'), this is a no-op so
+-- repeated calls (e.g. from upstream UI gestures) cannot wipe user edits
+-- such as quantize or transpose. Callers that genuinely need to discard a
+-- snapshot and re-slice should call unfreeze_buffer() first.
 function Clip:freeze_buffer()
 	if not self.buffer or not self.playback_start or not self.playback_length then return end
+
+	if self.buffer_frozen and self.frozen_from == 'buffer'
+		and self.sources.frozen.loop_start == self.playback_start
+		and self.sources.frozen.loop_length == self.playback_length then
+		if flags.debug_clip then
+			print('Clip: freeze_buffer skipped — already frozen at same range, preserving edits')
+		end
+		return
+	end
 
 	-- Use FrozenBufferSource to create snapshot
 	self.sources.frozen:freeze_from_buffer(self.buffer, self.playback_start, self.playback_length)
@@ -314,18 +356,19 @@ function Clip:unfreeze_buffer()
 end
 
 -- Freeze from active source (scrub or clip_bank)
--- Generalizes freeze to work from any playback source
+-- Generalizes freeze to work from any playback source.
+-- Performs a deep copy so subsequent edits on the frozen surface cannot
+-- mutate the original source (clip bank or scrub) data.
 function Clip:freeze_from_source()
 	if not self.active_source then return false end
-	
+
 	-- If already frozen, no-op
 	if self.active_source == self.sources.frozen then return true end
-	
+
 	local source = self.active_source
 	local frozen = self.sources.frozen
-	
-	-- Copy source's store content to frozen store
-	local source_sparse = source.store:to_sparse_table()
+
+	local source_sparse = EventStore.deep_copy_sparse_all(source.store.events)
 	frozen.store:from_sparse_table(source_sparse)
 	frozen.events = frozen.store.events -- keep alias
 	
@@ -388,55 +431,98 @@ function Clip:get_edit_store()
 	return nil
 end
 
--- Set playback loop boundaries (for frozen buffer playback)
+-- Set playback loop boundaries (for frozen buffer playback).
+--
+-- When the buffer is already frozen, the new loop range is reconciled against
+-- the existing frozen snapshot:
+--   * Ticks that fall OUTSIDE the new range are trimmed.
+--   * Ticks that are NEWLY-ADDED to the range (extending past the old range)
+--     are filled from the underlying source (live buffer / clip bank / scrub).
+--   * Ticks that exist in BOTH the old and new range are PRESERVED — they may
+--     contain user edits (quantize, transpose, manual nudges) that must not
+--     be overwritten by another adjust-loop gesture.
+--
+-- This is the difference between "drag loop endpoints to reframe what plays"
+-- (preserving edits) and "re-slice a fresh region from source" (which only
+-- happens for the genuinely new ticks).
 function Clip:set_playback_loop(start_tick, length)
 	local new_end = start_tick + length - 1
 
 	self.playback_start = start_tick
 	self.playback_length = length
 
-	-- If buffer is frozen and loop boundaries changed, update FrozenBufferSource using EventStore
-	if self.buffer_frozen then
-		local store = self.sources.frozen.store
-		
-		-- Get current loop boundaries
-		local old_start = self.sources.frozen.loop_start
-		local old_end = self.sources.frozen:get_loop_end()
-		
-		-- Clear entries that are now outside the new range
-		if old_start < start_tick then
-			store:delete_range(old_start, start_tick)
-		end
-		if old_end > new_end then
-			store:delete_range(new_end + 1, old_end + 1)
-		end
-		
-		-- Add new entries from buffer for the new range
-		local source_events = nil
-		-- When editing a frozen snapshot derived from clip_bank/scrub,
-		-- loop endpoint changes must reslice from the same underlying source.
-		if self.frozen_from == 'clip_bank' then
-			if self.sources.clip_bank and self.sources.clip_bank.store and self.sources.clip_bank.store.events then
-				source_events = self.sources.clip_bank.store.events
-			end
-		elseif self.frozen_from == 'scrub' then
-			if self.sources.scrub and self.sources.scrub.events then
-				source_events = self.sources.scrub.events
-			end
-		else
-			-- Default to live buffer coordinate space.
-			if self.buffer and self.buffer.buffer then source_events = self.buffer.buffer end
-		end
-
-		for tick = start_tick, new_end do
-			if source_events and source_events[tick] then
-				store:set(tick, source_events[tick])
-			end
-		end
-		
-		-- Update frozen source loop boundaries
-		self.sources.frozen:set_loop(start_tick, length)
+	if not self.buffer_frozen then
+		if flags.debug_clip then print('Clip: Playback loop set to ' .. start_tick .. '-' .. new_end) end
+		return
 	end
+
+	local store = self.sources.frozen.store
+	local old_start = self.sources.frozen.loop_start
+	local old_end = self.sources.frozen:get_loop_end()
+	local has_old_range = (old_start and old_end and old_end >= old_start and self.sources.frozen.loop_length and self.sources.frozen.loop_length > 0)
+
+	-- Trim entries that are now outside the new range.
+	-- delete_range(s, e) is exclusive-end; delete [old_start, start_tick) trims
+	-- the old head, and [new_end+1, old_end+1) trims the old tail.
+	if has_old_range then
+		if old_start < start_tick then store:delete_range(old_start, start_tick) end
+		if old_end > new_end then store:delete_range(new_end + 1, old_end + 1) end
+	end
+
+	-- Resolve the underlying source for any newly-exposed ticks. Editing on a
+	-- frozen snapshot derived from clip_bank/scrub must reslice from the same
+	-- coordinate space the snapshot was originally taken from.
+	local source_events = nil
+	if self.frozen_from == 'clip_bank' then
+		if self.sources.clip_bank and self.sources.clip_bank.store and self.sources.clip_bank.store.events then
+			source_events = self.sources.clip_bank.store.events
+		end
+	elseif self.frozen_from == 'scrub' then
+		if self.sources.scrub and self.sources.scrub.events then
+			source_events = self.sources.scrub.events
+		end
+	else
+		if self.buffer and self.buffer.buffer then source_events = self.buffer.buffer end
+	end
+
+	-- Local helper: deep-copy [s, e] from source_events and write into the
+	-- frozen store. Deep copy keeps the frozen snapshot independent of the
+	-- source so subsequent edits can't mutate the original.
+	local function fill_range(s, e)
+		if not source_events or s > e then return end
+		local fresh = EventStore.deep_copy_sparse(source_events, s, e)
+		for tick = s, e do
+			local evs = fresh[tick]
+			if evs then store:set(tick, evs) end
+		end
+	end
+
+	if not has_old_range then
+		-- No prior range to compare against — fill the whole new range from source.
+		fill_range(start_tick, new_end)
+	else
+		-- Compute intersection of old and new ranges. The intersection is
+		-- preserved (those ticks may contain user edits). Only the regions of
+		-- the new range that fall OUTSIDE the intersection are filled from source.
+		local intersect_start = old_start
+		if start_tick > intersect_start then intersect_start = start_tick end
+		local intersect_end = old_end
+		if new_end < intersect_end then intersect_end = new_end end
+
+		if intersect_start > intersect_end then
+			-- Old and new ranges are disjoint. The trim above already cleared
+			-- the old range; fill the entire new range from source.
+			fill_range(start_tick, new_end)
+		else
+			-- Fill the regions before and after the intersection.
+			-- The intersection itself is left untouched to preserve edits.
+			if start_tick < intersect_start then fill_range(start_tick, intersect_start - 1) end
+			if intersect_end < new_end then fill_range(intersect_end + 1, new_end) end
+		end
+	end
+
+	-- Update frozen source loop boundaries
+	self.sources.frozen:set_loop(start_tick, length)
 
 	if flags.debug_clip then print('Clip: Playback loop set to ' .. start_tick .. '-' .. new_end) end
 end
@@ -464,13 +550,16 @@ function Clip:queue_clip_slot_unload()
 end
 
 -- On transport start: apply track clip_slot param (0 = live, N = bank slot)
+-- Only acts on the loaded clip slot. A manually-frozen buffer is an independent
+-- user action and is preserved across transport stop/start.
 function Clip:apply_clip_slot_on_transport_start()
 	local pid = 'track_' .. self.track.id .. '_clip_slot'
 	local slot = params:get(pid) or 0
 	if slot < 0 then slot = 0 end
 	if slot > 16 then slot = 16 end
 	if slot == 0 then
-		if self.current_slot or self.buffer_frozen then self:queue_clip_slot_unload() end
+		-- Only queue an unload when an actual clip is loaded; never touch buffer_frozen here.
+		if self.current_slot then self:queue_clip_slot_unload() end
 		return
 	end
 	if not self.clip_bank[slot] then
@@ -552,9 +641,12 @@ function Clip:transport_event(data)
 		local next_tick = self.tick + 1
 
 		if next_tick >= playback_start + playback_length then
-			-- Handle clip playback modes at loop boundary
-			-- Kill all active notes before looping to prevent stuck notes
-			self:kill_notes()
+			-- Handle clip playback modes at loop boundary.
+			-- Surgical close: only emit note_off for notes THIS clip dispatched.
+			-- The device manager's last_note_on closure coalesces with the
+			-- immediately-following loop-start note_on, so musicality stays
+			-- intact and notes the user is playing live aren't interrupted.
+			self:close_active_notes()
 
 			-- Emit loop boundary event
 			if self.current_slot then
@@ -596,10 +688,12 @@ function Clip:transport_event(data)
 			local next_scrub_tick = scrub_lookup_tick + 1
 			local scrub_end = self.sources.scrub:get_loop_end()
 
-			-- Now handle boundary wrapping (after playing current position)
+			-- Now handle boundary wrapping (after playing current position).
+			-- Use surgical close_active_notes for boundary transitions so we
+			-- don't nuke unrelated notes the user may be playing live.
 			if self.sources.scrub.loop_enabled and next_scrub_tick > scrub_end then
 				-- Loop back to scrub start
-				self:kill_notes()
+				self:close_active_notes()
 				self.sources.scrub.tick = self.sources.scrub.loop_start
 			elseif not self.sources.scrub.loop_enabled then
 				-- Play-thru mode
@@ -607,14 +701,14 @@ function Clip:transport_event(data)
 					-- Completed one pass through scrub range
 					if not self.buffer_loop then
 						-- One-shot mode: stop scrub after one loop through range
-						self:kill_notes()
+						self:close_active_notes()
 						self:stop_scrub()
 					else
 						-- Continuous loop mode: continue playing through full buffer
 						-- Wrap at buffer end
 						local buffer_end = self.buffer.buffer_start + self.buffer.buffer_length - 1
 						if next_scrub_tick > buffer_end then
-							self:kill_notes()
+							self:close_active_notes()
 							self.sources.scrub.tick = self.buffer.buffer_start
 						else
 							self.sources.scrub.tick = next_scrub_tick
@@ -692,6 +786,26 @@ function Clip:run_events(events)
 			self.track:send_scale(midi_msg)
 		end
 
+		-- Track which notes are currently sounding so loop-boundary cleanup
+		-- can be surgical. Uses the post-reharmonization note (event.new_note)
+		-- when present so the off matches what the device actually heard.
+		if event.note then
+			local effective_note = event.new_note or event.note
+			local ch = event.ch or 1
+			local key = ch * 128 + effective_note
+			if event.type == 'note_on' then
+				local entry = self._active_notes[key]
+				if entry then
+					entry.ch = ch
+					entry.note = effective_note
+				else
+					self._active_notes[key] = { ch = ch, note = effective_note }
+				end
+			elseif event.type == 'note_off' then
+				self._active_notes[key] = nil
+			end
+		end
+
 		-- Don't record clip playback events back into buffer
 		-- Buffer records continuously from live input only
 		-- Recording playback events would cause feedback loops and doubling
@@ -699,10 +813,16 @@ function Clip:run_events(events)
 	end
 end
 
--- Send note_off for all active buffer notes (prevents stuck notes)
+-- Send note_off for all active buffer notes (prevents stuck notes).
+-- This is the global panic via DeviceMethods:kill — it closes ALL pending
+-- note_on closures registered with the device manager (across triggers and
+-- input). Use Clip:close_active_notes() at loop boundaries instead, since
+-- this can interrupt notes the user is playing live on the same output.
 function Clip:kill_notes()
 	if not self.track.output_device then return end
 	self.track.output_device:kill()
+	-- The device-side panic invalidates our per-clip tracking too.
+	for k in pairs(self._active_notes) do self._active_notes[k] = nil end
 end
 
 -- Scrub playback: temporarily play a range of the buffer
@@ -752,11 +872,8 @@ function Clip:start_scrub(start_tick, end_tick, loop_mode, initial_tick)
 
 		-- When editing on the frozen surface, scrub should read from the frozen snapshot,
 		-- not from the live buffer (which may be unrelated to the clip content).
-		local sparse_events = {}
-		for tick = start_tick, end_tick do
-			local evs = self.sources.frozen.store.events and self.sources.frozen.store.events[tick] or nil
-			if evs then sparse_events[tick] = evs end
-		end
+		-- Deep copy so scrub-time edits cannot mutate the frozen source.
+		local sparse_events = EventStore.deep_copy_sparse(self.sources.frozen.store.events, start_tick, end_tick)
 		sparse_events = EventStore.fix_note_pairs_in_sparse(sparse_events, start_tick, end_tick)
 
 		self.sources.scrub.loop_start = start_tick
@@ -824,11 +941,8 @@ function Clip:update_scrub(start_tick, end_tick)
 		end
 
 		-- Rebuild scrub source events from frozen snapshot.
-		local sparse_events = {}
-		for tick = start_tick, end_tick do
-			local evs = self.sources.frozen.store.events and self.sources.frozen.store.events[tick] or nil
-			if evs then sparse_events[tick] = evs end
-		end
+		-- Deep copy so scrub-time edits cannot mutate the frozen source.
+		local sparse_events = EventStore.deep_copy_sparse(self.sources.frozen.store.events, start_tick, end_tick)
 		sparse_events = EventStore.fix_note_pairs_in_sparse(sparse_events, start_tick, end_tick)
 
 		self.sources.scrub.loop_start = start_tick
@@ -899,13 +1013,28 @@ end
 -- Clip Bank Management
 --==============================================================================
 
---- Save a clip from buffer to bank slot
+--- Save a clip from buffer to bank slot.
+-- The saved clip is a deep copy of the source range so destructive edits on the
+-- bank entry (or on a clip later loaded from it) cannot mutate the live buffer
+-- or frozen source.
+--
+-- Cutover semantics (controlled by `opts.cutover`):
+--   * cutover = true (default, used by clipgrid quick-save / empty-pad save):
+--       After saving, if the buffer was frozen-from-buffer (no clip loaded),
+--       unfreeze the buffer so monitoring/recording resumes from the live
+--       source. The caller is expected to then load the saved clip if it wants
+--       seamless playback continuity.
+--   * cutover = false (used by bufferseq / default-mode menu save):
+--       Leave the frozen state untouched so the user can continue saving
+--       additional clips from the same frozen snapshot.
+--
 -- @param bank_slot number The bank slot (positive integer)
 -- @param loop_start number The start tick of the loop
 -- @param loop_end number The end tick of the loop
 -- @param name string Optional name for the clip
+-- @param opts table Optional. Recognized keys: cutover (boolean, default true)
 -- @return boolean True if save succeeded
-function Clip:save_clip_to_bank(bank_slot, loop_start, loop_end, name)
+function Clip:save_clip_to_bank(bank_slot, loop_start, loop_end, name, opts)
 	if not self.buffer then
 		print('Clip: Cannot save clip - buffer not available')
 		return false
@@ -915,6 +1044,11 @@ function Clip:save_clip_to_bank(bank_slot, loop_start, loop_end, name)
 		print('Clip: Invalid bank slot ' .. bank_slot .. ' (must be positive)')
 		return false
 	end
+
+	-- Default to cutover=true so existing call sites that omit opts retain
+	-- their prior auto-unfreeze behavior. Bufferseq's multi-save flow opts out.
+	local cutover = true
+	if opts ~= nil and opts.cutover == false then cutover = false end
 
 	-- Performance optimization: Use frozen buffer if available and range matches
 	local source_buffer = nil
@@ -928,13 +1062,10 @@ function Clip:save_clip_to_bank(bank_slot, loop_start, loop_end, name)
 		source_buffer = self.buffer.buffer
 	end
 
-	-- Build range sparse from source, fix note pairs, then build clip_buffer with remapped ticks
-	local range_sparse = {}
-	for tick, events in pairs(source_buffer) do
-		if tick >= loop_start and tick <= loop_end then
-			range_sparse[tick] = events
-		end
-	end
+	-- Deep copy the range so the saved clip owns its events. Without this,
+	-- the bank entry's events would alias the live buffer / frozen source and
+	-- editing the saved clip would silently mutate the original recording.
+	local range_sparse = EventStore.deep_copy_sparse(source_buffer, loop_start, loop_end)
 	range_sparse = EventStore.fix_note_pairs_in_sparse(range_sparse, loop_start, loop_end)
 
 	local clip_buffer = {}
@@ -973,12 +1104,14 @@ function Clip:save_clip_to_bank(bank_slot, loop_start, loop_end, name)
 		-- Emit event for mode components
 		self:emit('clip_saved', { bank_slot = bank_slot, name = clip_data.name })
 
-		-- Unfreeze buffer after saving (if it was frozen) UNLESS we're in dirty state
-		-- Dirty state = frozen from clip (current_slot set) - we want to keep editing
-		-- Non-dirty frozen = frozen from buffer - unfreeze to restore normal monitoring
-		if self.buffer_frozen and not self.current_slot then
+		-- Cutover behavior. Only auto-unfreeze when:
+		--   * cutover was requested by the caller, AND
+		--   * the buffer was frozen-from-buffer (current_slot is nil — the
+		--     "dirty editing of a loaded clip" case stays frozen).
+		-- Bufferseq's multi-save menu passes cutover=false to keep the frozen
+		-- snapshot in place across successive saves.
+		if cutover and self.buffer_frozen and not self.current_slot then
 			self:unfreeze_buffer()
-			-- Update monitor state to restore input monitoring
 			self.track:update_monitor_state()
 		end
 
@@ -1359,32 +1492,28 @@ function Clip:revert_edits()
 end
 
 -- Save edits to current slot (overwrite)
--- Only valid when dirty (frozen from clip)
+-- Only valid when dirty (frozen from clip).
+-- Performs a deep copy of the frozen content so the saved clip owns its events
+-- and remains independent of the live frozen-editing surface.
 -- @return boolean True if saved
 function Clip:save_edits_to_current_slot()
 	-- Only valid when dirty
 	if not self.buffer_frozen or not self.current_slot then
 		return false
 	end
-	
+
 	local frozen = self.sources.frozen
-	local store = frozen.store
-	
-	-- Get frozen content as sparse table
-	local frozen_sparse = store:to_sparse_table()
-	
-	-- Remap ticks to 1-based (clips are always 1-based)
-	local clip_buffer = {}
 	local loop_start = frozen.loop_start
 	local loop_end = frozen:get_loop_end()
 	local clip_length = frozen.loop_length
-	
+
+	local frozen_sparse = EventStore.deep_copy_sparse(frozen.store.events, loop_start, loop_end)
+
+	-- Remap ticks to 1-based (clips are always 1-based)
+	local clip_buffer = {}
 	for tick, events in pairs(frozen_sparse) do
-		if tick >= loop_start and tick <= loop_end then
-			-- Remap tick: tick - loop_start + 1 (so clip starts at tick 1)
-			local remapped_tick = tick - loop_start + 1
-			clip_buffer[remapped_tick] = events
-		end
+		local remapped_tick = tick - loop_start + 1
+		clip_buffer[remapped_tick] = events
 	end
 	
 	-- Create clip data structure
@@ -1435,7 +1564,9 @@ function Clip:save_edits_to_current_slot()
 	end
 end
 
--- Save edits to a new slot (Save As)
+-- Save edits to a new slot (Save As).
+-- Deep-copies the frozen content so the new bank entry is independent of the
+-- ongoing frozen-editing surface.
 -- @param bank_slot number The bank slot to save to
 -- @return boolean True if saved
 function Clip:save_edits_as(bank_slot)
@@ -1443,30 +1574,24 @@ function Clip:save_edits_as(bank_slot)
 		print('Clip: Invalid bank slot ' .. bank_slot .. ' (must be positive)')
 		return false
 	end
-	
+
 	if not self.buffer_frozen then
 		print('Clip: No frozen content to save')
 		return false
 	end
-	
+
 	local frozen = self.sources.frozen
-	local store = frozen.store
-	
-	-- Get frozen content as sparse table
-	local frozen_sparse = store:to_sparse_table()
-	
-	-- Remap ticks to 1-based (clips are always 1-based)
-	local clip_buffer = {}
 	local loop_start = frozen.loop_start
 	local loop_end = frozen:get_loop_end()
 	local clip_length = frozen.loop_length
-	
+
+	local frozen_sparse = EventStore.deep_copy_sparse(frozen.store.events, loop_start, loop_end)
+
+	-- Remap ticks to 1-based (clips are always 1-based)
+	local clip_buffer = {}
 	for tick, events in pairs(frozen_sparse) do
-		if tick >= loop_start and tick <= loop_end then
-			-- Remap tick: tick - loop_start + 1 (so clip starts at tick 1)
-			local remapped_tick = tick - loop_start + 1
-			clip_buffer[remapped_tick] = events
-		end
+		local remapped_tick = tick - loop_start + 1
+		clip_buffer[remapped_tick] = events
 	end
 	
 	-- Create clip data structure

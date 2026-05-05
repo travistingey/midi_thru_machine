@@ -269,6 +269,8 @@ function NoteGrid:grid_event (component, data)
 
 end
 
+local NOTEGRID_LED_RECORDING = {1, true}
+
 function NoteGrid:set_grid (component) 
     local grid = self.grid
 
@@ -278,7 +280,7 @@ function NoteGrid:set_grid (component)
           grid.led[c.x][c.y] = 3
         elseif self.type[self.track][i] == EMPTY  then
           if self.state[self.track][i] == 'recording' then
-            grid.led[c.x][c.y] = {1,true}
+            grid.led[c.x][c.y] = NOTEGRID_LED_RECORDING
           else  
             grid.led[c.x][c.y] = 0
           end

@@ -40,6 +40,50 @@ local trace_cache = {
 }
 
 --==============================================================================
+-- Null Tracer (fast path when tracing is fully disabled)
+--==============================================================================
+-- When no trace flag is set, Tracer factories return this singleton instead of
+-- allocating a fresh table + computing a string-format cache key for every
+-- call. All methods are cheap no-ops. This keeps the per-tick transport chain
+-- allocation-free.
+
+local NullTracer = {}
+NullTracer.__index = NullTracer
+NullTracer.enabled = false
+function NullTracer:should_trace() return false end
+function NullTracer:log() end
+function NullTracer:log_flow() end
+function NullTracer:log_event() end
+function NullTracer:log_load() end
+function NullTracer:format_data(data) return data end
+function NullTracer:format_message(level, fmt) return fmt end
+function NullTracer:has_transformation() return false end
+function NullTracer:contains() return false end
+function NullTracer:build_cache_key() return '' end
+function NullTracer:evaluate_trace_conditions() return false end
+
+local NULL_TRACER = setmetatable({ context = {} }, NullTracer)
+
+-- Cheap inline gate; recomputed on every call so flag changes take effect
+-- immediately without needing to invalidate a cache. The check is a handful of
+-- boolean / length comparisons, so the per-tick cost is negligible — far less
+-- than even a single Tracer:new() allocation.
+local function is_globally_enabled()
+    if flags.verbose then return true end
+    if cfg.load_trace then return true end
+    if cfg.events then return true end
+    if cfg.params then return true end
+    if cfg.modes then return true end
+    if cfg.correlate_flows then return true end
+    if #cfg.tracks > 0 then return true end
+    if #cfg.devices > 0 then return true end
+    if #cfg.components > 0 then return true end
+    if #cfg.chains > 0 then return true end
+    if #cfg.event_types > 0 then return true end
+    return false
+end
+
+--==============================================================================
 -- Core Tracer Class
 --==============================================================================
 
@@ -261,6 +305,7 @@ end
 --==============================================================================
 
 function Tracer.device(device_id, event_type)
+    if not is_globally_enabled() then return NULL_TRACER end
     return Tracer:new({
         context_type = CONTEXT_TYPES.DEVICE,
         device_id = device_id,
@@ -269,6 +314,7 @@ function Tracer.device(device_id, event_type)
 end
 
 function Tracer.track(track_id, event_type)
+    if not is_globally_enabled() then return NULL_TRACER end
     return Tracer:new({
         context_type = CONTEXT_TYPES.TRACK,
         track_id = track_id,
@@ -277,6 +323,7 @@ function Tracer.track(track_id, event_type)
 end
 
 function Tracer.component(component, track, event_type)
+    if not is_globally_enabled() then return NULL_TRACER end
     local track_id = nil
     local component_name = component.name
     if component.track then
@@ -293,6 +340,7 @@ function Tracer.component(component, track, event_type)
 end
 
 function Tracer.chain(track_id, event_type)
+    if not is_globally_enabled() then return NULL_TRACER end
     return Tracer:new({
         context_type = CONTEXT_TYPES.CHAIN,
         track_id = track_id,
@@ -301,6 +349,7 @@ function Tracer.chain(track_id, event_type)
 end
 
 function Tracer.event(source_context)
+    if not is_globally_enabled() then return NULL_TRACER end
     local ctx = {}
     if source_context then
         for k, v in pairs(source_context) do
@@ -315,12 +364,14 @@ function Tracer.event(source_context)
 end
 
 function Tracer.load()
+    if not is_globally_enabled() then return NULL_TRACER end
     return Tracer:new({
         context_type = CONTEXT_TYPES.LOAD
     })
 end
 
 function Tracer.for_track_component(component, track, event_type)
+    if not is_globally_enabled() then return NULL_TRACER end
     local track_id = nil
     if component.track then
         track_id = component.track.id

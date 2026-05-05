@@ -162,47 +162,43 @@ function FrozenBufferSource.new(config)
 	return self
 end
 
--- Create frozen snapshot from buffer component
+-- Create frozen snapshot from buffer component.
+-- Performs a deep copy of buffer events so destructive edits on the frozen
+-- snapshot (and any clip later derived from it) never leak back into the live
+-- recording buffer.
 function FrozenBufferSource:freeze_from_buffer(buffer_component, start_tick, length)
 	self.loop_start = start_tick
 	self.loop_length = length
 	self.tick = start_tick
 
-	-- Create shallow copy of events in range as sparse table
 	local loop_end = start_tick + length - 1
-	local sparse_events = {}
-	for tick, events in pairs(buffer_component.buffer) do
-		if tick >= start_tick and tick <= loop_end then
-			sparse_events[tick] = events -- shallow copy
-		end
-	end
+	local sparse_events = EventStore.deep_copy_sparse(buffer_component.buffer, start_tick, loop_end)
 	sparse_events = EventStore.fix_note_pairs_in_sparse(sparse_events, start_tick, loop_end)
 
-	-- Import into EventStore
 	self.store:from_sparse_table(sparse_events)
-	-- Keep backward compatibility alias
 	self.events = self.store.events
 
 	if flags.debug_clip then print('FrozenBufferSource: frozen range ' .. start_tick .. '-' .. loop_end .. ' (' .. self:event_count() .. ' events)') end
 end
 
--- Update frozen snapshot incrementally (for step-by-step updates)
+-- Update frozen snapshot incrementally (for step-by-step updates).
+-- Deep-copies the events from the live buffer so the snapshot remains
+-- independent of subsequent buffer recording.
 function FrozenBufferSource:update_step(buffer_component, step_start, step_end)
 	local loop_end = self:get_loop_end()
 
-	-- Clamp to loop boundaries
 	step_start = math.max(step_start, self.loop_start)
 	step_end = math.min(step_end, loop_end)
 
-	-- Update events from buffer using EventStore API
+	local fresh = EventStore.deep_copy_sparse(buffer_component.buffer, step_start, step_end)
 	for tick = step_start, step_end do
-		if buffer_component.buffer[tick] then
-			self.store:set(tick, buffer_component.buffer[tick])
+		local events = fresh[tick]
+		if events then
+			self.store:set(tick, events)
 		else
 			self.store:delete(tick)
 		end
 	end
-	-- Keep backward compatibility alias (store.events is updated by set/delete)
 	self.events = self.store.events
 end
 
@@ -229,11 +225,11 @@ function ScrubSource.new(config)
 	return self
 end
 
--- Create scrub buffer from buffer component
+-- Create scrub buffer from buffer component.
+-- Deep-copies events so scrub-time edits cannot mutate the live buffer.
 function ScrubSource:create_from_buffer(buffer_component, start_tick, end_tick, loop_mode, initial_tick)
 	self.loop_start = start_tick
 	self.loop_length = end_tick - start_tick + 1
-	-- Use initial_tick if provided and within range, otherwise use start_tick
 	if initial_tick and initial_tick >= start_tick and initial_tick <= end_tick then
 		self.tick = initial_tick
 	else
@@ -241,22 +237,18 @@ function ScrubSource:create_from_buffer(buffer_component, start_tick, end_tick, 
 	end
 	self.loop_enabled = loop_mode
 
-	-- Create shallow copy of events in range as sparse table
-	local sparse_events = {}
-	for tick = start_tick, end_tick do
-		if buffer_component.buffer[tick] then sparse_events[tick] = buffer_component.buffer[tick] end
-	end
+	local sparse_events = EventStore.deep_copy_sparse(buffer_component.buffer, start_tick, end_tick)
 	sparse_events = EventStore.fix_note_pairs_in_sparse(sparse_events, start_tick, end_tick)
 
-	-- Import into EventStore
 	self.store:from_sparse_table(sparse_events)
-	-- Keep backward compatibility alias
 	self.events = self.store.events
 
 	if flags.debug_scrub then print('ScrubSource: created range ' .. start_tick .. '-' .. end_tick .. ' (loop: ' .. tostring(loop_mode) .. ', initial_tick: ' .. self.tick .. ', events: ' .. self:event_count() .. ')') end
 end
 
--- Update scrub range (for multi-pad selection)
+-- Update scrub range (for multi-pad selection).
+-- Deep-copies fresh events into the scrub source on every range change so
+-- the scrub data remains independent of the live buffer.
 function ScrubSource:update_range(buffer_component, start_tick, end_tick)
 	local old_start = self.loop_start
 	local old_end = self:get_loop_end()
@@ -264,32 +256,21 @@ function ScrubSource:update_range(buffer_component, start_tick, end_tick)
 	self.loop_start = start_tick
 	self.loop_length = end_tick - start_tick + 1
 
-	-- Clear events outside new range using EventStore
-	-- Delete range before start_tick (if any)
 	if old_start < start_tick then
 		self.store:delete_range(old_start, start_tick)
 	end
-	-- Delete range after end_tick (if any)
 	if old_end > end_tick then
 		self.store:delete_range(end_tick + 1, old_end + 1)
 	end
 
-	-- Build sparse from buffer for new range, fix note pairs, then set into store
-	local sparse_events = {}
-	for tick = start_tick, end_tick do
-		if buffer_component.buffer[tick] then
-			sparse_events[tick] = buffer_component.buffer[tick]
-		end
-	end
+	local sparse_events = EventStore.deep_copy_sparse(buffer_component.buffer, start_tick, end_tick)
 	sparse_events = EventStore.fix_note_pairs_in_sparse(sparse_events, start_tick, end_tick)
 	for tick, events in pairs(sparse_events) do
 		self.store:set(tick, events)
 	end
 
-	-- Keep backward compatibility alias
 	self.events = self.store.events
 
-	-- Ensure tick is within new range
 	if self.tick < start_tick or self.tick > end_tick then self.tick = start_tick end
 end
 
@@ -318,16 +299,19 @@ function ClipBankSource.new(config)
 	return self
 end
 
--- Load from clip bank entry
+-- Load from clip bank entry.
+-- Deep-copies bank_entry.buffer so the playback source owns its events.
+-- This keeps the bank entry on disk authoritative: edits made through the
+-- frozen editing surface flow back to the bank entry only via the explicit
+-- save_edits_* paths, never via accidental aliasing.
 function ClipBankSource:load_from_bank_entry(bank_entry, slot)
 	self.slot = slot
 	self.name = bank_entry.name
-	
-	-- Import clip buffer into EventStore
-	self.store:from_sparse_table(bank_entry.buffer)
-	-- Keep backward compatibility alias
+
+	local fresh_buffer = EventStore.deep_copy_sparse_all(bank_entry.buffer)
+	self.store:from_sparse_table(fresh_buffer)
 	self.events = self.store.events
-	
+
 	self.loop_length = bank_entry.length or 0
 	self.original_loop_start = bank_entry.loop_start
 	self.loop_start = 1 -- clips are always 1-based

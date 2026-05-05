@@ -415,9 +415,6 @@ function Scale:quantize_note(data)
 	elseif #self.notes > 0 then
 		data.new_note = musicutil.snap_note_to_array(data.note, self.notes) + self.root
 		return data
-	else
-		print(#self.notes)
-		print(self.bits)
 	end
 end
 

@@ -55,8 +55,12 @@ function Buffer:set(o)
 	-- Key: step_index (step number within loop), Value: true
 	self.overwrite_cleared_steps = {}
 
-	-- Track open notes for record-time quantization (per channel+note)
-	-- Key: "<ch>_<note>", Value: { raw_on = tick, quantized_on = tick }
+	-- Track open notes per channel+note while a note is held.
+	-- Key: ch * 128 + note (numeric, no allocation per lookup).
+	-- Value: { raw_on = tick, quantized_on = tick, vel_on = velocity }
+	-- vel_on is stamped onto the closing note_off so synthetic note_ons at loop
+	-- boundaries (see EventStore.fix_note_pairs_in_sparse) inherit the original
+	-- attack velocity instead of the note_off release velocity (often 0 -> silent).
 	self.open_notes = {}
 end
 
@@ -83,55 +87,62 @@ function Buffer:record_buffer(midi_event)
 	-- Always preserve the raw, unquantized tick (read-only reference)
 	midi_event.raw_tick = recording_tick
 
-	-- Compute the storage tick, optionally applying global record quantize.
-	-- For note events, we quantize the NOTE ON and preserve the played duration
-	-- by deriving NOTE OFF from raw_tick + (quantized_on - raw_on).
+	-- Compute the storage tick. For note events:
+	--  - Always track open notes so we can stamp vel_on on the closing note_off
+	--    (used for synthetic note_on regeneration at loop boundaries).
+	--  - When record-quantize is enabled, snap note_on to grid and preserve duration.
 	local tick
 	local grid = App.record_quantize_grid or 0
+	local is_note = midi_event.type and (midi_event.type == 'note_on' or midi_event.type == 'note_off') and midi_event.note
 
-	if grid > 0 and midi_event.type and (midi_event.type == 'note_on' or midi_event.type == 'note_off') and midi_event.note then
+	if is_note then
 		local ch = midi_event.ch or 1
-		local key = tostring(ch) .. '_' .. tostring(midi_event.note)
+		local key = ch * 128 + midi_event.note -- numeric key, no per-event string alloc
 
 		if midi_event.type == 'note_on' then
-			-- Quantize note_on to nearest gridline anchored at tick 0
-			local anchor = 0
-			local quantized_on = math.floor(((recording_tick - anchor) + grid / 2) / grid) * grid + anchor
-			if quantized_on < 1 then quantized_on = 1 end
+			local quantized_on = recording_tick
+			if grid > 0 then
+				quantized_on = math.floor((recording_tick + grid / 2) / grid) * grid
+				if quantized_on < 1 then quantized_on = 1 end
+			end
 
-			-- Remember mapping so note_off can preserve duration relative to the quantized start
 			self.open_notes[key] = {
 				raw_on = recording_tick,
 				quantized_on = quantized_on,
+				vel_on = midi_event.vel or 100,
 			}
 
 			tick = self:wrap_tick(quantized_on)
 		else
-			-- NOTE OFF: try to preserve the original duration where possible
 			local open = self.open_notes[key]
-			if open and type(open.raw_on) == 'number' and type(open.quantized_on) == 'number' then
-				-- Duration in raw ticks
-				local duration = recording_tick - open.raw_on
-				if duration < 0 then duration = 0 end
 
-				-- Place note_off at quantized_on + duration (not necessarily on grid)
-				local off_tick = open.quantized_on + duration
-				if off_tick < open.quantized_on then off_tick = open.quantized_on end
+			-- Stamp the original attack velocity on the note_off so synthetic
+			-- note_on regenerations at loop boundaries can re-trigger at the
+			-- correct dynamic. Using vel_on (not vel) keeps note_off's own vel
+			-- (release velocity) untouched on the wire.
+			if open and open.vel_on then midi_event.vel_on = open.vel_on end
 
-				tick = self:wrap_tick(off_tick)
+			if grid > 0 then
+				if open and type(open.raw_on) == 'number' and type(open.quantized_on) == 'number' then
+					-- Preserve played duration relative to quantized start
+					local duration = recording_tick - open.raw_on
+					if duration < 0 then duration = 0 end
+					local off_tick = open.quantized_on + duration
+					if off_tick < open.quantized_on then off_tick = open.quantized_on end
+					tick = self:wrap_tick(off_tick)
+				else
+					-- No matching note_on: quantize note_off independently
+					local quantized_off = math.floor((recording_tick + grid / 2) / grid) * grid
+					if quantized_off < 1 then quantized_off = 1 end
+					tick = self:wrap_tick(quantized_off)
+				end
 			else
-				-- Fallback: quantize note_off independently
-				local anchor = 0
-				local quantized_off = math.floor(((recording_tick - anchor) + grid / 2) / grid) * grid + anchor
-				if quantized_off < 1 then quantized_off = 1 end
-				tick = self:wrap_tick(quantized_off)
+				tick = self:wrap_tick(recording_tick)
 			end
 
-			-- Close the note entry regardless
 			self.open_notes[key] = nil
 		end
 	else
-		-- Non-note events or record quantize disabled: use the raw recording tick (wrapped)
 		tick = self:wrap_tick(recording_tick)
 	end
 

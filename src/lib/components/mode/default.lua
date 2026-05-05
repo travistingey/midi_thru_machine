@@ -794,7 +794,10 @@ function Default:clip_menu()
 					local loop_start = track.buffer.buffer_start
 					local loop_end = track.buffer.buffer_start + track.buffer.buffer_length - 1
 					local name = slot
-					local success = track.clip:save_clip_to_bank(slot, loop_start, loop_end, name)
+					-- Menu save preserves the frozen state so the user can save multiple
+					-- clips from the same frozen snapshot (bufferseq workflow). The
+					-- frozen-aware loop range is applied inside save_clip_to_bank.
+					local success = track.clip:save_clip_to_bank(slot, loop_start, loop_end, name, { cutover = false })
 					if success then
 						print('Saved clip to slot ' .. slot)
 					else

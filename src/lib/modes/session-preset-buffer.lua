@@ -22,10 +22,8 @@ local mutegrid = MuteGrid:new({ track = 1 })
 local presetgrid = PresetGrid:new({
 	track = 1,
 	param_type = 'track',
-	-- New global preset behavior:
-	-- - Load applies globally to all tracks + scales (sparse keys)
-	-- - Save overwrites only active track + its selected scale
-	load_mode = 'global',
+	-- Scoped save per track/scale; normal press recall is macro or single-track via PARAMS > Preset grid macro
+	use_macro_launch_param = true,
 	save_mode = 'scoped_overwrite',
 	save_track_fn = function(self) return App.current_track end,
 	save_scale_fn = function(self, tid)

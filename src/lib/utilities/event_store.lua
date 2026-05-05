@@ -398,6 +398,12 @@ end
 -- Fix orphan note_on/note_off in a sparse table for segment [start_tick, end_tick] (inclusive).
 -- Orphan note_off -> synthetic note_on at first tick. Open note_on at end -> synthetic note_off at last tick.
 -- Preserves new_note for quantization/scale. Returns new sparse table; does not mutate input.
+--
+-- Synthetic note_on velocity prefers `event.vel_on` (stamped at record time on the
+-- matching note_off in Buffer:record_buffer). When that is missing the fallback
+-- velocity is 100 — a musically usable default that re-triggers held notes loudly
+-- enough to be heard, vs. the previous `event.vel or 64` path which evaluated to 0
+-- whenever the note_off carried release velocity 0 (silent re-trigger).
 -- @param sparse_table table Sparse table tick -> array of events
 -- @param start_tick number Segment start (inclusive)
 -- @param end_tick number Segment end (inclusive)
@@ -411,11 +417,8 @@ function EventStore.fix_note_pairs_in_sparse(sparse_table, start_tick, end_tick)
 	end
 	table.sort(ticks_in_range)
 
-	local function key(ch, note)
-		return tostring(ch or 1) .. '_' .. tostring(note)
-	end
-
-	local open_notes = {} -- key -> { ch, note, vel, new_note }
+	-- Numeric key: ch * 128 + note. Avoids per-event string allocation.
+	local open_notes = {} -- key -> { ch, note, vel_on, new_note }
 	local synthetic_first = {}
 
 	for _, tick in ipairs(ticks_in_range) do
@@ -424,22 +427,26 @@ function EventStore.fix_note_pairs_in_sparse(sparse_table, start_tick, end_tick)
 		for _, event in ipairs(events) do
 			if not event or not event.note or (event.type ~= 'note_on' and event.type ~= 'note_off') then goto next_event end
 			local ch = event.ch or 1
-			local k = key(ch, event.note)
+			local k = ch * 128 + event.note
 			if event.type == 'note_on' then
 				open_notes[k] = {
 					ch = ch,
 					note = event.note,
-					vel = event.vel,
+					vel_on = event.vel,
 					new_note = event.new_note,
 				}
 			else
 				if open_notes[k] then
 					open_notes[k] = nil
 				else
+					-- Orphan note_off: synthesize a matching note_on at start_tick.
+					-- Prefer the attack velocity stamped on this note_off at record time;
+					-- fall back to 100 only when vel_on is missing (legacy data, external
+					-- note_off without a recorded note_on, etc.).
 					local syn = {
 						type = 'note_on',
 						note = event.note,
-						vel = event.vel or 64,
+						vel = event.vel_on or 100,
 						ch = ch,
 					}
 					if event.new_note ~= nil then syn.new_note = event.new_note end
@@ -495,6 +502,68 @@ function EventStore.fix_note_pairs_in_sparse(sparse_table, start_tick, end_tick)
 	end
 
 	return result
+end
+
+-- ============================================================================
+-- DEEP COPY (sparse tables)
+-- Used when materializing buffer ranges into derivative stores (frozen, scrub,
+-- clip bank) so destructive edits on the derivative cannot mutate the live
+-- recording buffer's events. Without this, sparse[tick] arrays and individual
+-- event tables are shared, and a remove/edit on a frozen snapshot or saved
+-- clip would silently corrupt the live recording.
+--
+-- Events are flat MIDI-shaped tables (type, note, vel, ch, tick, raw_tick,
+-- new_note, vel_on, etc.); a single-level field copy is sufficient.
+-- @param sparse_table table Source sparse table (tick -> array of events)
+-- @param start_tick number Inclusive lower bound (only copies ticks in range)
+-- @param end_tick number Inclusive upper bound
+-- @return table Fresh sparse table with newly-allocated arrays and event tables
+-- ============================================================================
+function EventStore.deep_copy_sparse(sparse_table, start_tick, end_tick)
+	local out = {}
+	if not sparse_table then return out end
+	for tick, events in pairs(sparse_table) do
+		if tick >= start_tick and tick <= end_tick and events then
+			local n = #events
+			local arr = {}
+			for i = 1, n do
+				local src = events[i]
+				if src then
+					local copy = {}
+					for k, v in pairs(src) do copy[k] = v end
+					arr[i] = copy
+				end
+			end
+			out[tick] = arr
+		end
+	end
+	return out
+end
+
+-- Deep copy an entire sparse table (no range filter). Useful when copying a
+-- clip buffer for a save-as flow where the clip's tick keys are 1-based and
+-- bounded by clip length already.
+-- @param sparse_table table
+-- @return table Fresh sparse table
+function EventStore.deep_copy_sparse_all(sparse_table)
+	local out = {}
+	if not sparse_table then return out end
+	for tick, events in pairs(sparse_table) do
+		if events then
+			local n = #events
+			local arr = {}
+			for i = 1, n do
+				local src = events[i]
+				if src then
+					local copy = {}
+					for k, v in pairs(src) do copy[k] = v end
+					arr[i] = copy
+				end
+			end
+			out[tick] = arr
+		end
+	end
+	return out
 end
 
 -- ============================================================================

@@ -10,6 +10,12 @@ local ClipGrid = ModeComponent:new()
 ClipGrid.__base = ModeComponent
 ClipGrid.name = 'clipgrid'
 
+-- Module-level LED descriptor constants. Reused on every set_grid() instead of
+-- allocating fresh tables for every cell. Treat as read-only.
+local LED_EMPTY      = { 1, 1, 1 }   -- Dim white for empty slot
+local LED_RECORDING  = { 3, true }   -- Red, blinking
+local LED_REC_QUEUED = { 3, 3, 3 }   -- Dim red
+
 function ClipGrid:set(o)
 	self.__base.set(self, o)
 
@@ -564,14 +570,14 @@ function ClipGrid:set_grid(clip)
 		local clip_entry = clip.clip_bank[bank_slot]
 
 		-- Default: empty slot
-		s.led[x][y] = { 1, 1, 1 } -- Dim white for empty
+		s.led[x][y] = LED_EMPTY
 
 		if self.recording_slot == bank_slot then
 			-- Currently recording: blink red
-			s.led[x][y] = { 3, true } -- Red, blinking
+			s.led[x][y] = LED_RECORDING
 		elseif self.recording_pending and self.recording_pending.bank_slot == bank_slot then
 			-- Recording queued: dim red
-			s.led[x][y] = { 3, 3, 3 } -- Dim red
+			s.led[x][y] = LED_REC_QUEUED
 		elseif clip_entry then
 			-- Slot has clip: show color based on slot number
 			-- Only highlight the grid "active clip" when the clip bank is the active playback source.

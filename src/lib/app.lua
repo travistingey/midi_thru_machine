@@ -54,6 +54,9 @@ function App:init(o)
 	self.device_manager = DeviceManager:new()
 	self.flags = flags
 
+	-- Sticky screen settings only need to be applied once
+	if screen and screen.aa then screen.aa(1) end
+
 	-- Model components: scales, outputs, tracks, modes, settings
 	self.scale = {}
 	self.output = {}
@@ -149,6 +152,15 @@ function App:init(o)
 	self.tick = 0
 	self.start_time = 0
 	self.last_time = 0
+
+	-- Cached clock_source (1 = internal, 2 = external) to avoid params:get() lookups
+	-- on every tick. Kept in sync via a set_action below.
+	self.clock_source = 1
+
+	-- Reusable transport_event payload for clock ticks.
+	-- Listeners must treat this table as read-only. Allocating a fresh table
+	-- on every tick was a major source of GC pressure.
+	self._clock_event = { type = 'clock' }
 
 	-- UI redraw heartbeat (used by Foobar.lua watchdog)
 	-- Stores last time the UI successfully redrew, in seconds.
@@ -323,6 +335,12 @@ function App:init(o)
 		App.screen_dirty = true
 	end)
 
+	-- Preset grid (session): normal press recalls either only the active track or all tracks+scales from the slot (macro). Alt-save stays scoped per track.
+	params:add_option('preset_grid_macro', 'Preset grid macro', { 'off', 'on' }, 2)
+	params:set_action('preset_grid_macro', function()
+		App.screen_dirty = true
+	end)
+
 	-- Create the tracks
 	params:add_separator('tracks', 'Tracks')
 	for i = 1, 8 do
@@ -342,6 +360,16 @@ function App:init(o)
 	print('params:default')
 	App.flags.state.set('initializing', false)
 	params:default()
+
+	-- Mirror the (built-in) clock_source param into self.clock_source so the
+	-- per-tick hot path doesn't have to do a params:get() lookup. Norns sets
+	-- this via the system params menu.
+	if params.lookup_param and params:lookup_param('clock_source') then
+		self.clock_source = params:get('clock_source')
+		params:set_action('clock_source', function(d)
+			self.clock_source = d
+		end)
+	end
 
 	----------------------------------------------------------------------------
 	-- Register PSET save/load/delete callbacks for table data persistence
@@ -384,7 +412,7 @@ end
 --==============================================================================
 function App:on_external_clock()
 	-- Only process external clock if clock source is external
-	if params:get('clock_source') ~= 2 then return end
+	if self.clock_source ~= 2 then return end
 	-- Prevent reentrancy: emit('transport_event') in on_tick can trigger MIDI/echo and re-enter
 	if self._in_external_clock then return end
 	self._in_external_clock = true
@@ -594,7 +622,7 @@ function App:on_start(continue)
 	end
 
 	-- Transport Tick Loop using PPQN (Internal = 1, External = 2)
-	if params:get('clock_source') == 1 then self.clock = clock.run(function()
+	if self.clock_source == 1 then self.clock = clock.run(function()
 		while true do
 			clock.sync(1 / self.ppqn)
 			self:on_tick()
@@ -608,7 +636,7 @@ function App:on_stop()
 	tracer:log('info', 'App stop')
 	self.playing = false
 	self:emit('transport_event', { type = 'stop' })
-	if params:get('clock_source') == 1 then
+	if self.clock_source == 1 then
 		if self.clock then
 			safe_cancel(self.clock)
 			self.clock = nil
@@ -650,11 +678,12 @@ end
 -- and dispatches clock events to tracks.
 function App:on_tick()
 	-- When external clock: only advance if we were called from fire_tick_capped (catches stray callers)
-	if params:get('clock_source') == 2 and not self._tick_authorized then return end
+	local external = (self.clock_source == 2)
+	if external and not self._tick_authorized then return end
 	self.last_time = clock.get_beats()
 	self.tick = self.tick + 1
 	-- When external and in "current period" (dispatch): allow at most 4 advances per period; undo 5th.
-	if params:get('clock_source') == 2 and self._in_current_period then
+	if external and self._in_current_period then
 		self._current_period_advances = (self._current_period_advances or 0) + 1
 		if self._current_period_advances > self.tick_multiplier then
 			self.tick = self.tick - 1
@@ -662,7 +691,9 @@ function App:on_tick()
 			return
 		end
 	end
-	self:emit('transport_event', { type = 'clock' })
+	-- Reuse a single payload table to avoid allocating one per tick.
+	-- Listeners must treat the table as read-only (only reads .type).
+	self:emit('transport_event', self._clock_event)
 end
 
 --==============================================================================
@@ -713,14 +744,16 @@ end
 -- Drawing and User Interface Functions
 --==============================================================================
 function App:draw()
-	screen.ping()
 	screen.clear() -- Clear screen space
-	screen.aa(1) -- Enable anti-aliasing
 	if self.mode[self.current_mode] then self.mode[self.current_mode]:draw() end
-	screen.update()
+	-- Note: screen.update() is called once by the top-level redraw() in
+	-- Foobar.lua; do not call it here too. screen.aa(1) is set once at init,
+	-- not every frame. screen.ping() (screen-blanker reset) belongs on user
+	-- input paths, not in the redraw loop.
 end
 
 function App:handle_enc(e, d)
+	if screen and screen.ping then screen.ping() end
 	local context = self.mode[self.current_mode].context
 	if e == 1 then
 		if context.enc1_alt and self.alt_down then
@@ -753,6 +786,7 @@ function App:handle_enc(e, d)
 end
 
 function App:handle_key(k, z)
+	if screen and screen.ping then screen.ping() end
 	local mode = self.mode[self.current_mode]
 	local context = mode.context
 	local prev_key_held = self.key_held

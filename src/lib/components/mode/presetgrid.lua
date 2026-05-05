@@ -15,10 +15,12 @@ function PresetGrid:set(o)
 	self.param_list = o.param_list -- Predefined list of parameter names
 	self.id = o.id
 	-- Behavior overrides
-	-- load_mode: 'local' (default) or 'global'
+	-- load_mode: 'local' (default) or 'global' — if use_macro_launch_param is false, global => recall all tracks+scales from slot
 	-- save_mode: 'local' (default) or 'scoped_overwrite'
 	self.load_mode = o.load_mode or 'local'
 	self.save_mode = o.save_mode or 'local'
+	-- When true, normal-press macro vs single-track follows params:preset_grid_macro (session). When false, macro follows load_mode == 'global' only.
+	self.use_macro_launch_param = o.use_macro_launch_param == true
 	-- When saving scoped_overwrite, which track/scale to use
 	self.save_track_fn = o.save_track_fn
 	self.save_scale_fn = o.save_scale_fn
@@ -97,10 +99,18 @@ function PresetGrid:save_preset(number)
 	self.mode:toast('Saved preset ' .. number)
 end
 
+function PresetGrid:_macro_launch_on_press()
+	if self.use_macro_launch_param and params and params.lookup_param then
+		local p = params:lookup_param('preset_grid_macro')
+		if p then return params:get('preset_grid_macro') == 2 end
+	end
+	return self.load_mode == 'global'
+end
+
 function PresetGrid:load_preset(number)
 	local has_armed = (App and App.preset_armed and next(App.preset_armed) ~= nil) or false
 	local toast_label = 'Preset ' .. number .. (has_armed and '*' or '')
-	if self.load_mode == 'global' and App.activate_preset_global then
+	if self:_macro_launch_on_press() and App.activate_preset_global then
 		App:activate_preset_global(number)
 	else
 		if self.component then
