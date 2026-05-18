@@ -4,6 +4,7 @@ local Grid = require(path_name .. 'grid')
 local SequenceUtils = require(path_name .. 'utilities/sequence_utils')
 local Registry = require(path_name .. 'utilities/registry')
 local flags = require(path_name .. 'utilities/flags')
+local UI = require(path_name .. 'ui')
 
 local ClipGrid = ModeComponent:new()
 
@@ -42,6 +43,147 @@ function ClipGrid:set(o)
 	-- Max recording length (default 4 bars = 4 * 16 beats * 24ppqn = 1536 ticks at 24ppqn, but we use App.ppqn)
 	-- Default to 4 bars: 4 * 16 beats = 64 beats = 64 * App.ppqn ticks
 	self.max_recording_length = o.max_recording_length or (App.ppqn * 64)
+	self.range_action_slot = o.range_action_slot or 1
+end
+
+function ClipGrid:open_slot_action_menu(clip, selected_slot)
+	if not self.mode then return end
+	local max_slot = 32
+	self.range_action_slot = util.clamp(self.range_action_slot or selected_slot or 1, 1, max_slot)
+	local has_clip = (clip.clip_bank[selected_slot] ~= nil)
+
+	local menu = {
+		Registry.menu.make_item('clipgrid_slot_status', {
+			label_fn = function()
+				if has_clip then
+					return 'Slot ' .. selected_slot
+				end
+				return 'Slot Empty'
+			end,
+			value_fn = function() return '' end,
+			disable = true,
+		}),
+	}
+
+	if has_clip then
+		table.insert(menu, Registry.menu.make_item('clipgrid_slot_clear', {
+			label_fn = function() return 'Clear' end,
+			value_fn = function() return tostring(selected_slot) end,
+			on_press = function()
+				local ok = clip:clear_clip_slot(selected_slot)
+				if ok then
+					print('ClipGrid: Cleared slot ' .. selected_slot)
+				else
+					print('ClipGrid: Failed to clear slot ' .. selected_slot)
+				end
+				self:set_grid(clip)
+				self:update_row_pads()
+				self.mode:cancel_context()
+			end,
+			helper_labels = {
+				press_fn_3 = 'clear',
+			},
+		}))
+		table.insert(menu, Registry.menu.make_item('clipgrid_slot_load', {
+			label_fn = function() return 'Load' end,
+			value_fn = function() return tostring(selected_slot) end,
+			on_press = function()
+				clip:load_clip_from_bank(selected_slot)
+				self:set_grid(clip)
+				self.mode:cancel_context()
+			end,
+			helper_labels = {
+				press_fn_3 = 'load',
+			},
+		}))
+	end
+
+	table.insert(menu, Registry.menu.make_item('clipgrid_slot_save', {
+		label_fn = function() return 'Save' end,
+		value_fn = function() return tostring(self.range_action_slot) end,
+		enc3 = function(d)
+			self.range_action_slot = util.clamp((self.range_action_slot or 1) + d, 1, max_slot)
+			App.screen_dirty = true
+		end,
+		on_press = function()
+			local slot = self.range_action_slot
+			local name = string.format('Clip %03d', slot)
+			local loop_start, loop_end
+			if clip.buffer_frozen and clip.playback_start and clip.playback_length then
+				loop_start = clip.playback_start
+				loop_end = clip.playback_start + clip.playback_length - 1
+			else
+				loop_start = clip.buffer.buffer_start
+				loop_end = clip.buffer.buffer_start + clip.buffer.buffer_length - 1
+			end
+
+			local ok = clip:save_clip_to_bank(slot, loop_start, loop_end, name, { cutover = false })
+			if ok then
+				print('Saved to slot ' .. slot)
+			else
+				print('Failed to save to slot ' .. slot)
+			end
+			self:set_grid(clip)
+			self:update_row_pads()
+			self.mode:cancel_context()
+		end,
+		helper_labels = {
+			enc3 = 'slot',
+			press_fn_3 = 'save',
+		},
+	}))
+
+	table.insert(menu, Registry.menu.make_item('clipgrid_edit_open', {
+		label_fn = function() return 'Edit' end,
+		value_fn = function() return '' end,
+		on_press = function()
+			if not clip.buffer_frozen then
+				clip:set_playback_loop(clip.buffer.buffer_start, clip.buffer.buffer_length)
+				clip:freeze_buffer()
+			end
+
+			-- Route into the existing clip edit submenu from the Default component.
+			local default_component = nil
+			for _, component in ipairs(self.mode.components or {}) do
+				if component and component.clip_edit_menu and component.sub_menu and component.submenu_screen then
+					default_component = component
+					break
+				end
+			end
+
+			if default_component then
+				default_component:sub_menu(default_component:clip_edit_menu(), {
+					status = { icon = '\u{270e}', label = 'EDIT' },
+					screen = default_component:submenu_screen(),
+				})
+			else
+				print('ClipGrid: Edit menu unavailable')
+				self.mode:cancel_context()
+			end
+		end,
+		helper_labels = {
+			press_fn_3 = 'open',
+		},
+	}))
+
+	local menu_screen = function()
+		screen.clear()
+		UI:draw_small_tempo()
+		UI:draw_status(clip.track and clip.track.id or 1, 'Slot Actions')
+		UI:draw_menu(0, 20, self.mode.menu, self.mode.cursor, { disable_highlight = self.mode.disable_highlight })
+	end
+
+	self.mode:use_context({
+		menu = menu,
+		press_fn_2 = function() self.mode:cancel_context() end,
+		default_helper_labels = {
+			press_fn_2 = 'back',
+		},
+	}, menu_screen, {
+		timeout = 8,
+		menu_override = true,
+		cursor = 1,
+	})
 end
 
 function ClipGrid:enable_event()
@@ -141,6 +283,15 @@ function ClipGrid:grid_event(clip, data)
 
 		if bank_slot < 1 then return end -- Invalid slot
 
+		-- Alt + pad in clipgrid is menu-only: no launch/freeze side-effects.
+		if self.mode.alt then
+			self.mode:reset_alt()
+			self:set_grid(clip)
+			self:update_row_pads()
+			self:open_slot_action_menu(clip, bank_slot)
+			return
+		end
+
 		-- If we're editing a loaded clip (frozen snapshot) and the user presses the pad
 		-- for the currently-loaded slot, discard edits and revert back to the saved clip.
 		-- This keeps "reverting" intuitive: the original pad means "restore original".
@@ -153,48 +304,26 @@ function ClipGrid:grid_event(clip, data)
 			return
 		end
 
-		-- When buffer is frozen and slot is empty: swap behavior
-		-- Tap (no alt) = save frozen buffer to clip; Alt + tap = start recording (synced)
+		-- When buffer is frozen and slot is empty: save frozen range to clip.
 		if clip.buffer_frozen and not clip.clip_bank[bank_slot] then
-			if self.mode.alt then
-				-- Alt + empty pad: start recording to this slot (synced as usual)
-				self:queue_recording_start(clip, bank_slot)
-				self:set_grid(clip)
-				return
-			else
-				-- Empty pad (no alt): save frozen buffer to clip, then launch clip at same playback position
-				local saved_tick = clip.tick
-				local saved_playback_start = clip.playback_start
-				local saved_playback_length = clip.playback_length
-				local loop_end = saved_playback_start + saved_playback_length - 1
-				local clip_name = string.format('Clip %03d', bank_slot)
-				local success = clip:save_clip_to_bank(bank_slot, saved_playback_start, loop_end, clip_name)
-				if success then
-					if flags.debug_clip then print('ClipGrid: Saved frozen buffer to slot ' .. bank_slot) end
-					-- Launch the new clip and restore playback position (clip ticks are 1-based)
-					clip:load_clip_from_bank(bank_slot)
-					local clip_length = clip.clip_bank[bank_slot] and clip.clip_bank[bank_slot].length or saved_playback_length
-					local offset = (saved_tick - saved_playback_start) % saved_playback_length
-					if offset < 0 then offset = offset + saved_playback_length end
-					clip.tick = offset + 1
-					if clip.sources.clip_bank then
-						clip.sources.clip_bank.tick = clip.tick
-					end
-					self:set_grid(clip)
-					self:update_row_pads()
-				end
-				return
-			end
-		end
-
-		-- Not frozen + Alt + pad: save full buffer loop to bank slot (quick save without freezing)
-		if not clip.buffer_frozen and self.mode.alt then
-			local loop_start = clip.buffer.buffer_start
-			local loop_end = clip.buffer.buffer_start + clip.buffer.buffer_length - 1
+			-- Empty pad (no alt): save frozen buffer to clip, then launch clip at same playback position
+			local saved_tick = clip.tick
+			local saved_playback_start = clip.playback_start
+			local saved_playback_length = clip.playback_length
+			local loop_end = saved_playback_start + saved_playback_length - 1
 			local clip_name = string.format('Clip %03d', bank_slot)
-			local success = clip:save_clip_to_bank(bank_slot, loop_start, loop_end, clip_name)
+			local success = clip:save_clip_to_bank(bank_slot, saved_playback_start, loop_end, clip_name)
 			if success then
-				if flags.debug_clip then print('ClipGrid: Saved live buffer to slot ' .. bank_slot) end
+				if flags.debug_clip then print('ClipGrid: Saved frozen buffer to slot ' .. bank_slot) end
+				-- Launch the new clip and restore playback position (clip ticks are 1-based)
+				clip:load_clip_from_bank(bank_slot)
+				local clip_length = clip.clip_bank[bank_slot] and clip.clip_bank[bank_slot].length or saved_playback_length
+				local offset = (saved_tick - saved_playback_start) % saved_playback_length
+				if offset < 0 then offset = offset + saved_playback_length end
+				clip.tick = offset + 1
+				if clip.sources.clip_bank then
+					clip.sources.clip_bank.tick = clip.tick
+				end
 				self:set_grid(clip)
 				self:update_row_pads()
 			end

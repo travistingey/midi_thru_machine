@@ -63,6 +63,9 @@ function BufferSeq:set(o)
 	self.last_rendered_step = nil
 	self.last_record_step = nil
 	self.last_playback_step = nil
+	self.range_action_slot = o.range_action_slot or 1
+	-- Defer alt+single-pad menu so alt+two-pad chord can register on 2nd down
+	self._alt_single_pad_defer_co = nil
 
 	-- Initialize display calculations (will be recalculated when component is available)
 	self.row_ticks = 0
@@ -89,6 +92,75 @@ function BufferSeq:set(o)
 			end
 		end
 	end
+end
+
+function BufferSeq:open_range_action_menu(clip, start_tick, end_tick)
+	if not self.mode then return end
+
+	local max_slot = 32
+	self.range_action_slot = util.clamp(self.range_action_slot or 1, 1, max_slot)
+	local range_length = end_tick - start_tick + 1
+
+	local menu = {
+		Registry.menu.make_item('bufferseq_range_info', {
+			label_fn = function() return 'RANGE' end,
+			value_fn = function() return start_tick .. '-' .. end_tick end,
+			disable = true,
+		}),
+		Registry.menu.make_item('bufferseq_range_edit', {
+			label_fn = function() return 'EDIT RANGE' end,
+			value_fn = function() return tostring(range_length) .. ' ticks' end,
+			on_press = function()
+				print('Range ready for edit: ' .. start_tick .. '-' .. end_tick)
+				self.mode:cancel_context()
+			end,
+			helper_labels = {
+				press_fn_3 = 'keep editing',
+			},
+		}),
+		Registry.menu.make_item('bufferseq_range_save_slot', {
+			label_fn = function() return 'SAVE SLOT' end,
+			value_fn = function() return tostring(self.range_action_slot) end,
+			enc3 = function(d)
+				self.range_action_slot = util.clamp((self.range_action_slot or 1) + d, 1, max_slot)
+				App.screen_dirty = true
+			end,
+			on_press = function()
+				local slot = self.range_action_slot
+				local clip_name = string.format('Clip %03d', slot)
+				local success = clip:save_clip_to_bank(slot, start_tick, end_tick, clip_name, { cutover = false })
+				if success then
+					print('Saved chunk to slot ' .. slot .. ' (' .. start_tick .. '-' .. end_tick .. ')')
+				else
+					print('Failed to save chunk to slot ' .. slot)
+				end
+				self.mode:cancel_context()
+			end,
+			helper_labels = {
+				enc3 = 'choose slot',
+				press_fn_3 = 'save',
+			},
+		}),
+	}
+
+	local menu_screen = function()
+		screen.clear()
+		UI:draw_small_tempo()
+		UI:draw_status(clip.track and clip.track.id or 1, 'Range Actions')
+		UI:draw_menu(0, 20, self.mode.menu, self.mode.cursor, { disable_highlight = self.mode.disable_highlight })
+	end
+
+	self.mode:use_context({
+		menu = menu,
+		press_fn_2 = function() self.mode:cancel_context() end,
+		default_helper_labels = {
+			press_fn_2 = 'back',
+		},
+	}, menu_screen, {
+		timeout = 8,
+		menu_override = true,
+		cursor = 1,
+	})
 end
 
 function BufferSeq:enable_event()
@@ -499,6 +571,15 @@ function BufferSeq:stop_scrub()
 	if flags.debug_scrub then print('Scrub stopped') end
 end
 
+local ALT_SINGLE_PAD_DEFER_S = 0.07
+
+function BufferSeq:cancel_alt_single_pad_defer()
+	if self._alt_single_pad_defer_co then
+		clock.cancel(self._alt_single_pad_defer_co)
+		self._alt_single_pad_defer_co = nil
+	end
+end
+
 function BufferSeq:grid_event(component, data)
 	local grid = self.grid
 	local buffer = component
@@ -512,9 +593,11 @@ function BufferSeq:grid_event(component, data)
 	end
 	self.last_event = pad_index
 
+	print(data.state, data.pad_down, #data.pad_down)
 	-- Handle loop point setting (alt mode)
 	-- Gesture: Tap alt, then hold two pads simultaneously to set loop start and end points
 	if data.type == 'pad' and data.state and data.pad_down and #data.pad_down == 2 and self.mode.alt then
+		self:cancel_alt_single_pad_defer()
 		-- Ensure buffer component exists
 		if not buffer then
 			print('Cannot set loop: buffer component not available')
@@ -563,6 +646,59 @@ function BufferSeq:grid_event(component, data)
 			clip:freeze_buffer()
 		end
 		if flags.debug_clip then print('Loop frozen: ' .. loop_start .. '-' .. loop_end) end
+
+		-- Drop alt mode after the gesture completes. The two-pad chord is
+		-- a discrete action; leaving alt latched on causes the next pad
+		-- press (e.g. a quick scrub tap) to be interpreted as another alt
+		-- gesture, which is a frequent source of accidental edits.
+		self.mode:reset_alt()
+		self:set_grid(buffer)
+		self:update_row_pads()
+		return
+	end
+
+	-- Alt + single pad in bufferseq: select a chunk range and open contextual actions.
+	-- Defer slightly: the first down of a two-pad chord only has #pad_down==1; without
+	-- a delay that path would clear alt before the second pad is registered.
+	if data.type == 'pad' and data.state and self.mode.alt and data.pad_down and #data.pad_down == 1 then
+		self:cancel_alt_single_pad_defer()
+		self._alt_single_pad_defer_co = clock.run(function()
+			clock.sleep(ALT_SINGLE_PAD_DEFER_S)
+			self._alt_single_pad_defer_co = nil
+			if not self.mode or not self.mode.alt then return end
+			if #self.grid.pad_down ~= 1 then return end
+			local held = self.grid.pad_down[1]
+			if held.type ~= 'pad' then return end
+
+			local buffer_now = self:get_component()
+			local track = buffer_now and buffer_now.track or nil
+			local clip = track and track.clip or nil
+			if not clip then
+				print('Cannot save chunk: clip component not available')
+				self.mode:reset_alt()
+				return
+			end
+
+			local deferred_pad = self.grid:grid_to_index(held) + self.step_offset
+			local chunk_start, chunk_end = self:pad_to_tick_range(deferred_pad)
+			local chunk_length = chunk_end - chunk_start + 1
+
+			if clip.buffer_frozen then
+				clip:set_playback_loop(chunk_start, chunk_length)
+			elseif clip.current_slot then
+				clip:freeze_from_source()
+				clip:set_playback_loop(chunk_start, chunk_length)
+			else
+				clip:set_playback_loop(chunk_start, chunk_length)
+				clip:freeze_buffer()
+			end
+
+			self.mode:reset_alt()
+			self:open_range_action_menu(clip, chunk_start, chunk_end)
+			self:set_grid(buffer_now)
+			self:update_row_pads()
+		end)
+		return
 	end
 
 	-- Handle pad press (start/update scrub)
@@ -1123,6 +1259,7 @@ function BufferSeq:alt_event(data)
 	end
 
 	if data.state and self.mode.alt then
+		self:cancel_alt_single_pad_defer()
 		-- Alt mode activated
 		local buffer = self:get_component()
 		local track = buffer and buffer.track or nil
@@ -1156,6 +1293,7 @@ function BufferSeq:alt_event(data)
 			end
 		end)
 	elseif data.state then
+		self:cancel_alt_single_pad_defer()
 		-- Alt mode deactivated - stop blinking
 		self:end_blink()
 		self.index = nil

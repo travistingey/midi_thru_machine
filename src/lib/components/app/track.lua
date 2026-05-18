@@ -440,8 +440,8 @@ function Track:set(o)
 		self:build_chain()
 	end)
 
-	-- Clip slot: 0 = live buffer, 1–16 = bank slot (preset + launch on transport start)
-	Registry.add('add_number', track .. 'clip_slot', 'Clip Slot', 0, 16, 0, function(param)
+	-- Clip slot: 0 = live buffer, 1..Clip.MAX_BANK_SLOTS = bank slot (preset + launch on transport start)
+	Registry.add('add_number', track .. 'clip_slot', 'Clip Slot', 0, Clip.MAX_BANK_SLOTS, 0, function(param)
 		local v = param:get()
 		if v == 0 then return 'live' end
 		return tostring(v)

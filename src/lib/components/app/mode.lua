@@ -988,8 +988,12 @@ function Mode:disable()
 	self:cancel_context({ pop = false })
 	self:cancel_toast()
 	self.enabled = false
-	-- reset alt
-	self:emit('alt_reset')
+	-- Clear alt state and refresh the alt-pad LED. The previous code only
+	-- emitted the alt_reset event, leaving self.alt = true if the user had
+	-- toggled it on before switching modes; the next mode's first gesture
+	-- could then be misinterpreted as an alt action. reset_alt() does the
+	-- full job (state + LED + event).
+	self:reset_alt()
 
 	self.grid:disable()
 

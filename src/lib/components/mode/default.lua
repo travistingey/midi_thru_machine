@@ -517,7 +517,7 @@ function Default:track_menu()
 		label_fn = function() return 'CLIP SLOT' end,
 		requires_confirmation = true,
 		helper_labels = {
-			enc3 = '0 live · 1-16 bank',
+			enc3 = '0 live · 1-32 bank',
 		},
 	})
 

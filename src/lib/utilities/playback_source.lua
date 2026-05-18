@@ -300,17 +300,44 @@ function ClipBankSource.new(config)
 end
 
 -- Load from clip bank entry.
--- Deep-copies bank_entry.buffer so the playback source owns its events.
--- This keeps the bank entry on disk authoritative: edits made through the
--- frozen editing surface flow back to the bank entry only via the explicit
--- save_edits_* paths, never via accidental aliasing.
+--
+-- IMPORTANT: this runs synchronously on the clock tick at clip-launch sync
+-- boundaries. Any heavy work here translates directly to clock jitter that
+-- downstream gear (e.g. Pamela's New Workout) can interpret as a transport
+-- restart. We therefore SHARE bank_entry.buffer by reference instead of
+-- deep-copying it — that deep copy used to allocate one outer table plus N
+-- per-tick arrays plus N event tables plus K field copies per event, which
+-- on a 16-bar rich clip is thousands of allocations on the hot path.
+--
+-- Sharing is safe because:
+--   * The bank entry was deep-copied at save time (save_clip_to_bank /
+--     save_edits_to_current_slot both build a fresh `clip_buffer` from a
+--     deep-copy_sparse of the source). The bank entry is therefore already
+--     independent of the live recording buffer and any other clip.
+--   * Playback only READS via store:get(tick). No code path mutates the
+--     clip_bank source's events.
+--   * Editing flows go through Clip:freeze_from_source which itself calls
+--     deep_copy_sparse_all into the FrozenBufferSource. The frozen surface
+--     owns its own copy; the shared bank_entry.buffer reference is never
+--     mutated through that path.
+--
+-- We also skip from_sparse_table's ticks-array sort: ClipBankSource at
+-- runtime only does sparse get(tick) lookups; range queries are not used
+-- on this source. The store.ticks list stays empty (or whatever was left
+-- over from a previous tenant), and that's fine.
 function ClipBankSource:load_from_bank_entry(bank_entry, slot)
 	self.slot = slot
 	self.name = bank_entry.name
 
-	local fresh_buffer = EventStore.deep_copy_sparse_all(bank_entry.buffer)
-	self.store:from_sparse_table(fresh_buffer)
-	self.events = self.store.events
+	-- Share the bank entry's events. self.events is the public alias used
+	-- by Clip set_playback_loop's reslice path; self.store.events is what
+	-- store:get(tick) reads.
+	self.events = bank_entry.buffer
+	self.store.events = bank_entry.buffer
+	-- Clear any leftover ticks array from a previous load. Empty is fine
+	-- because get(tick) only reads events[tick]; if a future code path needs
+	-- ordered iteration on a clip-bank source it should rebuild this lazily.
+	self.store.ticks = {}
 
 	self.loop_length = bank_entry.length or 0
 	self.original_loop_start = bank_entry.loop_start

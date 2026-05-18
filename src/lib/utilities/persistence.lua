@@ -272,8 +272,10 @@ function Persistence.collect_state()
 				bank = {},
 			}
 
-			-- Collect bank slot metadata (filenames and settings, not full buffer data)
-			for slot = 1, 16 do
+			-- Collect bank slot metadata (filenames and settings, not full buffer data).
+			-- Slot count must match Clip.MAX_BANK_SLOTS in clip.lua. We hardcode 32 here
+			-- to avoid a require cycle (clip.lua already requires this module).
+			for slot = 1, 32 do
 				if clip.clip_bank[slot] then
 					state.clips[i].bank[slot] = {
 						filename = clip.clip_bank[slot].filename,
@@ -373,9 +375,11 @@ function Persistence.restore_state(state)
 			if state.clips[i] and App.track[i] and App.track[i].clip then
 				local clip = App.track[i].clip
 
-				-- Restore bank slot metadata
+				-- Restore bank slot metadata.
+				-- Slot count must match Clip.MAX_BANK_SLOTS in clip.lua (hardcoded
+				-- here to avoid a require cycle).
 				if state.clips[i].bank then
-					for slot = 1, 16 do
+					for slot = 1, 32 do
 						if state.clips[i].bank[slot] then
 							local slot_data = state.clips[i].bank[slot]
 							-- Load the actual clip file

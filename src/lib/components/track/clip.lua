@@ -19,6 +19,15 @@ Clip.name = 'clip'
 Clip.__index = Clip
 setmetatable(Clip, { __index = TrackComponent })
 
+-- Number of bank slots a track exposes. The clipgrid is laid out as an 8x4
+-- pad area (32 pads), the menu's clip-slot picker iterates 1..32, and the
+-- per-track clip_slot param ranges 0..MAX_BANK_SLOTS. Persistence
+-- (save_bank_metadata / load_bank_metadata, Persistence.collect_state /
+-- restore_state) iterates 1..MAX_BANK_SLOTS so every slot survives a script
+-- reload. If you change this value, audit grid layouts and the menu's
+-- max_clip_slot_select to keep them in sync.
+Clip.MAX_BANK_SLOTS = 32
+
 function Clip:new(o)
 	o = o or {}
 	setmetatable(o, self)
@@ -63,8 +72,8 @@ function Clip:set(o)
 	-- Uses App-level launch_sync_length instead of per-track action_sync_length
 	self.sync_manager = SyncManager.new(self, function(component) return App.launch_sync_length or (App.ppqn * 4) end)
 
-	-- Clip bank management
-	self.clip_bank = {} -- 16 slots: {[1-16] = nil or {filename, name, buffer, playback_settings}}
+	-- Clip bank management. Slot count is Clip.MAX_BANK_SLOTS (see top of file).
+	self.clip_bank = {}
 	self.current_slot = nil -- Which slot is currently playing (nil = live buffer)
 
 	-- PlaybackSource instances (unified abstraction)
@@ -556,7 +565,7 @@ function Clip:apply_clip_slot_on_transport_start()
 	local pid = 'track_' .. self.track.id .. '_clip_slot'
 	local slot = params:get(pid) or 0
 	if slot < 0 then slot = 0 end
-	if slot > 16 then slot = 16 end
+	if slot > Clip.MAX_BANK_SLOTS then slot = Clip.MAX_BANK_SLOTS end
 	if slot == 0 then
 		-- Only queue an unload when an actual clip is loaded; never touch buffer_frozen here.
 		if self.current_slot then self:queue_clip_slot_unload() end
@@ -1126,6 +1135,21 @@ end
 --- Load a clip from bank slot into playback
 -- @param bank_slot number The bank slot (positive integer)
 -- @return boolean True if load succeeded
+-- Load a clip from the bank and play it directly (unfrozen).
+--
+-- This runs synchronously on a clock tick at the launch sync boundary, so
+-- it is on the critical path for transport stability — every allocation
+-- and every print here translates to clock jitter visible to downstream
+-- gear. Several deliberate choices:
+--   * The ClipBankSource is REUSED across launches when one already exists
+--     (no fresh EventStore allocation on every clip change).
+--   * load_from_bank_entry shares bank_entry.buffer by reference (see the
+--     comment on that function for why this is safe).
+--   * If the buffer was frozen for editing, we unfreeze first so the new
+--     clip plays directly from the bank entry without an editing surface
+--     left in the way. This matches the user-facing "launch a clip = play
+--     it as recorded" semantic.
+--   * The success print is debug-gated; stdio writes can stall the clock.
 function Clip:load_clip_from_bank(bank_slot)
 	if bank_slot < 1 then
 		print('Clip: Invalid bank slot ' .. bank_slot .. ' (must be positive)')
@@ -1137,13 +1161,24 @@ function Clip:load_clip_from_bank(bank_slot)
 		return false
 	end
 
-	-- Kill notes when loading a clip to prevent stuck notes from previous playback
-	if App.playing then self:kill_notes() end
+	-- Drop any frozen editing surface so the launched clip plays directly
+	-- from the bank entry rather than through a stale frozen view.
+	-- unfreeze_buffer issues its own kill_notes when transport is playing,
+	-- so we only need a separate kill_notes when we DIDN'T need to unfreeze.
+	-- This avoids sending two redundant all-notes-off bursts on launch.
+	local killed_during_unfreeze = false
+	if self.buffer_frozen then
+		self:unfreeze_buffer()
+		killed_during_unfreeze = App.playing
+	end
 
-	-- Create and activate ClipBankSource
-	self.sources.clip_bank = PlaybackSources.ClipBankSource.new({
-		slot = bank_slot,
-	})
+	if App.playing and not killed_during_unfreeze then self:kill_notes() end
+
+	-- Reuse the existing ClipBankSource if we have one — no need to alloc
+	-- a fresh PlaybackSource (with its own EventStore) on every launch.
+	if not self.sources.clip_bank then
+		self.sources.clip_bank = PlaybackSources.ClipBankSource.new({ slot = bank_slot })
+	end
 	self.sources.clip_bank:load_from_bank_entry(self.clip_bank[bank_slot], bank_slot)
 	self.sources.clip_bank:activate()
 	self.active_source = self.sources.clip_bank
@@ -1158,7 +1193,8 @@ function Clip:load_clip_from_bank(bank_slot)
 	self:emit('clip_loaded', { bank_slot = bank_slot })
 	self.track:update_monitor_state()
 	self.track:sync_clip_slot_param()
-	print('Clip: Loaded clip from bank slot ' .. bank_slot)
+
+	if flags.debug_clip then print('Clip: Loaded clip from bank slot ' .. bank_slot) end
 	return true
 end
 
@@ -1298,7 +1334,7 @@ function Clip:save_bank_metadata()
 	}
 
 	-- Collect slot metadata
-	for slot = 1, 16 do
+	for slot = 1, Clip.MAX_BANK_SLOTS do
 		if self.clip_bank[slot] then
 			bank_data.slots[slot] = {
 				filename = self.clip_bank[slot].filename,
@@ -1319,7 +1355,7 @@ function Clip:load_bank_metadata()
 	if not bank_data or not bank_data.slots then return end
 
 	-- Load clips from metadata
-	for slot = 1, 16 do
+	for slot = 1, Clip.MAX_BANK_SLOTS do
 		if bank_data.slots[slot] then
 			local slot_data = bank_data.slots[slot]
 			local clip_data = Persistence.load_clip_file(self.track.id, slot_data.filename)

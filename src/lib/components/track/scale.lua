@@ -14,6 +14,14 @@ local MIDI_LATCH_MODE = 6
 local MIDI_LOCK_MODE = 7
 
 local ALL = musicutil.CHORDS
+
+-- Hoisted constants for follow_scale's pentatonic detection path. These were
+-- previously re-computed via intervals_to_bits on every follow_scale call.
+local PENTATONIC_MAJOR_TRIAD_BITS = musicutil.intervals_to_bits({ 0, 4 })
+local PENTATONIC_MINOR_TRIAD_BITS = musicutil.intervals_to_bits({ 0, 3 })
+local PENTATONIC_MAJOR_BITS = 661
+local PENTATONIC_MINOR_BITS = 1193
+local PENTATONIC_FALLBACK_BITS = 1
 local PLAITS = {
 	musicutil.interval_lookup[1],
 	musicutil.interval_lookup[129],
@@ -63,8 +71,35 @@ function Scale:set(o)
 	self.lock = false
 	self.lock_cc = 64
 
+	-- Reusable scratch buffers (avoid per-event table allocations on the
+	-- MIDI hot path). These are owned by the scale and never shared.
+	self._lock_merge_buf = {} -- merged track.note_on + latch_notes for MIDI_LOCK
+	self.notes = {} -- materialized note ladder, rebuilt in place by set_scale
+
+	-- bits → chord_set index map. Rebuilt whenever chord_set changes so
+	-- chord_id can short-circuit the linear scan in the common exact-match
+	-- case (musicutil.CHORDS has hundreds of entries; the fast-path was
+	-- still O(n) before this cache).
+	self._chord_set_index = self:_build_chord_set_index(self.chord_set)
+
 	self.event_listeners = {}
 	self.current_preset = o.preset or 1
+end
+
+-- Build a bits → index lookup for chord_set so chord_id can resolve an exact
+-- match in O(1). Only the first index for any given bits value is recorded
+-- (matches the original linear-scan behavior, which returned the first match).
+function Scale:_build_chord_set_index(chord_set)
+	local index = {}
+	if not chord_set then return index end
+	for i = 1, #chord_set do
+		local entry = chord_set[i]
+		if entry and entry.bits then
+			local masked = entry.bits & 0xFFF
+			if index[masked] == nil then index[masked] = i end
+		end
+	end
+	return index
 end
 
 function Scale:register_params()
@@ -140,8 +175,10 @@ function Scale:register_params()
 
 		if d == 1 then
 			self.chord_set = musicutil.CHORDS
+			self._chord_set_index = self:_build_chord_set_index(self.chord_set)
 		elseif d == 2 then
 			self.chord_set = PLAITS
+			self._chord_set_index = self:_build_chord_set_index(self.chord_set)
 		elseif d == 3 then
 			-- Build a chord set from the current preset bank for this scale
 			local preset_bank = App.preset or {}
@@ -182,6 +219,7 @@ function Scale:register_params()
 				self.chord_set = musicutil.CHORDS
 				Registry.set(scale .. 'chord_set', 1, 'chord_set_fallback')
 			end
+			self._chord_set_index = self:_build_chord_set_index(self.chord_set)
 		end
 	end)
 
@@ -213,36 +251,44 @@ function Scale:set_scale(bits)
 	local old_bits = self.bits or 0
 	local new_bits = bits
 
-	-- Early exit if bits haven't changed and notes are already built
-	-- This prevents unnecessary rebuilding during MIDI following
-	if old_bits == new_bits and self.notes and #self.notes > 0 then
-		return
-	end
+	-- Early exit if bits haven't changed and notes are already built.
+	-- This is the common case during MIDI following — a clip retrigger or a
+	-- repeated note that happens to map to the same chord shouldn't pay any
+	-- rebuild cost.
+	if old_bits == new_bits and self.notes and #self.notes > 0 then return end
 
-	-- Identify changed bits using XOR
 	local changed_bits = old_bits ~ new_bits
 	local changed_notes = musicutil.bits_to_intervals(changed_bits)
 
-	-- for i, note in ipairs(changed_notes) do
-	-- 	changed_notes[i] = (note + self.root) % 12
-	-- end
-
 	self.bits = bits
 	self.intervals = musicutil.bits_to_intervals(bits)
-	
-	-- Rebuild notes array (only happens when bits actually change or first time)
-	-- Note: root changes don't require rebuilding notes since root is applied in quantize_note()
-	self.notes = {}
 
+	-- Rebuild the materialized note ladder IN PLACE rather than allocating a
+	-- fresh table. This is on the hot path for live following and used to
+	-- churn ~70 entries of garbage per scale change. We overwrite up through
+	-- the new size and then nil-clear any trailing entries left over from a
+	-- previously-larger scale so #self.notes returns the correct length.
+	local notes = self.notes
+	local intervals = self.intervals
+	local interval_count = #intervals
+	local new_size = 10 * interval_count
+	local idx = 1
 	for oct = 1, 10 do
-		for i = 1, #self.intervals do
-			self.notes[(oct - 1) * #self.intervals + i] = self.intervals[i] + (oct - 1) * 12
+		for i = 1, interval_count do
+			notes[idx] = intervals[i] + (oct - 1) * 12
+			idx = idx + 1
 		end
 	end
+	-- Trim leftovers from a previous larger scale.
+	local prev_size = self._notes_size or 0
+	if prev_size > new_size then
+		for i = new_size + 1, prev_size do notes[i] = nil end
+	end
+	self._notes_size = new_size
 
 	Registry.set('scale_' .. self.id .. '_bits', bits, 'scale_bits_update')
 
-	if #self.intervals > 2 then self.chord = self:chord_id() end
+	if interval_count > 2 then self.chord = self:chord_id() end
 
 	-- Send interrupt request to stop changed notes
 	self:emit('interrupt', changed_notes)
@@ -277,28 +323,18 @@ function Scale:chord_id(bits)
 	bits = bits or self.bits
 	bits = bits & 0xFFF -- Ensure bits are in 12-bit range
 
-	-- Fast path: Check for exact match in interval_lookup first
+	-- Fast path: exact match against the global interval_lookup table.
+	-- The chord_set index resolves the index in self.chord_set in O(1),
+	-- replacing what used to be a linear scan over potentially hundreds of
+	-- chord entries on every set_scale call.
 	local exact_match = musicutil.interval_lookup[bits]
 	if exact_match then
-		-- Try to find the index in chord_set for this exact match
-		-- This is still O(n) but only happens when we have an exact match
-		for i = 1, #self.chord_set do
-			if (self.chord_set[i].bits & 0xFFF) == bits then
-				local chord = {}
-				for k, v in pairs(exact_match) do
-					chord[k] = v
-				end
-				chord.index = i
-				return chord
-			end
-		end
-		-- If exact match exists but not in current chord_set, return it anyway
-		-- This handles cases where chord_set is a subset (e.g., PLAITS)
 		local chord = {}
-		for k, v in pairs(exact_match) do
-			chord[k] = v
-		end
-		chord.index = 1 -- Default index when not found in chord_set
+		for k, v in pairs(exact_match) do chord[k] = v end
+		local idx = self._chord_set_index and self._chord_set_index[bits] or nil
+		-- If the exact match isn't in the current chord_set (e.g. PLAITS
+		-- subset), fall back to index 1 to match the legacy behavior.
+		chord.index = idx or 1
 		return chord
 	end
 
@@ -350,20 +386,16 @@ function Scale:follow_scale(notes)
 			self:shift_scale_to_note(other.root)
 			Registry.set(scale .. 'root', other.root, 'scale_follow_degree')
 		elseif self.follow_method == PENTATONIC_MODE and not self.lock then
-			-- Pentatonic
-			local major = musicutil.intervals_to_bits({ 0, 4 })
-			local minor = musicutil.intervals_to_bits({ 0, 3 })
-
-			if other.bits & major == major then
-				self:set_scale(661)
+			if other.bits & PENTATONIC_MAJOR_TRIAD_BITS == PENTATONIC_MAJOR_TRIAD_BITS then
+				self:set_scale(PENTATONIC_MAJOR_BITS)
 				self.root = other.root
-				Registry.set(scale .. 'root', other.root, 'scale_follow_pentatonic_major') -- We need to keep the params silent to avoid a loop
-			elseif other.bits & minor == minor then
-				self:set_scale(1193)
+				Registry.set(scale .. 'root', other.root, 'scale_follow_pentatonic_major')
+			elseif other.bits & PENTATONIC_MINOR_TRIAD_BITS == PENTATONIC_MINOR_TRIAD_BITS then
+				self:set_scale(PENTATONIC_MINOR_BITS)
 				self.root = other.root
 				Registry.set(scale .. 'root', other.root, 'scale_follow_pentatonic_minor')
 			else
-				self:set_scale(1)
+				self:set_scale(PENTATONIC_FALLBACK_BITS)
 				self.root = other.root
 				Registry.set(scale .. 'root', other.root, 'scale_follow_pentatonic_other')
 			end
@@ -376,18 +408,34 @@ function Scale:follow_scale(notes)
 				Registry.set(scale .. 'root', other.root + self.chord.root, 'scale_follow_chord')
 			end
 		elseif self.follow_method > CHORD_MODE and notes then
-			-- MIDI controlled
-			local n = {}
+			-- MIDI-driven follow. Reuse a per-scale scratch buffer for the
+			-- normalized interval list instead of allocating per call.
+			local n = self._follow_buf
+			if not n then
+				n = {}
+				self._follow_buf = n
+			end
+			local count = 0
 			local min = nil
 
 			for note in pairs(notes) do
 				if not min or note < min then min = note end
-				n[#n + 1] = note
+				count = count + 1
+				n[count] = note
 			end
+			-- Trim leftovers from a previous larger held set so #n is correct
+			-- when intervals_to_bits reads the array length.
+			local prev = self._follow_buf_size or 0
+			if prev > count then
+				for i = count + 1, prev do n[i] = nil end
+			end
+			self._follow_buf_size = count
 
-			for i = 1, #n do
-				n[i] = (n[i] - min) % 12
-			end
+			-- Note: when count == 0 we still call intervals_to_bits (returning 0)
+			-- and set_scale(0). This is the intended "no scale" state for
+			-- MIDI_ON when all keys are released, and quantize_note has a
+			-- bits == 0 fast path for it.
+			for i = 1, count do n[i] = (n[i] - min) % 12 end
 
 			local s = musicutil.intervals_to_bits(n)
 			if s > 0 then self.root = min % 12 end
@@ -418,79 +466,98 @@ function Scale:quantize_note(data)
 	end
 end
 
+-- Process a MIDI event for this scale.
+--
+-- Two responsibilities, split cleanly:
+--   1. FOLLOW STATE UPDATES — only when the event came from LIVE INPUT on the
+--      configured follow track. Clip-played notes (data.buffer_sent set) are
+--      explicitly excluded so they can't pollute latch state. This is what
+--      lets a clip play on the follow track while the user's keyboard
+--      continues to drive scale follow without "stumbling".
+--   2. NOTE QUANTIZATION — applied to non-follow-track notes (or any note
+--      that bypassed the follow logic). The follow track's own notes are
+--      passed through unchanged so the keyboard plays its own melody.
+--
+-- The follow gate is checked once at the top instead of repeated in three
+-- per-mode branches; this also makes the live-vs-clip discriminator obvious.
 function Scale:midi_event(data, track)
-	if data.note then
-		if track.input_type == 'chord' and data.type == 'note_on' then
-			data.index = self.chord.index
-			data.new_note = self.root + 36
+	if not data.note then return data end
 
-			return data
-		elseif self.follow_method == MIDI_ON_MODE and (data.type == 'note_on' or data.type == 'note_off') and track.id == self.follow then
+	if track.input_type == 'chord' and data.type == 'note_on' then
+		data.index = self.chord.index
+		data.new_note = self.root + 36
+		return data
+	end
+
+	-- Follow-track gate: this event might affect scale follow state IF...
+	--   - this scale's follow_method is one of the MIDI-driven modes,
+	--   - the event is a note on/off,
+	--   - the event came from the configured follow track,
+	--   - AND the event came from LIVE input (not clip playback).
+	-- Anything that fails this gate falls through to quantize_note below,
+	-- which is the correct semantic for non-follow tracks AND for clip notes
+	-- on the follow track (we still want them to be reharmonized).
+	local is_follow_track = (track.id == self.follow)
+	local is_note_event = (data.type == 'note_on' or data.type == 'note_off')
+	local is_live_input = not data.buffer_sent
+
+	if is_follow_track and is_note_event and is_live_input and self.follow_method >= MIDI_ON_MODE then
+		if self.follow_method == MIDI_ON_MODE then
 			if self.lock and data.type == 'note_on' then
-				for k, v in pairs(track.note_on) do
-					self.latch_notes[k] = v
-				end
-
+				for k, v in pairs(track.note_on) do self.latch_notes[k] = v end
 				self:follow_scale(self.latch_notes)
 			elseif not self.lock then
 				self:follow_scale(track.note_on)
 			end
-
 			return data
-		elseif self.follow_method == MIDI_LOCK_MODE and (data.type == 'note_on' or data.type == 'note_off') and track.id == self.follow then
+		elseif self.follow_method == MIDI_LOCK_MODE then
 			if self.lock and data.type == 'note_on' then
-				for k, v in pairs(track.note_on) do
-					self.latch_notes[k] = v
-				end
-
+				for k, v in pairs(track.note_on) do self.latch_notes[k] = v end
 				self:follow_scale(self.latch_notes)
 			elseif not self.lock then
-				local notes = {}
-				for k, v in pairs(track.note_on) do
-					notes[k] = v
-				end
-
-				for k, v in pairs(self.latch_notes) do
-					notes[k] = v
-				end
-
-				self:follow_scale(notes)
+				-- Reuse a per-scale merge buffer instead of allocating a fresh
+				-- table on every event. The buffer is built fresh each call
+				-- from track.note_on + latch_notes; trailing entries from a
+				-- previous larger merge are nil-cleared to keep iteration
+				-- accurate when latch_notes shrinks.
+				local merged = self._lock_merge_buf
+				for k in pairs(merged) do merged[k] = nil end
+				for k, v in pairs(track.note_on) do merged[k] = v end
+				for k, v in pairs(self.latch_notes) do merged[k] = v end
+				self:follow_scale(merged)
 			end
-
 			return data
-		elseif self.follow_method == MIDI_LATCH_MODE and (data.type == 'note_on' or data.type == 'note_off') and track.id == self.follow then
-			local count = 0
+		elseif self.follow_method == MIDI_LATCH_MODE then
 			if self.lock and data.type == 'note_on' then
-				for k, v in pairs(track.note_on) do
-					self.latch_notes[k] = v
-					count = count + 1
-				end
-
+				for k, v in pairs(track.note_on) do self.latch_notes[k] = v end
 				self:follow_scale(self.latch_notes)
 			elseif not self.lock then
-				for n in pairs(track.note_on) do
-					count = count + 1
-				end
-
-				if data.type == 'note_off' and count == 0 then
-					self.reset_latch = true
-				elseif data.type == 'note_on' then
+				if data.type == 'note_off' then
+					-- Use next() instead of counting via a full pairs() loop;
+					-- we only need to know whether ANY live note is held.
+					if next(track.note_on) == nil then self.reset_latch = true end
+				else
 					if self.reset_latch then
-						self.latch_notes = {}
+						-- Reuse the existing latch_notes table by clearing it
+						-- in place rather than allocating a new table.
+						for k in pairs(self.latch_notes) do self.latch_notes[k] = nil end
 						self.reset_latch = false
 					end
-					self.latch_notes[data.note] = data
-					self:follow_scale(self.latch_notes)
+					-- Skip follow_scale when the note is already latched: the
+					-- note set hasn't changed, so the resulting bits won't
+					-- either, and set_scale would early-exit anyway after
+					-- doing all the prep work in follow_scale. Save the trip.
+					if self.latch_notes[data.note] == nil then
+						self.latch_notes[data.note] = data
+						self:follow_scale(self.latch_notes)
+					end
 				end
 			end
-
 			return data
-		else
-			return self:quantize_note(data)
 		end
-	else
-		return data
 	end
+
+	return self:quantize_note(data)
 end
 
 return Scale
