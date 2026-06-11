@@ -473,7 +473,14 @@ function Registry.menu.make_combo(left_id, right_id, opts)
 		local rc = row.requires_confirmation_left
 		if rc == nil then rc = row.requires_confirmation end
 		if type(rc) == 'function' then rc = rc(row, 'left') end
-		if rc then return default_left_bump(d) end
+		if rc then
+			if opts.enc2 then
+				opts.enc2(d)
+				if type(row.on_set) == 'function' then pcall(row.on_set) end
+				return
+			end
+			return default_left_bump(d)
+		end
 		if opts.left_value_fn then
 			opts.left_value_fn(d)
 			if type(row.on_set) == 'function' then pcall(row.on_set) end
@@ -491,7 +498,14 @@ function Registry.menu.make_combo(left_id, right_id, opts)
 		local rc = row.requires_confirmation_right
 		if rc == nil then rc = row.requires_confirmation end
 		if type(rc) == 'function' then rc = rc(row, 'right') end
-		if rc then return default_right_bump(d) end
+		if rc then
+			if opts.enc3 then
+				opts.enc3(d)
+				if type(row.on_set) == 'function' then pcall(row.on_set) end
+				return
+			end
+			return default_right_bump(d)
+		end
 		if opts.enc3 then
 			opts.enc3(d)
 			if type(row.on_set) == 'function' then pcall(row.on_set) end

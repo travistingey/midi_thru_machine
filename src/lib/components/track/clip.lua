@@ -338,6 +338,26 @@ function Clip:freeze_buffer()
 	self:emit('buffer_frozen', { track_id = self.track.id })
 end
 
+-- Freeze the entire live recording buffer (buffer_start .. buffer_length).
+-- Used by alt+row for quick performance capture.
+function Clip:freeze_full_buffer()
+	if not self.buffer or not self.buffer.buffer_start or not self.buffer.buffer_length then
+		return false
+	end
+	if self.buffer_frozen then return false end
+
+	if self.active_source == self.sources.scrub then
+		self:clear_pending_scrub()
+		self:stop_scrub()
+	end
+
+	local loop_start = self.buffer.buffer_start
+	local loop_length = self.buffer.buffer_length
+	self:set_playback_loop(loop_start, loop_length)
+	self:freeze_buffer()
+	return true
+end
+
 -- Unfreeze the buffer (clear frozen snapshot)
 function Clip:unfreeze_buffer()
 	local was_frozen = self.buffer_frozen

@@ -318,7 +318,12 @@ function Grid:process(d)
 						for k, v in pairs(data) do
 							long_press_data[k] = v
 						end
-						long_press_data.type = 'pad_long'
+						-- Row pads use row_long so modes can toggle record arm without pad gestures.
+						if data.type == 'row' then
+							long_press_data.type = 'row_long'
+						else
+							long_press_data.type = 'pad_long'
+						end
 						long_press_data.hold_time = hold_time
 
 						long_press_data.pad_down = self.pad_down

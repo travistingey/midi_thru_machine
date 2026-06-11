@@ -51,6 +51,10 @@ local SessionMode = Mode:new({
 		App.screen_dirty = true
 	end,
 	row_event = function(self, data)
+		if data.type == 'row_long' then
+			clipgrid:row_event(data)
+			return
+		end
 		if data.state then
 			-- Let clipgrid handle row events
 			-- It will update row pads internally

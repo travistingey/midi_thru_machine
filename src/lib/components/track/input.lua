@@ -260,7 +260,6 @@ Input.types['bitwise'] = {
 		s.vel = Bitwise:new({
 			format = function(value) return math.floor(value * 127) end,
 		})
-
 	end,
 	process = function(s, data)
 		s.note.chance = s.track.chance
@@ -274,13 +273,11 @@ Input.types['bitwise'] = {
 		s.note:mutate(s.index)
 		s.vel:mutate(s.index)
 
-		if s.note:get(s.index).state then
-			return {
-				type = 'note_on',
-				note = s.note:get(s.index).value,
-				vel = s.vel:get(s.index).value,
-			}
-		end
+		if s.note:get(s.index).state then return {
+			type = 'note_on',
+			note = s.note:get(s.index).value,
+			vel = s.vel:get(s.index).value,
+		} end
 	end,
 }
 

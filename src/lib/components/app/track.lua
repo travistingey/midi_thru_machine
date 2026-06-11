@@ -15,6 +15,19 @@ local Output = require(path_name .. 'output')
 -- Define a new class for Track
 local Track = {}
 
+local function crow_hardware_id()
+	if App and App.crow and App.crow.id then return App.crow.id end
+	local port_count = App and App.device_manager and App.device_manager.midi_port_count or 0
+	return port_count + 2
+end
+
+local function is_crow_device_out_selection(d, output_device_names)
+	if not d then return false end
+	if output_device_names and output_device_names[d] == 'Crow' then return true end
+	-- Older presets may store the crow hardware id instead of the option index.
+	return d == crow_hardware_id()
+end
+
 -- Constructor
 function Track:new(o)
 	o = o or {}
@@ -76,7 +89,7 @@ function Track:set(o)
 
 	local track = 'track_' .. self.id .. '_'
 
-	Registry.add('add_group', 'Track ' .. self.id, 29)
+	Registry.add('add_group', 'Track ' .. self.id, 30)
 
 	Registry.add('add_text', track .. 'name', 'Name', self.name)
 	Registry.set_action(track .. 'name', function(d) self.name = d end)
@@ -88,10 +101,6 @@ function Track:set(o)
 			self.note_on[data.note] = data
 		elseif data.type == 'note_off' then
 			self.note_on[data.note] = nil
-		elseif data.type == 'cc' then
-			-- if self.midi_in > 0 and data.ch == self.midi_in then
-			-- 	self:emit('cc_event', data)
-			-- end
 		end
 	end
 
@@ -104,6 +113,8 @@ function Track:set(o)
 	end)
 
 	self:on('cc_event', function(data)
+		if data.type == 'cc' then data.ch = self.midi_out end
+
 		if self.output_device then self.output_device:send(data) end
 	end)
 
@@ -111,11 +122,9 @@ function Track:set(o)
 	self:on('midi_trigger', input_event)
 	self:on('mute_input', function(state) self.mute_input = state end)
 	self:on('record_buffer', function(data)
-		-- Buffer always records output, including output from scrubbing, clips, and frozen buffer
-		-- Recording happens at buffer.tick (continuously advancing), while playback uses different
-		-- tick positions (scrub tick, clip tick, etc.), so recording at buffer.tick won't cause feedback
-		-- Always record to buffer when transport is playing
-		if App.playing and self.buffer then self.buffer:record_buffer(data) end
+		-- Buffer records output when transport is playing and this track's buffer is armed.
+		-- Disarmed tracks skip MIDI capture and buffer transport clock work (performance).
+		if App.playing and self.buffer and self.buffer_armed then self.buffer:record_buffer(data) end
 	end)
 
 	-- Device In/Out
@@ -162,28 +171,20 @@ function Track:set(o)
 		output_devices_abbr[#output_devices_abbr + 1] = abbr
 	end
 	output_devices_abbr[#output_devices_abbr + 1] = 'Crow'
+	self.output_device_names = output_devices
+	self.crow_device_out_option = #output_devices_abbr
 	Registry.add('add_option', track .. 'device_out', 'Device Out', output_devices_abbr, 2)
 	Registry.set_action(track .. 'device_out', function(d)
-		local new_device = App.device_manager:get(d)
-		if output_devices[d] ~= 'Crow' and (not new_device or not new_device.send) then
-			print('Device Out set to empty slot ' .. d .. '; ignoring')
-			return
+		if not is_crow_device_out_selection(d, output_devices) then
+			local new_device = App.device_manager:get(d)
+			if not new_device or not new_device.send then
+				print('Device Out set to empty slot ' .. d .. '; ignoring')
+				return
+			end
 		end
 
-		self.device_out = d
-		if output_devices[d] == 'Crow' then
-			-- Switch to Crow output type
-			Registry.set(track .. 'output_type', 2, 'device_out_select') -- 2 = crow
-			self.output_type = 'crow'
-			-- keep output_device as-is for crow; Output component uses App.crow
-		else
-			-- Ensure MIDI output type and set selected MIDI device
-			Registry.set(track .. 'output_type', 1, 'device_out_select') -- 1 = midi
-			self.output_type = 'midi'
-			self.output_device = App.device_manager:get(d)
-		end
-		self:load_component(Output)
-		self:enable()
+		self:kill()
+		self:apply_output_routing(d, { source = 'device_out_select' })
 	end)
 
 	-- Input Type
@@ -207,9 +208,24 @@ function Track:set(o)
 	Registry.add('add_option', track .. 'output_type', 'Output Type', Output.options, 1)
 	Registry.set_action(track .. 'output_type', function(d)
 		self:kill()
-		self.output_type = Output.options[d]
-		self:load_component(Output)
-		self:enable()
+		local requested = Output.options[d]
+		local device_out_id = track .. 'device_out'
+		local current_device_out = params:get(device_out_id)
+
+		if requested == 'crow' then
+			if not is_crow_device_out_selection(current_device_out, output_devices) then
+				Registry.set(device_out_id, self.crow_device_out_option, 'output_type_select')
+			else
+				self:apply_output_routing(current_device_out, { source = 'output_type_select' })
+			end
+		elseif is_crow_device_out_selection(current_device_out, output_devices) then
+			local midi_port_count = App.device_manager.midi_port_count or 0
+			local fallback = self.output_device and self.output_device.id or 2
+			fallback = util.clamp(fallback, 1, math.max(1, midi_port_count))
+			Registry.set(device_out_id, fallback, 'output_type_select')
+		else
+			self:apply_output_routing(current_device_out, { source = 'output_type_select' })
+		end
 	end)
 
 	-- MIDI In
@@ -523,9 +539,12 @@ function Track:set(o)
 
 	Registry.add('add_option', track .. 'crow_out', 'Crow Out', crow_options, 1)
 	Registry.set_action(track .. 'crow_out', function(d)
-		self:kill()
 		self.crow_out = d
-		if self.output_type == 'crow' then self.output = App.crow.output[d] end
+		if self.output_type == 'crow' then
+			-- Reload Output component only; never assign self.output to App.crow.output
+			-- (that table overwrote the component and broke process_midi routing).
+			self:load_component(Output)
+		end
 		self:enable()
 	end)
 
@@ -555,6 +574,16 @@ function Track:set(o)
 		else
 			self.mono = true
 		end
+	end)
+
+	-- Record buffer arm: when off, skip buffer MIDI capture and transport clock (performance)
+	self.buffer_armed = (o.buffer_armed ~= false)
+	Registry.add('add_binary', track .. 'buffer_arm', 'Record Arm', 'toggle', self.buffer_armed and 1 or 0)
+	Registry.set_action(track .. 'buffer_arm', function(d)
+		self.buffer_armed = (d > 0)
+		App.settings[track .. 'buffer_arm'] = d
+		self:emit('buffer_arm_changed')
+		App.screen_dirty = true
 	end)
 
 	-- Monitor (controls input flow: IN = always on, AUTO = on when not playing, OFF = never)
@@ -616,6 +645,41 @@ function Track:update(o, silent)
 	end
 end
 
+-- Apply device_out selection to runtime routing. Device Out is the source of truth;
+-- output_type param is kept in sync for presets.
+function Track:apply_output_routing(device_out_value, opts)
+	opts = opts or {}
+	local source = opts.source or 'output_routing'
+	local names = self.output_device_names
+
+	self.device_out = device_out_value
+
+	if is_crow_device_out_selection(device_out_value, names) then
+		self.output_type = 'crow'
+		if not opts.skip_output_type_param then Registry.set('track_' .. self.id .. '_output_type', 2, source, nil, true) end
+	else
+		local new_device = App.device_manager:get(device_out_value)
+		if not new_device or not new_device.send then
+			print('Device Out set to empty slot ' .. tostring(device_out_value) .. '; ignoring')
+			return false
+		end
+		self.output_type = 'midi'
+		self.output_device = new_device
+		if not opts.skip_output_type_param then Registry.set('track_' .. self.id .. '_output_type', 1, source, nil, true) end
+	end
+
+	self:load_component(Output)
+	self:enable()
+	return true
+end
+
+-- After params:default(), re-apply routing from device_out so load order cannot
+-- leave output_type and device_out disagreeing (which breaks crow output).
+function Track:reconcile_output_routing()
+	local device_out_value = params:get('track_' .. self.id .. '_device_out')
+	self:apply_output_routing(device_out_value, { source = 'reconcile' })
+end
+
 function Track:remove_trigger()
 	if self.input_device then self.input_device:remove_trigger(self) end
 end
@@ -662,6 +726,13 @@ function Track:emit(event_name, ...)
 			listener(...)
 		end
 	end
+end
+
+-- Toggle record-buffer arm (row-pad long press in session / drums modes)
+function Track:toggle_buffer_arm()
+	local pid = 'track_' .. self.id .. '_buffer_arm'
+	local next_val = self.buffer_armed and 0 or 1
+	Registry.set(pid, next_val, 'row_long')
 end
 
 -- Sync clip_slot param from clip state (silent — does not re-trigger launch)

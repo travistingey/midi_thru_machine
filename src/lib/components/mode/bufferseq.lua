@@ -219,9 +219,17 @@ function BufferSeq:enable_event()
 		)
 	end
 
-	-- Listen for buffer freeze/unfreeze events from all tracks to update row pad visualization
+	-- Listen for buffer freeze/unfreeze and record-arm changes on all tracks
 	for track_id = 1, 8 do
 		local track = App.track[track_id]
+		if track then
+			table.insert(
+				self.cleanup_functions,
+				track:on('buffer_arm_changed', function()
+					self:update_row_pads()
+				end)
+			)
+		end
 		if track and track.clip then
 			-- Listen for buffer frozen event
 			table.insert(
@@ -1305,21 +1313,35 @@ function BufferSeq:alt_event(data)
 end
 
 function BufferSeq:row_event(data)
+	if data.type == 'row_long' and data.row then
+		local track = App.track[data.row]
+		if track then
+			track:toggle_buffer_arm()
+			if flags.debug_clip then
+				print('BufferSeq: Track ' .. data.row .. ' record arm ' .. (track.buffer_armed and 'on' or 'off'))
+			end
+		end
+		self:update_row_pads()
+		return
+	end
+
 	if data.state then
-		-- If alt mode is active, unfreeze buffer for that track
+		-- Alt + row: freeze full buffer or unfreeze (symmetric quick capture)
 		if self.mode.alt then
 			local track = App.track[data.row]
-			if track and track.clip and track.clip.buffer_frozen then
-				track.clip:unfreeze_buffer()
-				if flags.debug_clip then print('Buffer unfrozen for track ' .. data.row) end
-				-- Update row pads to reflect unfrozen state
+			if track and track.clip then
+				if track.clip.buffer_frozen then
+					track.clip:unfreeze_buffer()
+					if flags.debug_clip then print('BufferSeq: Buffer unfrozen for track ' .. data.row) end
+				elseif track.clip:freeze_full_buffer() then
+					if flags.debug_clip then print('BufferSeq: Full buffer frozen for track ' .. data.row) end
+				end
 				self:update_row_pads()
-				-- Refresh grid if this is the current track
 				if data.row == App.current_track then
 					local buffer = self:get_component()
 					if buffer then self:set_grid(buffer) end
 				end
-				return -- Don't proceed with track switching
+				return
 			end
 		end
 
@@ -1374,17 +1396,21 @@ function BufferSeq:update_row_pads()
 			local is_frozen = track.clip and track.clip.buffer_frozen or false
 			local is_selected = (track_id == current_track)
 
+			local is_armed = track.buffer_armed or false
+
 			if is_frozen then
-				-- Frozen track: use rainbow color index 10
 				if is_selected then
-					-- Selected frozen track: bright color
 					self.mode.row_pads.led[9][row_y] = Grid.rainbow_on[10]
 				else
-					-- Unselected frozen track: dim color
 					self.mode.row_pads.led[9][row_y] = Grid.rainbow_off[10]
 				end
+			elseif is_armed then
+				if is_selected then
+					self.mode.row_pads.led[9][row_y] = Grid.rainbow_on[1]
+				else
+					self.mode.row_pads.led[9][row_y] = Grid.rainbow_off[1]
+				end
 			elseif is_selected then
-				-- Current track (not frozen): white (brightness 1)
 				self.mode.row_pads.led[9][row_y] = 1
 			end
 		end

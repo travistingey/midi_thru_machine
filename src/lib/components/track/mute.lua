@@ -44,6 +44,8 @@ function Mute:midi_event(data)
 		if self.active == true then state = true end
 
 		if not state then return data end
+	elseif data.type == 'pitchbend' then
+		return data
 	end
 end
 

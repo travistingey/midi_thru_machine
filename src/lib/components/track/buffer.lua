@@ -78,6 +78,8 @@ end
 -- Always records to buffer
 -- @param midi_event table The MIDI event to record
 function Buffer:record_buffer(midi_event)
+	if self.track and not self.track.buffer_armed then return end
+
 	-- Timing tracking (conditional on flag)
 	local record_start = flags.buffer_timing_stats and util.time() or nil
 
@@ -196,6 +198,14 @@ end
 
 -- Transport Event Handling
 function Buffer:transport_event(data)
+	if self.track and not self.track.buffer_armed then
+		if data.type == 'stop' and self.playing then
+			self.playing = false
+			self.open_notes = {}
+		end
+		return data
+	end
+
 	-- Timing tracking (conditional on flag)
 	local transport_start = flags.buffer_timing_stats and util.time() or nil
 

@@ -56,11 +56,11 @@ Output.types['crow'] = {
 			local voct = 1
 			local gate = 2
 
-			s.channel = 1
-			if s.channel == 1 then
+			local channel = track.crow_out or 1
+			if channel == 1 then
 				voct = 1
 				gate = 2
-			elseif s.channel == 2 then
+			elseif channel == 2 then
 				voct = 3
 				gate = 4
 			end

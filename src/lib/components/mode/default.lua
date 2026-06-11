@@ -262,7 +262,20 @@ function Default:default_menu()
 	local style = { inactive_color = 15, icon_inactive_color = 5, width = 80 }
 	local items = {
 		Registry.menu.make_item('track_' .. id .. '_midi_in', { disable = true, icon = '\u{2192}', label_fn = function() return App.track[id].input_device.abbr end, style = style }),
-		Registry.menu.make_item('track_' .. id .. '_midi_out', { disable = true, icon = '\u{2190}', label_fn = function() return App.track[id].output_device.abbr end, style = style }),
+		Registry.menu.make_item('track_' .. id .. '_device_out', {
+			disable = true,
+			icon = '\u{2190}',
+			label_fn = function()
+				local track = App.track[id]
+				if track.output_type == 'crow' then
+					local crow_value = Registry.menu.format_value('track_' .. id .. '_crow_out')
+					return 'CROW ' .. crow_value
+				end
+				return track.output_device.abbr
+			end,
+			value_fn = function() return '' end,
+			style = style,
+		}),
 	}
 	return items
 end
@@ -445,11 +458,14 @@ function Default:track_menu()
 			})
 		end,
 		alt_fn_3 = function() Registry.set('track_' .. id .. '_device_swap_trigger', 1, 'menu_swap') end,
-		helper_labels = {
-			enc1 = 'device',
-			enc3 = 'channel',
-			alt_fn_3 = 'swap',
-		},
+		helper_labels = function()
+			local enc3_label = (App.track[id].output_type == 'crow') and 'output' or 'channel'
+			return {
+				enc1 = 'device',
+				enc3 = enc3_label,
+				alt_fn_3 = 'swap',
+			}
+		end,
 	})
 
 	local out_row = Registry.menu.make_combo('track_' .. id .. '_device_out', 'track_' .. id .. '_midi_out', {
@@ -464,6 +480,13 @@ function Default:track_menu()
 				return Registry.menu.format_value('track_' .. id .. '_midi_out')
 			end
 		end,
+		enc3 = function(d)
+			if App.track[id].output_type == 'crow' then
+				Registry.menu.bump('track_' .. id .. '_crow_out', d)
+			else
+				Registry.menu.bump('track_' .. id .. '_midi_out', d)
+			end
+		end,
 		on_press = function()
 			self:sub_menu(self:output_menu(), {
 				status = { icon = id, label = 'OUTPUT' },
@@ -471,11 +494,14 @@ function Default:track_menu()
 			})
 		end,
 		alt_fn_3 = function() Registry.set('track_' .. id .. '_device_swap_trigger', 1, 'menu_swap') end,
-		helper_labels = {
-			enc1 = 'device',
-			enc3 = 'channel',
-			alt_fn_3 = 'swap',
-		},
+		helper_labels = function()
+			local enc3_label = (App.track[id].output_type == 'crow') and 'output' or 'channel'
+			return {
+				enc1 = 'device',
+				enc3 = enc3_label,
+				alt_fn_3 = 'swap',
+			}
+		end,
 	})
 
 	local type_row = Registry.menu.make_item('track_' .. id .. '_input_type', {
@@ -521,6 +547,17 @@ function Default:track_menu()
 		},
 	})
 
+	local buffer_arm_row = Registry.menu.make_item('track_' .. id .. '_buffer_arm', {
+		label_fn = function() return 'RECORD ARM' end,
+		value_fn = function()
+			local track = App.track[id]
+			return (track and track.buffer_armed) and 'armed' or 'off'
+		end,
+		helper_labels = {
+			enc3 = 'toggle',
+		},
+	})
+
 	local bitwise_row = Registry.menu.make_item('bitwise_tools', {
 		label_fn = function() return 'BITWISE' end,
 		value_fn = function() return 'tools' end,
@@ -537,7 +574,7 @@ function Default:track_menu()
 		},
 	})
 
-	local items = { in_row, out_row, type_row, scale_row, clip_slot_row, bitwise_row }
+	local items = { in_row, out_row, type_row, scale_row, clip_slot_row, buffer_arm_row, bitwise_row }
 
 	-- Additional track parameters (excluding note_range_upper)
 	local function add(id_suffix, opts)

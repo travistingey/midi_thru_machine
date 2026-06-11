@@ -361,6 +361,12 @@ function App:init(o)
 	App.flags.state.set('initializing', false)
 	params:default()
 
+	-- device_out is authoritative for crow vs midi routing; reconcile after all
+	-- param set_actions so output_type cannot override a crow device_out choice.
+	for i = 1, 8 do
+		if self.track[i] then self.track[i]:reconcile_output_routing() end
+	end
+
 	-- Mirror the (built-in) clock_source param into self.clock_source so the
 	-- per-tick hot path doesn't have to do a params:get() lookup. Norns sets
 	-- this via the system params menu.
